@@ -12,6 +12,7 @@
   "devDependencies": {
     "@oh-my-pi/pi-ai": "^18.0.7",
     "@oh-my-pi/pi-coding-agent": "^18.0.7",
+    "@oh-my-pi/pi-utils": "^18.0.7",
     "@types/bun": "latest",
     "typescript": "latest"
   },
