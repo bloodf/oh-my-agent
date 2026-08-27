@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 out/
+.DS_Store
 # dinostack (agentic-engineering) - .agentic/ runtime state; see the !.agentic/<file> negations below for what is committed
 .agentic/*
 !.agentic/config.json
