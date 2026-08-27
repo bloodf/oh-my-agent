@@ -1345,7 +1345,9 @@ def render_readme() -> str:
         "",
         "## Start here",
         "",
-        "1. [`ARCHITECTURE.md`](../../ARCHITECTURE.md) — what the system is and why.",
+        "1. [`ARCHITECTURE.md`](../../ARCHITECTURE.md) — what the system is and why. "
+        "Read it as a design specification: every section is marked `[Implemented]`, "
+        "`[Partial]`, or `[Planned]`, and where the two documents disagree this tree wins.",
         "2. [`adr/`](adr/) — the decisions, each with the alternatives that lost and the evidence behind it.",
         "3. The epic you are working in, then its task file.",
         "4. [`asset-map.md`](asset-map.md) — which task owns a given source file.",
