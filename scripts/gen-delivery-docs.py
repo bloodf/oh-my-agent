@@ -449,6 +449,39 @@ ADRS = [
             ("Engineering practice", "ARCHITECTURE.md:174-178"),
         ],
     ),
+    ADR(
+        id="ADR-009",
+        slug="threads-and-reactions",
+        title="Conversation gains threads and reactions; reactions carry agent status",
+        status="Proposed",
+        context=(
+            "The room store is a flat append-only log with per-agent read cursors, which is "
+            "enough for one agent answering one human. It stops being enough once several "
+            "agents work a channel at once: replies interleave, and a human cannot tell "
+            "which agent picked up which request without reading every turn."
+        ),
+        decision=(
+            "Add `parent_id` to messages and a uniquely-keyed `reactions` table. Threads are "
+            "derived from the parent chain rather than stored twice. Agents may set "
+            "reactions from a small declared emoji set, which doubles as machine-readable "
+            "status: picked up, finished, failed."
+        ),
+        consequences=[
+            "A human scanning a channel sees per-message state without reading every turn.",
+            "Status costs no extra messages, so a busy channel does not fill with acknowledgements.",
+            "The emoji set is closed, because a free-form vocabulary cannot render as status.",
+            "Wake semantics are deliberately unchanged: a threaded reply is still an unread message, and a reaction never marks a message read.",
+        ],
+        alternatives=[
+            ("Store a thread root alongside the parent", "Two pointers can disagree; a derived root cannot."),
+            ("A separate status field on messages", "Only the author could set it, so it could not express another agent picking up a human's request."),
+            ("Free-form reactions", "The UI could not render arbitrary emoji as status, and agents would invent divergent conventions."),
+        ],
+        evidence=[
+            ("Current flat message model", "src/rooms/store.ts"),
+            ("Delivery is subscription-scoped and must stay so", "src/daemon/supervisor.ts"),
+        ],
+    ),
 ]
 
 ADR_FILE = {a.id: f"{a.id}-{a.slug}.md" for a in ADRS}
@@ -555,7 +588,7 @@ EPICS = [
         id="EP-03",
         slug="credential-gateway",
         title="Scoped credential gateway",
-        status="In progress",
+        status="Done",
         outcome=(
             "Workers reach model credentials only through a loopback gateway that shows each "
             "one exactly the accounts it is bound to."
@@ -646,6 +679,46 @@ EPICS = [
         ],
         adrs=["ADR-001", "ADR-005"],
     ),
+    Epic(
+        id="EP-06",
+        slug="web-console",
+        title="Web console: manage agents and channels from a browser",
+        status="Planned",
+        outcome=(
+            "A browser UI where a human creates agents and channels, puts agents in "
+            "channels, and holds a Slack-like conversation with them: replies, threads, "
+            "and emoji reactions."
+        ),
+        why=(
+            "The TUI (EP-05) reaches whoever is at the terminal that launched the daemon. "
+            "Long-lived agents outlive that terminal by design, so the natural way to check "
+            "on them is a URL. This epic is also where the message model stops being a flat "
+            "log: threads keep several agents talking at once from becoming unreadable, and "
+            "reactions double as machine-readable status an agent can set on a message "
+            "without adding noise to the channel."
+        ),
+        scope=[
+            "Message model: parent/child replies, thread roots, and reactions.",
+            "HTTP and WebSocket API over the daemon's existing state.",
+            "Browser client: channel list, transcript, thread pane, composer.",
+            "Create and configure agents and channels from the UI.",
+            "Membership: add and remove agents from channels.",
+            "Reactions as agent status, settable through the toolbelt.",
+        ],
+        non_goals=[
+            "Multi-user accounts or auth beyond the daemon's single-operator model.",
+            "Replacing the TUI; both talk to the same daemon.",
+            "Editing or deleting another participant's messages.",
+        ],
+        acceptance=[
+            "A channel created in the UI is visible to a worker, and one created by a worker appears in the UI.",
+            "An agent added to a channel receives its next message.",
+            "A reply appears in a thread without cluttering the channel root.",
+            "An agent can set a reaction, and it appears in an open browser without a refresh.",
+            "Closing the browser does not stop or park any agent.",
+        ],
+        adrs=["ADR-009"],
+    ),
 ]
 
 EPIC_FILE = {e.id: f"{e.id}-{e.slug}.md" for e in EPICS}
@@ -658,13 +731,17 @@ SPRINTS = [
            theme="Pin how OMP actually behaves, and turn a peer file into a typed definition."),
     Sprint(id="SP-02", slug="isolation", title="Isolation", status="Done",
            theme="Materialized roots, compiled sandbox policies, and a launch gate that fails closed."),
-    Sprint(id="SP-03", slug="credentials", title="Credentials", status="In progress",
-           theme="A scoped gateway so a worker sees one account, not the vault. "
-                 "The wire is verified; the client that consumes it is not (T-303)."),
+    Sprint(id="SP-03", slug="credentials", title="Credentials", status="Done",
+           theme="A scoped gateway so a worker sees one account, not the vault, "
+                 "verified against the real client that consumes it."),
     Sprint(id="SP-04", slug="autonomy", title="Autonomy", status="Done",
            theme="Workers, rooms, schedules, quota parking, and unattended resume."),
     Sprint(id="SP-05", slug="operator-surface", title="Operator surface", status="Ready",
            theme="The parts a human touches: daemon entry point, toolbelt, and TUI."),
+    Sprint(id="SP-06", slug="conversation-model", title="Conversation model", status="Planned",
+           theme="Threads, replies, and reactions in the store, then over the wire."),
+    Sprint(id="SP-07", slug="web-console", title="Web console", status="Planned",
+           theme="The browser client and the daemon API behind it."),
 ]
 
 SPRINT_FILE = {s.id: f"{s.id}-{s.slug}.md" for s in SPRINTS}
@@ -982,13 +1059,13 @@ TASKS += [
     ),
     Task(
         id="T-303", slug="client-integration", title="Drive the gateway with a real credential store",
-        epic="EP-03", sprint="SP-03", status="Ready",
+        epic="EP-03", sprint="SP-03", status="Done",
         goal="A stock `RemoteAuthCredentialStore` is proven to work against the gateway, including recovering from a refused shared disable.",
         read_first=[ARCH, ("Gateway", "src/daemon/credential-gateway.ts"), ("Gateway suite", "tests/credential-gateway.test.ts")],
-        files=["tests/gateway-client.test.ts"],
+        files=["tests/gateway-client.test.ts", "src/daemon/credential-gateway.ts"],
         assets=[
             ("tests/gateway-client.test.ts", "New", "Integration suite using the real client."),
-            ("src/daemon/credential-gateway.ts", "Read", "Subject under test; no change expected."),
+            ("src/daemon/credential-gateway.ts", "Edited", "Shutdown defect the real client exposed."),
             ("node_modules/@oh-my-pi/pi-ai/src/auth-broker/remote-store.ts", "Read only, not edited by this task", "The client whose behavior is currently inferred rather than exercised."),
         ],
         steps=[
@@ -1005,7 +1082,12 @@ TASKS += [
             "An upstream change reaches the real store through the gateway's stream.",
         ],
         depends_on=["T-302"],
-        out_of_scope=["Changing gateway semantics; T-301 and T-302 own those."],
+        out_of_scope=["Changing gateway filtering semantics; T-301 and T-302 own those."],
+        evidence=[
+            ("Real-client suite, 8 tests", "tests/gateway-client.test.ts"),
+            ("Shutdown regression", "tests/credential-gateway.test.ts"),
+            ("Commits", "74174ef, 9fe651e"),
+        ],
     ),
     # ── EP-04 ────────────────────────────────────────────────────────────────
     Task(
@@ -1321,6 +1403,146 @@ TASKS += [
     ),
 ]
 
+TASKS += [
+    # ── EP-06: web console ───────────────────────────────────────────────────
+    Task(
+        id="T-601", slug="conversation-model", title="Threads, replies, and reactions in the store",
+        epic="EP-06", sprint="SP-06", status="Ready",
+        goal="A message can reply to another, threads have roots, and any participant can react to a message.",
+        read_first=[ARCH, ("Room store", "src/rooms/store.ts"), ("Room suite", "tests/rooms.test.ts")],
+        files=["src/rooms/store.ts", "tests/rooms.test.ts"],
+        assets=[
+            ("src/rooms/store.ts", "Edited", "Schema and API for replies and reactions."),
+            ("tests/rooms.test.ts", "Edited", "Covers the new shapes."),
+            ("src/daemon/supervisor.ts", "Read", "Delivery semantics must not change."),
+        ],
+        steps=[
+            "Add `parent_id` to `messages`, nullable, referencing another message in the same room.",
+            "Derive a thread root rather than storing a second pointer, so a reply to a reply cannot disagree with its own thread about where it belongs.",
+            "Add a `reactions` table keyed by `(message_id, actor, emoji)` with a uniqueness constraint: a participant reacting twice with the same emoji is one reaction, not two.",
+            "Extend `listMessages` to return reply counts and reactions in one read, so the UI renders a channel in a single round trip.",
+            "Leave `pendingForAgent` semantics alone. A threaded reply is still an unread message, and changing wake behavior here would silently alter every existing peer.",
+            "Add idempotent `react(messageId, actor, emoji)` and `unreact(...)`.",
+        ],
+        acceptance=[
+            "A reply carries its parent, and its thread root resolves to the top of the chain.",
+            "Reacting twice with the same emoji leaves one reaction.",
+            "Removing a reaction that was never added is a no-op, not an error.",
+            "`listMessages` returns reply counts and reactions without a second query.",
+            "Existing wake and unread behavior is unchanged, proven by the current room suite passing untouched.",
+        ],
+        out_of_scope=["Any HTTP surface; T-602 owns that."],
+        unblocks=["T-602", "T-604"],
+    ),
+    Task(
+        id="T-602", slug="console-api", title="Daemon HTTP and WebSocket API",
+        epic="EP-06", sprint="SP-07", status="Blocked",
+        goal="A browser can read and change agents, channels, and messages over HTTP, and receive live updates.",
+        read_first=[ARCH, ("Daemon entry point", "docs/delivery/tasks/T-502-daemon-entry-point.md"), ("Conversation model", "docs/delivery/tasks/T-601-conversation-model.md")],
+        files=["src/daemon/console-api.ts", "tests/console-api.test.ts"],
+        assets=[
+            ("src/daemon/console-api.ts", "New", "HTTP and WebSocket surface."),
+            ("src/rooms/store.ts", "Read", "Backing state."),
+            ("src/daemon/supervisor.ts", "Read", "Posting must route through it."),
+        ],
+        steps=[
+            "Serve on loopback by default, beside the daemon's other listeners.",
+            "Expose read routes for agents, channels, and messages, plus writes for creating a channel and posting a message.",
+            "Route every post through `Supervisor.post()` rather than `RoomStore.post()`. The supervisor is what wakes subscribers; writing straight to the store would leave agents silent.",
+            "Add a WebSocket that pushes new messages and reactions so an open browser does not poll.",
+            "Refuse a write whose author is an agent name: the console posts as the human, and forging an agent identity would make a transcript untrustworthy.",
+        ],
+        acceptance=[
+            "Creating a channel over HTTP makes it visible to a worker.",
+            "Posting over HTTP wakes a subscribed peer exactly as a supervisor post does.",
+            "A connected WebSocket receives a message posted by an agent.",
+            "A write claiming an agent as author is refused.",
+            "The server binds loopback and refuses a request with no operator token.",
+        ],
+        out_of_scope=["The browser client; T-603 owns it."],
+        depends_on=["T-502", "T-601"],
+        unblocks=["T-603"],
+    ),
+    Task(
+        id="T-603", slug="console-client", title="Browser client",
+        epic="EP-06", sprint="SP-07", status="Blocked",
+        goal="A human can watch and join agent conversations in a browser.",
+        read_first=[ARCH, ("Console API", "docs/delivery/tasks/T-602-console-api.md")],
+        files=["src/console/index.html", "src/console/app.ts", "src/console/style.css"],
+        assets=[
+            ("src/console/app.ts", "New", "Client logic."),
+            ("src/console/index.html", "New", "Shell."),
+            ("src/console/style.css", "New", "Styling."),
+            ("src/daemon/console-api.ts", "Read", "The API it consumes."),
+        ],
+        steps=[
+            "Render a channel list, a transcript, and a composer.",
+            "Open a thread in a side pane rather than inline, so a long thread cannot push the channel out of view.",
+            "Show reactions under a message with counts; a click toggles the operator's own.",
+            "Reconnect the WebSocket on drop and refetch. A socket dropped during a long agent turn would otherwise leave a permanently stale transcript.",
+            "Keep it dependency-free unless a real need appears: the surface is small and a framework would outweigh it.",
+        ],
+        acceptance=[
+            "Channels, messages, and reactions render from a live daemon.",
+            "A message sent from the browser appears in the transcript and reaches a subscribed agent.",
+            "A reply opens in the thread pane and does not appear at the channel root.",
+            "Dropping and restoring the connection restores a correct transcript.",
+            "Verified by driving a real browser against a running daemon, not by asserting on rendered strings alone.",
+        ],
+        out_of_scope=["Creation forms; T-605 owns those."],
+        depends_on=["T-602"],
+    ),
+    Task(
+        id="T-604", slug="reaction-toolbelt", title="Agents set reactions as status",
+        epic="EP-06", sprint="SP-07", status="Blocked",
+        goal="An agent can mark a message with an emoji to signal what it is doing about it.",
+        read_first=[ARCH, ("Toolbelt", "docs/delivery/tasks/T-503-agent-toolbelt.md"), ("Conversation model", "docs/delivery/tasks/T-601-conversation-model.md")],
+        files=["src/worker/toolbelt.ts", "tests/toolbelt.test.ts"],
+        assets=[
+            ("src/worker/toolbelt.ts", "Edited", "Adds `chat_react`."),
+            ("src/rooms/store.ts", "Read", "`react` and `unreact` exist after T-601."),
+        ],
+        steps=[
+            "Add `chat_react(messageId, emoji)` and its removal counterpart to the toolbelt.",
+            "State the convention in the tool description: mark a message picked up, finished, or failed, so a human scanning a channel sees state without reading every turn.",
+            "Reject an emoji outside a small declared set. A free-form vocabulary cannot be rendered as status in the UI.",
+            "Route through the daemon socket like every other toolbelt call, never touching the database directly.",
+        ],
+        acceptance=[
+            "An agent's reaction appears on the message for every reader.",
+            "An unknown emoji is refused with a message naming the allowed set.",
+            "Reacting twice is idempotent.",
+            "A reaction does not mark the message read or suppress a wake.",
+        ],
+        depends_on=["T-503", "T-601"],
+    ),
+    Task(
+        id="T-605", slug="console-management", title="Create agents and channels from the UI",
+        epic="EP-06", sprint="SP-07", status="Blocked",
+        goal="An operator can stand up an agent or channel, and manage membership, without editing files.",
+        read_first=[ARCH, ("Peer store", "docs/delivery/tasks/T-501-peer-store.md"), ("Console client", "docs/delivery/tasks/T-603-console-client.md")],
+        files=["src/console/app.ts", "src/daemon/console-api.ts", "src/daemon/peer-store.ts"],
+        assets=[
+            ("src/console/app.ts", "Edited", "Forms and membership controls."),
+            ("src/daemon/console-api.ts", "Edited", "Write routes."),
+            ("src/daemon/peer-store.ts", "Edited", "Writing a definition, not only reading one."),
+        ],
+        steps=[
+            "Write a created agent as a definition file in the private store, so the UI and a hand-written file produce the same thing and neither becomes a second source of truth.",
+            "Validate through `parsePeerDefinition` before writing, and surface the parse error in the form rather than writing a file the daemon will later refuse.",
+            "Let an operator add or remove an agent from a channel, updating its subscriptions.",
+            "Say plainly in the UI when a change needs a rebuild: a live worker's definition is fingerprinted and policy files never mutate under a running process.",
+        ],
+        acceptance=[
+            "An agent created in the UI appears as a definition file and loads on the next daemon start.",
+            "An invalid definition is refused with the parser's own error, and no file is written.",
+            "Adding an agent to a channel makes it receive the next message there.",
+            "Removing it stops delivery without disturbing the channel's other members.",
+        ],
+        depends_on=["T-501", "T-603"],
+    ),
+]
+
 TASK_FILE = {t.id: f"{t.id}-{t.slug}.md" for t in TASKS}
 
 
@@ -1355,7 +1577,7 @@ def render_readme() -> str:
         "",
         "## Current state",
         "",
-        f"**{done} of {total} tasks Done.** Test suite: 402 passing across 18 files, `tsc --noEmit` clean.",
+        f"**{done} of {total} tasks Done.** Test suite: 411 passing across 19 files, `tsc --noEmit` clean.",
         "",
         "Every runtime subsystem is built and under test: workers, isolation, credentials, "
         "rooms, scheduling, and quota handling. Two things keep that from meaning finished.",
@@ -1364,12 +1586,10 @@ def render_readme() -> str:
         "and there is no daemon binary, so nothing here can currently be launched or looked "
         "at by a human (EP-05).",
         "",
-        "Second, one subsystem is verified at its wire and not at its consumer. The "
-        "credential gateway's suites drive it with `fetch`, so the requester-recovery path "
-        "is checked as a response shape while the client's reaction to that shape is read "
-        "from upstream source rather than exercised. "
-        "[T-303](tasks/T-303-client-integration.md) closes it; until then EP-03 is In "
-        "progress, not Done.",
+        "The credential gateway is now verified at its consumer as well as its wire: a "
+        "stock `RemoteAuthCredentialStore` drives it in "
+        "[T-303](tasks/T-303-client-integration.md), which found and fixed a real shutdown "
+        "defect — a daemon would hang on exit while any worker was parked on a long-poll.",
         "",
         "## Unit contract",
         "",
@@ -1415,12 +1635,13 @@ def render_readme() -> str:
         "",
         "## What to do next",
         "",
-        "[T-303](tasks/T-303-client-integration.md) first. It sits in SP-03, needs no "
-        "new modules, and closes the one place a Done claim outruns its evidence.",
-        "",
-        "Then EP-05 in dependency order: "
+        "EP-05 in dependency order: "
         + " then ".join(f"[{t}](tasks/{TASK_FILE[t]})" for t in ["T-501", "T-502"])
         + ". After T-502 the remaining four are independent and can run in parallel.",
+        "",
+        "EP-06 (the web console) starts at "
+        "[T-601](tasks/T-601-conversation-model.md), which is independent of EP-05 and can "
+        "run alongside it. Everything else in that epic needs the daemon API from T-502.",
         "",
         "## Working rules",
         "",

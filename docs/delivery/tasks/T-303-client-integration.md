@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-03](../epics/EP-03-credential-gateway.md) | [SP-03](../sprints/SP-03-credentials.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-03](../epics/EP-03-credential-gateway.md) | [SP-03](../sprints/SP-03-credentials.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -17,13 +17,14 @@ A stock `RemoteAuthCredentialStore` is proven to work against the gateway, inclu
 ## Files this task may change
 
 - `tests/gateway-client.test.ts`
+- `src/daemon/credential-gateway.ts`
 
 ## Modules and assets in play
 
 | Path | Role | Note |
 |---|---|---|
-| `tests/gateway-client.test.ts` (to be created) | New | Integration suite using the real client. |
-| [`src/daemon/credential-gateway.ts`](../../../src/daemon/credential-gateway.ts) | Read | Subject under test; no change expected. |
+| [`tests/gateway-client.test.ts`](../../../tests/gateway-client.test.ts) | New | Integration suite using the real client. |
+| [`src/daemon/credential-gateway.ts`](../../../src/daemon/credential-gateway.ts) | Edited | Shutdown defect the real client exposed. |
 | [`node_modules/@oh-my-pi/pi-ai/src/auth-broker/remote-store.ts`](../../../node_modules/@oh-my-pi/pi-ai/src/auth-broker/remote-store.ts) | Read only, not edited by this task | The client whose behavior is currently inferred rather than exercised. |
 
 ## Steps
@@ -36,14 +37,22 @@ A stock `RemoteAuthCredentialStore` is proven to work against the gateway, inclu
 
 ## Acceptance
 
-- [ ] A real store loads only its bound credentials through the gateway.
-- [ ] After a refused shared disable, the requester's store holds the credential again without a manual reload.
-- [ ] A peer's store is unaffected by the requester's refused disable.
-- [ ] An upstream change reaches the real store through the gateway's stream.
+- [x] A real store loads only its bound credentials through the gateway.
+- [x] After a refused shared disable, the requester's store holds the credential again without a manual reload.
+- [x] A peer's store is unaffected by the requester's refused disable.
+- [x] An upstream change reaches the real store through the gateway's stream.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Real-client suite, 8 tests | [`tests/gateway-client.test.ts`](../../../tests/gateway-client.test.ts) |
+| Shutdown regression | [`tests/credential-gateway.test.ts`](../../../tests/credential-gateway.test.ts) |
+| Commits | `74174ef, 9fe651e` |
 
 ## Out of scope
 
-- Changing gateway semantics; T-301 and T-302 own those.
+- Changing gateway filtering semantics; T-301 and T-302 own those.
 
 ## Depends on
 

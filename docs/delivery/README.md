@@ -11,13 +11,13 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**17 of 24 tasks Done.** Test suite: 402 passing across 18 files, `tsc --noEmit` clean.
+**18 of 29 tasks Done.** Test suite: 411 passing across 19 files, `tsc --noEmit` clean.
 
 Every runtime subsystem is built and under test: workers, isolation, credentials, rooms, scheduling, and quota handling. Two things keep that from meaning finished.
 
 First, there is no operator surface. The extension entry point is an empty factory and there is no daemon binary, so nothing here can currently be launched or looked at by a human (EP-05).
 
-Second, one subsystem is verified at its wire and not at its consumer. The credential gateway's suites drive it with `fetch`, so the requester-recovery path is checked as a response shape while the client's reaction to that shape is read from upstream source rather than exercised. [T-303](tasks/T-303-client-integration.md) closes it; until then EP-03 is In progress, not Done.
+The credential gateway is now verified at its consumer as well as its wire: a stock `RemoteAuthCredentialStore` drives it in [T-303](tasks/T-303-client-integration.md), which found and fixed a real shutdown defect — a daemon would hang on exit while any worker was parked on a long-poll.
 
 ## Unit contract
 
@@ -41,9 +41,10 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-00](epics/EP-00-foundations-and-contracts.md) | Foundations and OMP contracts | Done | 5 |
 | [EP-01](epics/EP-01-agent-definitions.md) | Peer definitions and private store | Done | 1 |
 | [EP-02](epics/EP-02-worker-isolation.md) | Worker isolation: materialization, sandbox, launch gate | Done | 4 |
-| [EP-03](epics/EP-03-credential-gateway.md) | Scoped credential gateway | In progress | 3 |
+| [EP-03](epics/EP-03-credential-gateway.md) | Scoped credential gateway | Done | 3 |
 | [EP-04](epics/EP-04-autonomy-runtime.md) | Autonomy runtime: workers, rooms, scheduler, quota | Done | 5 |
 | [EP-05](epics/EP-05-operator-surface.md) | Operator surface: daemon entry point and TUI | Ready | 6 |
+| [EP-06](epics/EP-06-web-console.md) | Web console: manage agents and channels from a browser | Planned | 5 |
 
 ## Sprints
 
@@ -51,9 +52,11 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 |---|---|---|---|
 | [SP-01](sprints/SP-01-contracts-and-parsing.md) | Contracts and parsing | Done | Pin how OMP actually behaves, and turn a peer file into a typed definition. |
 | [SP-02](sprints/SP-02-isolation.md) | Isolation | Done | Materialized roots, compiled sandbox policies, and a launch gate that fails closed. |
-| [SP-03](sprints/SP-03-credentials.md) | Credentials | In progress | A scoped gateway so a worker sees one account, not the vault. The wire is verified; the client that consumes it is not (T-303). |
+| [SP-03](sprints/SP-03-credentials.md) | Credentials | Done | A scoped gateway so a worker sees one account, not the vault, verified against the real client that consumes it. |
 | [SP-04](sprints/SP-04-autonomy.md) | Autonomy | Done | Workers, rooms, schedules, quota parking, and unattended resume. |
 | [SP-05](sprints/SP-05-operator-surface.md) | Operator surface | Ready | The parts a human touches: daemon entry point, toolbelt, and TUI. |
+| [SP-06](sprints/SP-06-conversation-model.md) | Conversation model | Planned | Threads, replies, and reactions in the store, then over the wire. |
+| [SP-07](sprints/SP-07-web-console.md) | Web console | Planned | The browser client and the daemon API behind it. |
 
 ## Decisions
 
@@ -67,12 +70,13 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [ADR-006](adr/ADR-006-account-level-quota-parking.md) | Quota is an account property; subscription accounts auto-resume unattended | Accepted |
 | [ADR-007](adr/ADR-007-native-task-delegation.md) | Peers delegate coding subtasks through native task, never agent_spawn | Accepted |
 | [ADR-008](adr/ADR-008-tests-share-production-builders.md) | Tests exercise production construction, never a parallel copy | Accepted |
+| [ADR-009](adr/ADR-009-threads-and-reactions.md) | Conversation gains threads and reactions; reactions carry agent status | Proposed |
 
 ## What to do next
 
-[T-303](tasks/T-303-client-integration.md) first. It sits in SP-03, needs no new modules, and closes the one place a Done claim outruns its evidence.
+EP-05 in dependency order: [T-501](tasks/T-501-peer-store.md) then [T-502](tasks/T-502-daemon-entry-point.md). After T-502 the remaining four are independent and can run in parallel.
 
-Then EP-05 in dependency order: [T-501](tasks/T-501-peer-store.md) then [T-502](tasks/T-502-daemon-entry-point.md). After T-502 the remaining four are independent and can run in parallel.
+EP-06 (the web console) starts at [T-601](tasks/T-601-conversation-model.md), which is independent of EP-05 and can run alongside it. Everything else in that epic needs the daemon API from T-502.
 
 ## Working rules
 

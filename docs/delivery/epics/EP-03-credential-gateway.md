@@ -1,6 +1,6 @@
 # EP-03 — Scoped credential gateway
 
-**Status:** In progress
+**Status:** Done
 
 ## Outcome
 
@@ -23,13 +23,11 @@ The upstream admin token is vault-wide. Without a gateway, every peer holds ever
 
 ## Acceptance
 
-- [ ] Two workers on the same gateway see disjoint credential sets.
-- [ ] A foreign credential id returns 403 on every scoped route.
-- [ ] Usage data is filtered by affirmative identity match, never by provider fallback.
-- [ ] A shared disable leaves upstream unchanged and peers usable.
-- [ ] A real `RemoteAuthCredentialStore` works against the gateway and recovers from a refused shared disable (T-303).
-
-Unchecked items above are covered by the Ready tasks below.
+- [x] Two workers on the same gateway see disjoint credential sets.
+- [x] A foreign credential id returns 403 on every scoped route.
+- [x] Usage data is filtered by affirmative identity match, never by provider fallback.
+- [x] A shared disable leaves upstream unchanged and peers usable.
+- [x] A real `RemoteAuthCredentialStore` works against the gateway and recovers from a refused shared disable (T-303).
 
 ## Decisions
 
@@ -42,4 +40,4 @@ Unchecked items above are covered by the Ready tasks below.
 |---|---|---|
 | [T-301](../tasks/T-301-credential-gateway.md) | Scoped per-worker credential gateway | Done |
 | [T-302](../tasks/T-302-shared-disable-recovery.md) | Shared-account disable and requester recovery | Done |
-| [T-303](../tasks/T-303-client-integration.md) | Drive the gateway with a real credential store | Ready |
+| [T-303](../tasks/T-303-client-integration.md) | Drive the gateway with a real credential store | Done |
