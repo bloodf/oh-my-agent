@@ -1,0 +1,29 @@
+{
+  "name": "@bloodf/oh-my-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "OMP plugin for autonomous long-lived multi-agent collaboration",
+  "files": [
+    "src"
+  ],
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": "^18.0.7"
+  },
+  "devDependencies": {
+    "@oh-my-pi/pi-coding-agent": "^18.0.7",
+    "@types/bun": "latest",
+    "typescript": "latest"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "omp": {
+    "name": "oh-my-agent",
+    "version": "0.1.0",
+    "description": "OMP plugin for autonomous long-lived multi-agent collaboration",
+    "extensions": [
+      "src/extension/index.ts"
+    ]
+  }
+}
