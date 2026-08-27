@@ -891,8 +891,11 @@ describe("usage routes isolate same-provider accounts", () => {
 			const seen = new Headers(init?.headers).get("If-None-Match");
 			if (seen === '"7"') {
 				// Park like a real conditional long-poll until the gateway aborts.
+				if (init?.signal?.aborted) throw new Error("aborted");
 				const { promise, reject } = Promise.withResolvers<Response>();
-				init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+				init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+					once: true,
+				});
 				return await promise;
 			}
 			return body({
@@ -980,5 +983,22 @@ describe("usage routes isolate same-provider accounts", () => {
 		).json()) as { reports: { metadata: { accountId: string } }[] };
 
 		expect(res.reports.map((r) => r.metadata.accountId)).toEqual(["acct-alice", "acct-bob"]);
+	});
+
+	test("close() completes while the watcher is parked on a long-poll", async () => {
+		const gateway = await startCredentialGateway({
+			upstreamUrl: "http://upstream.invalid",
+			adminToken: ADMIN_TOKEN,
+			fetchUpstream: stubUpstream,
+		});
+		const { url } = gateway;
+
+		// The stub parks every conditional snapshot, so the watcher is blocked in
+		// flight. close() must abort it and return rather than hang.
+		await gateway.close();
+
+		// Idempotent, and the server is really down.
+		await gateway.close();
+		await expect(fetch(`${url}/v1/healthz`)).rejects.toThrow();
 	});
 });

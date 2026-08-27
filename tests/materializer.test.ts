@@ -660,8 +660,12 @@ describe("rebuild semantics", () => {
 				inferenceGateway: GATEWAY,
 			});
 			const goodAgent = await readFile(good.generatedAgentPath, "utf8");
-			// Fail only the staging→agentDir swap, so the restore rename can run.
+			// Fail only the staging→agentDir swap. The three renames have distinct
+			// sources (agentDir→previous, staging→agentDir, previous→agentDir), so
+			// the restore rename is delegated to the real implementation.
+			const attempted: string[] = [];
 			const spy = spyOn(fs, "rename").mockImplementation(async (from, to) => {
+				attempted.push(`${String(from).includes(".staging-") ? "staging" : String(from).includes(".previous") ? "previous" : "agentDir"}->${String(to).includes(".previous") ? "previous" : "agentDir"}`);
 				if (String(from).includes(".staging-")) throw new Error("simulated rename failure");
 				return await realRename(from as string, to as string);
 			});
@@ -679,6 +683,12 @@ describe("rebuild semantics", () => {
 				spy.mockRestore();
 			}
 
+			// The restore rename must have actually run, not merely been skipped.
+			expect(attempted).toEqual([
+				"agentDir->previous",
+				"staging->agentDir",
+				"previous->agentDir",
+			]);
 			expect(await readFile(good.generatedAgentPath, "utf8")).toBe(goodAgent);
 		});
 	});
