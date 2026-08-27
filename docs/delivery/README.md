@@ -51,7 +51,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 |---|---|---|---|
 | [SP-01](sprints/SP-01-contracts-and-parsing.md) | Contracts and parsing | Done | Pin how OMP actually behaves, and turn a peer file into a typed definition. |
 | [SP-02](sprints/SP-02-isolation.md) | Isolation | Done | Materialized roots, compiled sandbox policies, and a launch gate that fails closed. |
-| [SP-03](sprints/SP-03-credentials.md) | Credentials | Done | A scoped gateway so a worker sees one account, not the vault. |
+| [SP-03](sprints/SP-03-credentials.md) | Credentials | In progress | A scoped gateway so a worker sees one account, not the vault. The wire is verified; the client that consumes it is not (T-303). |
 | [SP-04](sprints/SP-04-autonomy.md) | Autonomy | Done | Workers, rooms, schedules, quota parking, and unattended resume. |
 | [SP-05](sprints/SP-05-operator-surface.md) | Operator surface | Ready | The parts a human touches: daemon entry point, toolbelt, and TUI. |
 
@@ -70,7 +70,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 
 ## What to do next
 
-[T-303](tasks/T-303-client-integration.md) first: it needs no new modules and closes the one place a Done claim outruns its evidence.
+[T-303](tasks/T-303-client-integration.md) first. It sits in SP-03, needs no new modules, and closes the one place a Done claim outruns its evidence.
 
 Then EP-05 in dependency order: [T-501](tasks/T-501-peer-store.md) then [T-502](tasks/T-502-daemon-entry-point.md). After T-502 the remaining four are independent and can run in parallel.
 

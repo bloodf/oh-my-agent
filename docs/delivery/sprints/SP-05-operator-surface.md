@@ -10,7 +10,6 @@ The parts a human touches: daemon entry point, toolbelt, and TUI.
 
 | Task | Epic | Title | Status |
 |---|---|---|---|
-| [T-303](../tasks/T-303-client-integration.md) | [EP-03](../epics/EP-03-credential-gateway.md) | Drive the gateway with a real credential store | Ready |
 | [T-501](../tasks/T-501-peer-store.md) | [EP-05](../epics/EP-05-operator-surface.md) | Peer store: load definitions from the private paths | Ready |
 | [T-502](../tasks/T-502-daemon-entry-point.md) | [EP-05](../epics/EP-05-operator-surface.md) | Daemon entry point | Ready |
 | [T-503](../tasks/T-503-agent-toolbelt.md) | [EP-05](../epics/EP-05-operator-surface.md) | Worker toolbelt extension | Ready |

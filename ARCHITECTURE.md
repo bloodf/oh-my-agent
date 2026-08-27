@@ -101,8 +101,10 @@ and the agent toolbelt are not written: no `chat_send`, `chat_read`, `chat_wait`
 25 tests) with `rooms`, `messages`, and `subscriptions` tables. Subscription-scoped
 delivery and wake are built ([`src/daemon/supervisor.ts`](src/daemon/supervisor.ts),
 `tests/supervisor.test.ts`, 13 tests). Mention parsing and per-agent wake filters are
-not implemented: `wake` is parsed from a definition but nothing consumes it. Humans
-cannot post, because the TUI does not exist.*
+not implemented: `wake` is parsed from a definition but nothing consumes it, so a
+wake is triggered by subscription alone. `Supervisor.post()` accepts any author
+including `@you`, so human posting works at the API; no human-facing surface exists
+to call it ([T-504](docs/delivery/tasks/T-504-tui-surface.md)).*
 
 - Rooms = channels (`#general`, `#reviews`, …) and DMs (`@researcher`). SQLite-backed, append-only messages with per-agent read cursors.
 - Wakeups: a parked (idle) agent is resumed by the daemon when it is `@mentioned` or a room it subscribes to gets a message matching its wake filter — the daemon calls `session.prompt()` / RPC prompt with the pending messages batched into one turn.
@@ -207,14 +209,18 @@ cursors(agent, room_id, last_msg_id)
 schedules(id, cron, action, payload, next_fire_at, enabled)
 ```
 
-## 7. Isolation and security model — read this before assuming anything — [Implemented]
+## 7. Isolation and security model — read this before assuming anything — [Partial]
 
-*Layer 1 is built: [`src/worker/sandbox.ts`](src/worker/sandbox.ts) compiles the
-policy (51 tests), [`src/worker/launch-gate.ts`](src/worker/launch-gate.ts) fails
-closed (13 tests), and `tests/seatbelt-wiring.test.ts` verifies the profile against
-the materialized layout (10 tests). Layers 2 and 3 are OMP's own behavior, inherited.
-The `/agents` shield described at the end of this section is [Planned] with the TUI
-([T-504](docs/delivery/tasks/T-504-tui-surface.md)).*
+*The mechanism is built and tested: [`src/worker/sandbox.ts`](src/worker/sandbox.ts)
+compiles the policy (51 tests), [`src/worker/launch-gate.ts`](src/worker/launch-gate.ts)
+fails closed on a missing adapter or unreachable bridge (13 tests),
+[`src/worker/lifecycle.ts`](src/worker/lifecycle.ts) gates opted-in peers itself, and
+`tests/seatbelt-wiring.test.ts` verifies the profile against the materialized layout
+(10 tests). What is missing is production reach: no daemon launches a worker, so no
+sandboxed process has ever run outside a test
+([T-502](docs/delivery/tasks/T-502-daemon-entry-point.md)). Layers 2 and 3 are OMP's
+own behavior, inherited. The `/agents` shield at the end of this section is
+[Planned] ([T-504](docs/delivery/tasks/T-504-tui-surface.md)).*
 
 This section is deliberately blunt because the intuitive mental model is wrong.
 
@@ -247,13 +253,18 @@ oh-my-agent/
   tests/                  # unit, integration, and OMP contract suites
 ```
 
-## 9. Decisions (confirmed) — [Implemented, except where noted]
+## 9. Decisions (confirmed) — [Partial]
 
-*Decisions 1, 3, 4, and 6 are built and tested. Decision 2 (per-worker gateway
-tokens) is built at the gateway; the worker side that would consume it is not
-wired, because no daemon composes them ([T-502](docs/delivery/tasks/T-502-daemon-entry-point.md)).
-Decision 5 (no phased delivery) describes intent, and is not yet met: the
-operator surface is unbuilt.*
+*Decisions 1, 3, and 6 are built and tested. Decision 2 (per-worker gateway tokens)
+is built at the gateway; the worker side that consumes it is unwired, because no
+daemon composes them ([T-502](docs/delivery/tasks/T-502-daemon-entry-point.md)).
+Decision 4 is split: subscription park and unattended auto-resume are built and
+tested ([`src/daemon/account-registry.ts`](src/daemon/account-registry.ts), 16
+tests), but the metered half is unreachable — the 80% warning fires into an empty
+callback in [`src/daemon/supervisor.ts`](src/daemon/supervisor.ts) and no caller
+supplies `budget_usd`, so no warning can reach a human
+([T-506](docs/delivery/tasks/T-506-metered-budget-wiring.md)). Decision 5 (no
+phased delivery) states intent and is not met: the operator surface is unbuilt.*
 
 1. **Worker mode:** RPC subprocess is the default; in-process SDK sessions are for tests and daemon-internal tooling only (§5.2).
 2. **RPC worker auth:** every worker connects to the daemon's scoped credential gateway with its own revocable bearer token; only the daemon can access the upstream broker with the vault-wide token (§9.6).

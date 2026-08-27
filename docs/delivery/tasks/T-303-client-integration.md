@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-03](../epics/EP-03-credential-gateway.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-03](../epics/EP-03-credential-gateway.md) | [SP-03](../sprints/SP-03-credentials.md) | Ready | [asset-map](../asset-map.md) |
 
 ## Goal
 

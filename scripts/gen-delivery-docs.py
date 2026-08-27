@@ -658,8 +658,9 @@ SPRINTS = [
            theme="Pin how OMP actually behaves, and turn a peer file into a typed definition."),
     Sprint(id="SP-02", slug="isolation", title="Isolation", status="Done",
            theme="Materialized roots, compiled sandbox policies, and a launch gate that fails closed."),
-    Sprint(id="SP-03", slug="credentials", title="Credentials", status="Done",
-           theme="A scoped gateway so a worker sees one account, not the vault."),
+    Sprint(id="SP-03", slug="credentials", title="Credentials", status="In progress",
+           theme="A scoped gateway so a worker sees one account, not the vault. "
+                 "The wire is verified; the client that consumes it is not (T-303)."),
     Sprint(id="SP-04", slug="autonomy", title="Autonomy", status="Done",
            theme="Workers, rooms, schedules, quota parking, and unattended resume."),
     Sprint(id="SP-05", slug="operator-surface", title="Operator surface", status="Ready",
@@ -981,7 +982,7 @@ TASKS += [
     ),
     Task(
         id="T-303", slug="client-integration", title="Drive the gateway with a real credential store",
-        epic="EP-03", sprint="SP-05", status="Ready",
+        epic="EP-03", sprint="SP-03", status="Ready",
         goal="A stock `RemoteAuthCredentialStore` is proven to work against the gateway, including recovering from a refused shared disable.",
         read_first=[ARCH, ("Gateway", "src/daemon/credential-gateway.ts"), ("Gateway suite", "tests/credential-gateway.test.ts")],
         files=["tests/gateway-client.test.ts"],
@@ -1414,8 +1415,8 @@ def render_readme() -> str:
         "",
         "## What to do next",
         "",
-        "[T-303](tasks/T-303-client-integration.md) first: it needs no new modules and "
-        "closes the one place a Done claim outruns its evidence.",
+        "[T-303](tasks/T-303-client-integration.md) first. It sits in SP-03, needs no "
+        "new modules, and closes the one place a Done claim outruns its evidence.",
         "",
         "Then EP-05 in dependency order: "
         + " then ".join(f"[{t}](tasks/{TASK_FILE[t]})" for t in ["T-501", "T-502"])
@@ -1654,7 +1655,26 @@ def verify(written: list[str]) -> None:
             )
     print(f"gate: task sections -> {len(TASKS)} files, {drifted} drifted (expect 0)")
 
-    # Gate 5b: task contract shape.
+    # Gate 5b: a Done epic or sprint may not contain a task that is not Done.
+    # Every status drift caught in review was this shape: a container claiming
+    # completion while holding unfinished children.
+    inconsistent = 0
+    for e in EPICS:
+        open_tasks = [t.id for t in TASKS if t.epic == e.id and t.status != "Done"]
+        if e.status == "Done" and open_tasks:
+            inconsistent += 1
+            failures.append(f"{e.id} is Done but holds open tasks {open_tasks}")
+    for s in SPRINTS:
+        open_tasks = [t.id for t in TASKS if t.sprint == s.id and t.status != "Done"]
+        if s.status == "Done" and open_tasks:
+            inconsistent += 1
+            failures.append(f"{s.id} is Done but holds open tasks {open_tasks}")
+    print(
+        f"gate: status consistency -> {len(EPICS) + len(SPRINTS)} containers, "
+        f"{inconsistent} inconsistent (expect 0)"
+    )
+
+    # Gate 5c: task contract shape.
     missing = 0
     for t in TASKS:
         if not t.acceptance or not t.steps or not t.files or not t.assets:
