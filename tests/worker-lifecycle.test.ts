@@ -176,6 +176,20 @@ async function workerFixture(overrides: Record<string, unknown> = {}, script?: S
 	return { base, cwd: base, parsedPeer, layout };
 }
 
+/**
+ * A runnable stand-in for `sandbox-exec`: consumes `-p <profile>`, execs the
+ * payload. Lets a real gate result run without a privileged sandbox.
+ */
+async function passthroughAdapter(root: string): Promise<string> {
+	const path = join(root, "passthrough-adapter");
+	await writeFile(
+		path,
+		["#!/bin/sh", 'if [ "$1" = "-p" ]; then shift 2; fi', 'exec "$@"', ""].join("\n"),
+		{ encoding: "utf8", mode: 0o755 },
+	);
+	return path;
+}
+
 async function start(
 	overrides: Record<string, unknown> = {},
 	script?: ScriptTurn[],
@@ -351,11 +365,16 @@ describe("sandbox wiring", () => {
 		expect(gated.args).toContain("-p");
 
 		const handle = await startWorker({
-			peer: parsedPeer,
+			peer: peer({ sandbox: true }),
 			layout,
 			cwd,
-			// The gate's result, verbatim.
-			sandbox: gated,
+			// No plan is handed in: the launcher gates the opted-in peer itself.
+			sandboxAdapter: {
+				platform: "darwin",
+				which: async () => "/usr/bin/sandbox-exec",
+				probeBridge: async () => true,
+				adapterCommand: wrapper,
+			},
 		});
 		cleanups.push(() => handle.stop());
 
@@ -411,7 +430,17 @@ describe("sandbox wiring", () => {
 			adapterCommand: wrapper,
 		});
 
-		const handle = await startWorker({ peer: parsedPeer, layout, cwd, sandbox: gated });
+		const handle = await startWorker({
+			peer: peer({ sandbox: true }),
+			layout,
+			cwd,
+			sandboxAdapter: {
+				platform: "darwin",
+				which: async () => "/usr/bin/sandbox-exec",
+				probeBridge: async () => true,
+				adapterCommand: wrapper,
+			},
+		});
 		const childPid = Number(await readFile(pidFile, "utf8"));
 		expect(childPid).toBeGreaterThan(0);
 
@@ -427,10 +456,75 @@ describe("sandbox wiring", () => {
 		expect(alive).toBe(false);
 	});
 
-	test("an unsandboxed worker writes no shim", async () => {
+	test("a peer with sandbox: true is gated without a caller-supplied plan", async () => {
+		const { cwd, layout } = await workerFixture({}, [{ text: "ok" }]);
+		const wrapper = await passthroughAdapter(layout.root);
+
+		const probed: string[] = [];
+		const handle = await startWorker({
+			peer: peer({ sandbox: true }),
+			layout,
+			cwd,
+			// §7:141 — layer 1 is opt-in, but once opted in the launcher must
+			// gate it itself rather than trusting a caller to pass a plan.
+			sandboxAdapter: {
+				platform: "darwin",
+				which: async (binary) => {
+					probed.push(binary);
+					return `/usr/bin/${binary}`;
+				},
+				probeBridge: async () => true,
+				adapterCommand: wrapper,
+			},
+		});
+		cleanups.push(() => handle.stop());
+
+		expect(probed).toEqual(["sandbox-exec"]);
+		expect(handle.sandboxed).toBe(true);
+		expect(await Bun.file(join(layout.root, "sandbox-shim.ts")).exists()).toBe(true);
+	});
+
+	test("sandbox: true with a missing adapter refuses to start", async () => {
+		const { cwd, layout } = await workerFixture({}, [{ text: "ok" }]);
+
+		// Fail closed: never silently downgrade an opted-in agent.
+		await expect(
+			startWorker({
+				peer: peer({ sandbox: true }),
+				layout,
+				cwd,
+				sandboxAdapter: {
+					platform: "darwin",
+					which: async () => null,
+					probeBridge: async () => true,
+				},
+			}),
+		).rejects.toThrow(/sandbox-exec/);
+	});
+
+	test("an omitted sandbox key stays unsandboxed per §7 defaults", async () => {
 		const handle = await start();
 
+		expect(handle.sandboxed).toBe(false);
 		expect(await Bun.file(join(handle.layout.root, "sandbox-shim.ts")).exists()).toBe(false);
+	});
+
+	test("sandbox: false stays unsandboxed even when an adapter exists", async () => {
+		const { cwd, layout } = await workerFixture({}, [{ text: "ok" }]);
+
+		const handle = await startWorker({
+			peer: peer({ sandbox: false }),
+			layout,
+			cwd,
+			sandboxAdapter: {
+				platform: "darwin",
+				which: async () => "/usr/bin/sandbox-exec",
+				probeBridge: async () => true,
+			},
+		});
+		cleanups.push(() => handle.stop());
+
+		expect(handle.sandboxed).toBe(false);
 	});
 });
 

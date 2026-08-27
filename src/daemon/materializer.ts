@@ -79,6 +79,8 @@ export interface WorkerLayout {
 	/** Provider/model the worker selects; the provider routes to the gateway. */
 	provider: string;
 	modelId: string;
+	/** Gateway the worker's turns route through; sandbox policy needs it. */
+	inferenceGateway: { host: string; port: number };
 	mcpPath?: string;
 	skillPaths: string[];
 	/** Discovered agents denied to this worker, ascending. */
@@ -222,6 +224,35 @@ function resolveWorkerModel(
 	return { provider, modelId };
 }
 
+/**
+ * Split the gateway URL into the host/port the sandbox policy must allow.
+ * An implicit port is rejected: the compiler needs a real port, and a URL
+ * without one would silently become `0`.
+ */
+function parseGatewayEndpoint(url: string): { host: string; port: number } {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		throw new MaterializationError(`Inference gateway url is not a URL: ${JSON.stringify(url)}`);
+	}
+	const port = Number(parsed.port);
+	if (!parsed.port || !Number.isInteger(port) || port < 1 || port > 65535) {
+		throw new MaterializationError(
+			`Inference gateway url needs an explicit port: ${JSON.stringify(url)}`,
+		);
+	}
+	// §7:137 routes sandboxed model traffic through the daemon's loopback
+	// gateway, and the Darwin compiler hard-codes `127.0.0.1` (sandbox.ts:129).
+	// A non-loopback host would compile a profile the worker never dials.
+	if (parsed.hostname !== "127.0.0.1") {
+		throw new MaterializationError(
+			`Inference gateway must be loopback, got ${JSON.stringify(parsed.hostname)}`,
+		);
+	}
+	return { host: parsed.hostname, port };
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function materializeWorker(options: MaterializeOptions): Promise<WorkerLayout> {
@@ -269,6 +300,7 @@ export async function materializeWorker(options: MaterializeOptions): Promise<Wo
 
 	// Resolve before any filesystem work so an unroutable model fails closed.
 	const { provider, modelId } = resolveWorkerModel(parsedPeer, options.model);
+	const gatewayEndpoint = parseGatewayEndpoint(inferenceGateway.url);
 
 	const allowed = new Set(parsedPeer.spawns === "*" ? discoveredAgentNames : spawnNames);
 	const disabledAgents =
@@ -370,6 +402,7 @@ export async function materializeWorker(options: MaterializeOptions): Promise<Wo
 		disabledAgents,
 		provider,
 		modelId,
+		inferenceGateway: gatewayEndpoint,
 		definitionFingerprint: fingerprintPeerDefinition(parsedPeer),
 		env: {
 			HOME: home,

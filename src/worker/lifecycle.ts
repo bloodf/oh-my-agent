@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
 
+import { resolveSandboxLaunch } from "./launch-gate";
 import type { SandboxLaunch } from "./launch-gate";
 
 import type { WorkerLayout } from "../daemon/materializer";
@@ -41,10 +42,15 @@ export interface StartWorkerOptions {
 	/** CLI entry point override, for tests and vendored installs. */
 	cliPath?: string;
 	/**
-	 * Sandbox the child per §7. Omitted means the worker runs unsandboxed, and
-	 * the caller has decided that explicitly.
+	 * Platform seam for gating an opted-in peer. Defaults to the host platform
+	 * and a real `which`/loopback probe.
 	 */
-	sandbox?: SandboxLaunchPlan;
+	sandboxAdapter?: {
+		platform?: NodeJS.Platform;
+		which?: (binary: string) => Promise<string | null>;
+		probeBridge?: (host: string, port: number) => Promise<boolean>;
+		adapterCommand?: string;
+	};
 	/** Per-turn ceiling for a prompt round-trip. */
 	turnTimeoutMs?: number;
 }
@@ -56,6 +62,8 @@ export interface WorkerHandle {
 	readonly state: WorkerState;
 	/** Live child's session id; undefined once parked or stopped. */
 	readonly sessionId: string | undefined;
+	/** True when the child runs under a probed, compiled sandbox profile. */
+	readonly sandboxed: boolean;
 	readonly layout: WorkerLayout;
 	readonly env: Record<string, string>;
 	/** Fingerprint of the definition this worker was materialized from. */
@@ -143,9 +151,54 @@ async function writeSandboxShim(layout: WorkerLayout, plan: SandboxLaunchPlan): 
 	return shimPath;
 }
 
+/**
+ * Gate an opted-in peer: probe the adapter and gateway bridge, compile its
+ * policy, and return the argv. Fails closed — an opted-in agent never
+ * downgrades to an unsandboxed launch.
+ */
+async function gatePeer(
+	peer: PeerDefinition,
+	layout: WorkerLayout,
+	cwd: string,
+	options: StartWorkerOptions,
+): Promise<SandboxLaunchPlan> {
+	const adapter = options.sandboxAdapter ?? {};
+	const extraRoots =
+		typeof peer.sandbox === "object" && Array.isArray(peer.sandbox.extraRoots)
+			? peer.sandbox.extraRoots
+			: [];
+	return await resolveSandboxLaunch({
+		policy: {
+			workspace: cwd,
+			workerHome: layout.home,
+			runtimePaths: ["/usr/bin", "/bin", "/usr/lib"],
+			inferenceGateway: layout.inferenceGateway,
+			loopbackPorts: [layout.inferenceGateway.port],
+			extraRoots,
+		},
+		command: ["bun", options.cliPath ?? resolveOmpCli()],
+		platform: adapter.platform ?? process.platform,
+		...(adapter.which ? { which: adapter.which } : { which: defaultWhich }),
+		...(adapter.probeBridge ? { probeBridge: adapter.probeBridge } : {}),
+		...(adapter.adapterCommand ? { adapterCommand: adapter.adapterCommand } : {}),
+	});
+}
+
+/** Real adapter lookup. */
+async function defaultWhich(binary: string): Promise<string | null> {
+	return Bun.which(binary);
+}
+
 export async function startWorker(options: StartWorkerOptions): Promise<WorkerHandle> {
-	const { peer, layout, cwd, cliPath, sandbox } = options;
+	const { peer, layout, cwd, cliPath } = options;
 	const turnTimeoutMs = options.turnTimeoutMs ?? 60_000;
+
+	// §7:141 — layer 1 is opt-in, but an opted-in peer must be gated here
+	// rather than trusting a caller to hand in a plan. `sandbox: false` and an
+	// omitted key both stay unsandboxed.
+	const wantsSandbox =
+		peer.sandbox === true || (typeof peer.sandbox === "object" && peer.sandbox.enabled !== false);
+	const sandbox = wantsSandbox ? await gatePeer(peer, layout, cwd, options) : undefined;
 	const fingerprint = fingerprintPeerDefinition(peer);
 	const toolListeners = new Set<(name: string) => void>();
 	const eventListeners = new Set<(event: unknown) => void>();
@@ -205,6 +258,7 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
 
 	return {
 		name: peer.name,
+		sandboxed: sandbox !== undefined,
 		get state() {
 			return state;
 		},
