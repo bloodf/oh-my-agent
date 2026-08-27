@@ -875,6 +875,9 @@ describe("usage routes isolate same-provider accounts", () => {
 		metadata: { accountId: "acct-bob", email: "bob@example.com" },
 	};
 
+	/** Resolves the first time the watcher parks on a conditional snapshot. */
+	let watchParked = Promise.withResolvers<void>();
+
 	/** Upstream stub: two OAuth accounts on one provider, plus their usage. */
 	const stubUpstream = async (input: string, init?: RequestInit): Promise<Response> => {
 		const url = new URL(String(input));
@@ -896,6 +899,7 @@ describe("usage routes isolate same-provider accounts", () => {
 				init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
 					once: true,
 				});
+				watchParked.resolve();
 				return await promise;
 			}
 			return body({
@@ -986,6 +990,7 @@ describe("usage routes isolate same-provider accounts", () => {
 	});
 
 	test("close() completes while the watcher is parked on a long-poll", async () => {
+		watchParked = Promise.withResolvers<void>();
 		const gateway = await startCredentialGateway({
 			upstreamUrl: "http://upstream.invalid",
 			adminToken: ADMIN_TOKEN,
@@ -993,8 +998,11 @@ describe("usage routes isolate same-provider accounts", () => {
 		});
 		const { url } = gateway;
 
-		// The stub parks every conditional snapshot, so the watcher is blocked in
-		// flight. close() must abort it and return rather than hang.
+		// Wait until the watcher is genuinely blocked in its conditional poll,
+		// otherwise close() might only prove it ran before the watch began.
+		await watchParked.promise;
+
+		// close() must abort that in-flight poll and return rather than hang.
 		await gateway.close();
 
 		// Idempotent, and the server is really down.
