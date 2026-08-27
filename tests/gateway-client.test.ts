@@ -261,3 +261,38 @@ describe("requester recovery after a refused shared disable", () => {
 		expect(idsOf(store)).not.toContain(own);
 	});
 });
+
+// ── Upstream changes reach the real client ───────────────────────────────────
+
+describe("upstream changes propagate to a real store", () => {
+	test("a third-party disable reaches the store through the stream", async () => {
+		const up = await upstream();
+		const gateway = await gatewayFor(up);
+		const worker = gateway.issueWorkerToken({
+			workerId: "w1",
+			credentialIds: [up.ids.openai, up.ids.anthropic],
+		});
+
+		const store = await storeFor(gateway, worker.token, { streamSnapshots: true });
+		expect(idsOf(store)).toContain(up.ids.anthropic);
+
+		// Someone else disables the credential directly upstream: not this
+		// worker, and not through the gateway. The gateway's own watcher must
+		// notice and push a new worker-view generation down.
+		const admin = new AuthBrokerClient({ url: up.url, token: ADMIN_TOKEN });
+		await admin.disableCredential(up.ids.anthropic, "revoked by an operator");
+
+		expect(await waitFor(() => !idsOf(store).includes(up.ids.anthropic))).toBe(true);
+
+		// The worker's other credential is untouched: propagation is not a reset.
+		expect(idsOf(store)).toContain(up.ids.openai);
+
+		// The view generation must have advanced. Without it a later conditional
+		// poll would answer 304 against a stale `seen`, so the store would stop
+		// hearing about changes even though this first push landed.
+		const after = await fetch(`${gateway.url}/v1/snapshot`, {
+			headers: { Authorization: `Bearer ${worker.token}` },
+		});
+		expect(Number(after.headers.get("ETag")?.replace(/"/g, ""))).toBeGreaterThan(1);
+	});
+});
