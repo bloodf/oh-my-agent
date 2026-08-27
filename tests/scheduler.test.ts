@@ -608,3 +608,50 @@ describe("AccountStateMachine", () => {
     expect(resumedRuns).toContain("r2");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Vixie cron DOM/DOW OR semantics
+// ---------------------------------------------------------------------------
+
+describe("Vixie cron: DOM and DOW both restricted", () => {
+  // Standard Vixie cron rule:
+  // - Both DOM and DOW wildcards → any day
+  // - One restricted, one wildcard → restricted field must match
+  // - Both restricted → day matches when EITHER field matches (OR)
+  //
+  // The buggy implementation uses AND for all fields.
+
+  test("DOM=13, DOW=* → DOM must match (standard one-restricted rule)", () => {
+    // Start: 2025-02-01 12:30:00 UTC. Next 13th: 2025-02-13.
+    const start = new Date("2025-02-01T12:30:00Z").getTime();
+    const expected = new Date("2025-02-13T00:00:00Z").getTime();
+    expect(nextCronTime("0 0 13 * *", start)).toBe(expected);
+  });
+
+  test("DOM=*, DOW=Mon → DOW must match (standard one-restricted rule)", () => {
+    // Start: 2025-02-01 12:30:00 UTC. Next Monday: 2025-02-03.
+    const start = new Date("2025-02-01T12:30:00Z").getTime();
+    const expected = new Date("2025-02-03T00:00:00Z").getTime();
+    expect(nextCronTime("0 0 * * 1", start)).toBe(expected);
+  });
+
+  test("both restricted: 0 0 13 * 1 from Feb 10 → Vixie OR picks Feb 13 (Thu) earlier than next Mon Feb 17", () => {
+    // Start: 2025-02-10 12:30:00 UTC.
+    // Vixie OR: date=13 OR weekday=Mon. Feb 13 (date=13) < Feb 17 (next Mon).
+    // Buggy AND: needs BOTH date=13 AND weekday=Mon simultaneously → first match is Oct 13.
+    const start = new Date("2025-02-10T12:30:00Z").getTime();
+    const expected = new Date("2025-02-13T00:00:00Z").getTime();
+    expect(nextCronTime("0 0 13 * 1", start)).toBe(expected);
+  });
+
+  test("both restricted: 0 0 13 * 1 from Feb 1 → Vixie OR picks Feb 3 (Mon) earlier than next 13th Feb 13", () => {
+    // Start: 2025-02-01 12:30:00 UTC.
+    // Vixie OR: date=13 OR weekday=Mon. Feb 3 (Mon) < Feb 13 (date=13).
+    // Buggy AND: needs BOTH → skips past all Mon 3, Mon 10, then all 13ths with wrong DOW,
+    //            finally lands on Oct 13 2025 (first date that is both 13 AND Monday).
+    const start = new Date("2025-02-01T12:30:00Z").getTime();
+    const expected = new Date("2025-02-03T00:00:00Z").getTime();
+    expect(nextCronTime("0 0 13 * 1", start)).toBe(expected);
+  });
+});
+
