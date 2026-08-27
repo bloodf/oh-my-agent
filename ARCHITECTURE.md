@@ -1,0 +1,178 @@
+# oh-my-agent — Architecture
+
+An [oh-my-pi (OMP)](https://omp.sh/docs) plugin that runs **autonomous, long-lived agents** which keep working while you're away, talk to each other in chat rooms, and are fully observable/steerable from inside the interactive OMP TUI.
+
+Status: design. Everything here is grounded in verified OMP surfaces (docs + `dist/types` of the installed `@oh-my-pi/pi-coding-agent`), not guesses.
+
+---
+
+## 1. Goals
+
+- **Autonomy** — agents run without a TUI attached; closing your terminal does not stop them.
+- **Multi-agent collaboration** — agents communicate through persistent chat rooms (channels + DMs), with mention-based wakeups.
+- **Native OMP feel** — agents are defined the same way OMP task agents are (markdown + YAML frontmatter); the plugin installs as a normal OMP extension package.
+- **Observability** — from any OMP session: list agents, tail their work, join their rooms, inject instructions, kill/restart them.
+- **Scheduling** — cron-style automations that spawn or wake agents.
+
+## 2. Non-goals
+
+- Not a security sandbox (see §7 — this is important and easy to get wrong).
+- Not a general workflow engine; agents are OMP sessions, orchestration stays thin.
+- No cloud component. Everything is local: Bun + SQLite + unix sockets.
+
+---
+
+## 3. What OMP gives us (verified)
+
+| Surface | What we use it for |
+|---|---|
+| **Extension API** — default-export factory `(pi: ExtensionAPI) => void`; `registerTool`, `registerCommand`, `on(...)` events, `sendMessage` / `sendUserMessage` / `appendEntry`, ask dialogs, widgets, custom renderers | The in-TUI control plane: slash commands, status widget, chat viewer, agent tools |
+| **Register-then-run constraint** — action methods throw `ExtensionRuntimeNotInitializedError` during load | All runtime behavior lives in event/command/tool handlers |
+| **SDK** — `createAgentSession`, `SessionManager`, `Settings`, `AuthStorage`, `ModelRegistry`, `AgentRegistry`, discovery helpers; `session.subscribe(event)`, `session.prompt(...)`, `session.dispose()`; requires Bun ≥ 1.3.14 | The daemon embeds agent sessions in-process |
+| **RPC mode** — typed client (`dist/types/modes/rpc/rpc-client.d.ts`), frame protocol, subagent subscription levels (`RpcSubagentLifecycleFrame`, `RpcSubagentProgressFrame`, `setSubagentSubscription`) | Subprocess workers when crash isolation matters |
+| **Task agent discovery** — `~/.omp/agent/agents/*.md` with frontmatter: `name`, `description`, `model` (incl. `@role` aliases via `modelRoles`), `tools`, `prewalk`, `advisor`; overridable via `task.agentModelOverrides` | We reuse the exact same format + roots for agent definitions |
+| **Extension loading roots** — `<cwd>/.omp/extensions`, active agent dir `extensions/`, `package.json#omp.extensions` plugin manifests, `config.yml` `extensions:` | How oh-my-agent installs |
+| **Task isolation** — `task.isolation.mode`: `none` / `worktree` / `fuse-overlay` / `overlayfs` / `rcopy` / `projfs`; copy-on-write workspace, merge back on completion | **Write** isolation for agent workspaces (not a security boundary) |
+
+## 4. Component architecture
+
+```
+┌────────────────────────────── omp (interactive TUI) ──────────────────────────────┐
+│  oh-my-agent extension                                                            │
+│  /agents /rooms /spawn /kill …   status widget   chat renderer   notifications    │
+└───────────────┬───────────────────────────────────────────────────────────────────┘
+                │ JSON-RPC over unix socket (~/.omp/agent/oh-my-agent/daemon.sock)
+┌───────────────▼───────────────── omp-agent daemon (Bun) ──────────────────────────┐
+│  Supervisor      Scheduler (cron/automations)      Bus (rooms/channels/DMs)       │
+│  SQLite (state, messages, runs, schedules)                                        │
+│      │ spawns & owns                                                              │
+│      ├── worker: agent "researcher"   (OMP session)                               │
+│      ├── worker: agent "reviewer"     (OMP session)                               │
+│      └── worker: agent "ops"          (OMP session)                               │
+└───────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.1 Daemon
+- `omp-agent daemon` — long-running Bun process, detached from any TTY; **this** is what "keeps working while I'm away" means.
+- Single instance per user profile; socket + pidfile under the active agent dir (honors `PI_CODING_AGENT_DIR` / `--profile`).
+- Owns all durable state (SQLite via `bun:sqlite`): agents, runs, room messages, schedules, delivery cursors.
+
+### 4.2 Workers (agent runtimes)
+- Default: **subprocess per agent** in RPC mode — crash isolation, per-agent env/cwd, daemon supervises restarts with backoff.
+- Optimization path: in-process `createAgentSession` for cheap/short-lived agents. Same worker interface either way.
+- Each worker gets the oh-my-agent **agent toolbelt** injected as an extension: `chat_send`, `chat_read`, `chat_wait` (block until mention/new message), `agent_spawn` (create a long-lived **peer** agent in the daemon — never for coding subtasks, see §5.1), `agent_status`, `task_handoff`.
+
+### 4.3 Bus (chat rooms)
+- Rooms = channels (`#general`, `#reviews`, …) and DMs (`@researcher`). SQLite-backed, append-only messages with per-agent read cursors.
+- Wakeups: a parked (idle) agent is resumed by the daemon when it is `@mentioned` or a room it subscribes to gets a message matching its wake filter — the daemon calls `session.prompt()` / RPC prompt with the pending messages batched into one turn.
+- Humans are first-class participants: the TUI extension posts into rooms as `@you`.
+
+### 4.4 Scheduler
+- Cron expressions + one-shot timers stored in SQLite; on fire → spawn agent or post a message into a room (which may wake subscribers).
+- Automations are markdown too: prompt body + `schedule:` frontmatter.
+
+### 4.5 TUI extension
+- Slash commands: `/agents` (hub: list/spawn/kill/logs), `/rooms` (join/read/post), `/schedule`.
+- Status widget: running/parked agent count, unread room messages.
+- Custom renderer for room transcripts; ask-dialogs for confirmations.
+- Talks **only** to the daemon socket — no direct DB access, so the TUI and daemon can't race.
+
+## 5. Agent definitions
+
+Definitions use OMP's task-agent format verbatim — but they are **not** stored in OMP's discovery roots. `~/.omp/agent/agents/` is global: OMP merges it into every session, so parking peer definitions there would surface them in the `/agents` hub of every unrelated OMP session. See §5.2 for where they actually live.
+
+```markdown
+---
+name: reviewer
+description: Reviews PRs and posts findings to #reviews.
+model: "@review"          # resolved via modelRoles, e.g. review: openai/gpt-5.4:high
+tools: [task, read, grep, chat_send, chat_read]   # keep `task` — see §5.1
+spawns: [scout, implementor]                      # in-run delegation allowlist
+workspace: ~/work/acme    # cwd for the worker — see §7 for what this does and does NOT mean
+rooms: ["#reviews"]       # oh-my-agent additions live under plain keys OMP ignores
+wake: { mention: true }
+autonomy: { max_turns: 40, budget_usd: 2.50 }
+---
+You are the code reviewer for this team. When woken with new messages…
+```
+
+OMP-known keys behave identically to native task agents (so definitions stay portable); oh-my-agent reads its extra keys (`rooms`, `wake`, `autonomy`, `workspace`, `sandbox`) and ignores none silently — unknown keys warn at spawn.
+
+### 5.1 Delegation contract (worker agents are orchestrators)
+
+A top-level worker agent's job is to **coordinate**, and in OMP coordination means the native `task` tool. An explicit `tools:` list *replaces* the default set — write it naively and you silently strip `task`, leaving the agent unable to spawn subagents at all. The contract:
+
+- **Every worker agent keeps native delegation.** Either include `task` in `tools:` or declare `spawns:` — OMP auto-adds `task` to a restricted tool list when `spawns:` is declared and depth permits (`runSubprocess`). Declaring `spawns: [a, b]` is preferred: it doubles as the allowlist, and an omitted `agent` field in a dispatch defaults to the first listed entry. (`tools: [task]` without `spawns:` implies `spawns: *` via backward-compat.)
+- **Two spawn verbs, two meanings.** Native `task` = in-run subagent (bounded, transcript folds into the parent run, subject to spawn policy). `agent_spawn` toolbelt = new long-lived peer in the daemon (own lifecycle, rooms, budget). Coding/research subtasks MUST dispatch through native `task`; `agent_spawn` is reserved for standing up durable teammates. The toolbelt tool description states this and the daemon rejects `agent_spawn` calls whose payload looks like a one-shot subtask (has `expected_output`, no `rooms`).
+- **Recursion & approval policy is OMP's, inherited.** Depth is governed by `task.maxRecursionDepth` (default `2`; at the cap OMP strips `task` and empties the spawn policy), self-recursion by the `PI_BLOCKED_AGENT` guard, and per-agent bans by `task.disabledAgents`. oh-my-agent adds nothing on top except `autonomy.max_turns`/`budget_usd` at the run level — one policy system, not two.
+- **Tested invariant.** The integration suite runs a worker with a restricted `tools:` list, has it perform a coding task, and asserts (a) the effective tool list contains `task`, (b) at least one dispatch went through native `task`, (c) zero `agent_spawn` calls occurred during the run.
+
+### 5.2 Private store + materialized worker dirs (no global leakage)
+
+- **Source of truth is plugin-private.** Peer definitions live in `~/.omp/agent/oh-my-agent/agents/*.md` (user) and `<project>/.omp/oh-my-agent/agents/*.md` (project). Neither path is an OMP discovery root, so normal OMP sessions never see them. A user who *wants* a definition available to plain OMP copies it into the global root explicitly.
+- **Materialize per worker at spawn.** The daemon builds a throwaway agent dir per worker under `~/.omp/agent/oh-my-agent/workers/<agent>/`: an `agents/` directory containing **only** the worker's own definition plus the definitions named in its `spawns:` list. The dir starts with no `agent.db`; OMP creates a fresh one on first use. Never seed it from the user's `agent.db` — source documents that file as the local auth store (`sdk.ts`: "local SQLite store at `<agentDir>/agent.db`"), so copying it would hand every worker dir the full credential set.
+- **Wire-up per worker mode.** RPC subprocess workers are the default worker mode (crash isolation, per-worker sandbox, matches the §4 supervisor). They launch with `PI_CODING_AGENT_DIR=<materialized dir>` plus `OMP_AUTH_BROKER_URL=<daemon gateway>` and a per-worker `OMP_AUTH_BROKER_TOKEN`; the vault-wide upstream broker token remains daemon-only. The gateway applies the account binding and reconciliation contract in §9.6. In-process SDK sessions (`agentDir: <materialized dir>` to `createAgentSession`, shared `authStorage`/`modelRegistry` objects, private `AgentRegistry`) remain supported for tests and daemon-internal tooling, not production workers.
+- **`spawns:` policy is the enforcement — materialization is not.** Discovery precedence (`discoverAgents`, `src/task/discovery.ts`) consults the nearest project `.omp/agents` *before* the active agent dir, and extension + bundled roots after it. Workers keep the project `cwd` (they edit the project tree), so an unmaterialized project agent — or any extension/bundled agent — remains discoverable regardless of what the worker dir contains. Materialization only curates the user-root slice; the actual allowlist is §5.1's `spawns:` policy, checked at dispatch time. As defense-in-depth, at spawn the daemon snapshots `discoverAgents(workerCwd)` and writes every discovered name outside the worker's allowlist into the worker's `task.disabledAgents` — a static deny-list (filtered after discovery, preflight-enforced at dispatch): agents appearing after spawn stay enabled until the next materialization, so it hardens listings but never replaces `spawns:`.
+- **Cleanup.** Materialized dirs are ephemeral; the daemon rebuilds them on every spawn (definitions may have changed) and sweeps orphans at startup.
+
+## 6. Persistence (SQLite sketch)
+
+```
+agents(name, definition_path, status, worker_pid, cwd, started_at, …)
+runs(id, agent, trigger, started_at, ended_at, outcome, cost_usd, transcript_ref)
+rooms(id, kind)                      -- channel | dm
+messages(id, room_id, author, body, created_at)
+cursors(agent, room_id, last_msg_id)
+schedules(id, cron, action, payload, next_fire_at, enabled)
+```
+
+## 7. Isolation & security model — read this before assuming anything
+
+This section is deliberately blunt because the intuitive mental model is wrong.
+
+**`workspace:` (the worker's `cwd`) scopes *defaults*, not *access*.** Setting an agent's cwd to `DIR A` controls project discovery (`.omp/` config, skills, context files), relative-path resolution, and which repo the agent *thinks* it's in. It does **not** prevent the agent from reading `/etc/passwd`, `~/.ssh/`, or `../other-project`. OMP's own docs are explicit that extensions and tools are **not sandboxed** and run with full user permissions.
+
+Three distinct layers, in decreasing strength:
+
+1. **OS-level sandbox (the only real security boundary).** Optional per-agent `sandbox: true` wraps the worker subprocess in an OS sandbox: `sandbox-exec` (macOS Seatbelt profile allowing only the workspace + caches), or `bwrap`/container on Linux. Only available in subprocess-worker mode — one more reason it's the default. If you need to guarantee an agent cannot exfiltrate or touch files outside its workspace, **this is the only layer that provides it.**
+2. **Write isolation (mergeability, not security).** We reuse OMP `task.isolation.mode` (`worktree` / `fuse-overlay` / `overlayfs` / `rcopy` / `projfs`) so agents edit copy-on-write views and the daemon merges results back. This protects your working tree from bad edits; it does not restrict reads.
+3. **Convention scoping (soft, bypassable).** Tool allowlists in frontmatter, path-validation in our custom tools, and system-prompt instructions ("only operate inside your workspace"). This shapes behavior of a cooperative model and reduces accidents. A confused or adversarial model can bypass it with absolute paths — we document it as a convention and never call it isolation in user-facing text.
+
+Defaults: layer 2 + 3 on, layer 1 opt-in (it constrains tooling and needs per-OS setup). `/agents` shows a shield icon only for sandboxed agents so the actual guarantee is visible.
+
+## 8. Repo layout
+
+```
+oh-my-agent/
+  package.json            # omp.extensions manifest → installs the TUI extension
+  src/
+    extension/            # in-TUI plugin (commands, widget, renderers)
+    daemon/               # supervisor, scheduler, bus, sqlite, socket server
+    worker/               # worker bootstrap + agent toolbelt extension
+    shared/               # JSON-RPC protocol types, agent-definition parsing
+  agents/                 # example agent definitions
+  tests/                  # unit, integration, and OMP contract suites
+```
+
+## 9. Decisions (confirmed)
+
+1. **Worker mode:** RPC subprocess is the default; in-process SDK sessions are for tests and daemon-internal tooling only (§5.2).
+2. **RPC worker auth:** every worker connects to the daemon's scoped credential gateway with its own revocable bearer token; only the daemon can access the upstream broker with the vault-wide token (§9.6).
+3. **Discovery hygiene:** `spawns:` is the enforcement; enumerated `task.disabledAgents` snapshot at spawn as defense-in-depth (§5.2).
+4. **Budget & quotas:** billing is a property of the **account**, not the agent. *Metered* (API-key) accounts: warn in the room at 80% of `budget_usd`, park at 100%; a human resumes with a bump or kills. *Subscription* accounts: no dollar cap — on a quota-exhaustion signal, every run on that account parks and the daemon schedules auto-resume at quota reset via a one-shot timer (§4); work continues with no human in the loop. `budget_usd` in agent frontmatter is metered-only; quota state is tracked per account in the daemon's account registry beside the broker.
+5. **Delivery & method:** no phased delivery — the first shipped version has everything working (daemon, broker, rooms/bus, scheduler, materialization, sandboxing, quota handling), built test-first (§11).
+6. **Broker hosting: discover, else embed - fronted by a per-worker gateway.** At boot the daemon runs the client discovery chain (`OMP_AUTH_BROKER_URL` env → `auth.broker.*` config → token file). Admin-token sourcing differs by mode: *external broker reused* → authenticate with the discovered token, treat it read-only, never rotate it; *embedded* → run `startAuthBroker` over the shared vault with a fresh in-memory admin token generated at boot. Workers receive only per-worker gateway tokens bound to one account. The gateway rewrites all upstream generations into a monotonically increasing **worker-view generation** and filters `GET /v1/snapshot`, `GET /v1/snapshot/stream`, refresh, block, and usage data to bound credentials. Foreign-id access, credential upload, and `/v1/usage/clients` are admin-only. Usage routes required by stock `RemoteAuthCredentialStore` remain compatible: observed usage is attributed to the worker; aggregate/history responses are account-filtered; stale notification is allowed. **Shared disable reconciliation is explicit:** `RemoteAuthCredentialStore.deleteAuthCredential()` removes locally before its fire-and-forget disable request and streaming clients skip pull refresh. For a dedicated account, the gateway proxies disable and returns the upstream result. For a shared account, the gateway (a) queues an idempotent policy request containing the route credential id and gateway-token worker identity, (b) returns retryable `409 {"status":"pending_policy","requestId":"…"}`, (c) leaves upstream state unchanged, (d) increments only the requester's worker-view generation, and (e) immediately emits a valid full filtered `snapshot` SSE event to that worker's active stream; conditional long-poll uses the same synthetic generation bump. `RemoteAuthCredentialStore` accepts a full snapshot when its generation is not older (`remote-store.ts:499-512`), restoring the locally removed credential. Peers remain unchanged. After approval, the daemon disables upstream and normal gateway events converge every worker. Embedded lifecycle mirrors `runServe` (`auth-broker-cli.ts:154-194`): open `SqliteAuthCredentialStore` → `AuthStorage.reload()` → `startAuthBroker`, loopback-only ephemeral bind; shutdown revokes worker tokens, closes gateway, then closes embedded handle/storage. Reused external brokers are never closed or mutated except through approved credential operations.
+
+## 10. Open questions
+
+1. Transcript storage: full session JSON per run vs. summarized digests with on-demand replay. *(Held: needs volume numbers from a prototype run against the §6 schema.)*
+2. Seatbelt profile shipping: template per-OS profiles in-repo vs. generate at spawn. *(Held: depends on target-OS mix and what OMP itself ships for sandboxing.)*
+3. Materialized-dir staleness: long-lived workers never re-materialize, so a `spawns:` or definition edit mid-run doesn't propagate until the next spawn. Re-materialize on wake vs. accept. *(Held: depends on the scheduler's worker-lifecycle model, not yet settled.)*
+4. ~~Broker surface~~ **Resolved** → §9.6. Server is exported (`startAuthBroker`, HTTP+SSE, bearer auth, ArkType wire schemas); embedding template is `runServe` (`auth-broker-cli.ts:154-194`) over local SQLite; discovery precedence verified in `auth-broker-config.ts`.
+5. Quota signals: the broker models these natively — `POST /v1/credential/:id/block` accepts a scoped `CredentialBlockSnapshot` and snapshot entries carry `blocks` + `rotatesInMs`, so park/auto-resume keys off broker blocks rather than parsing provider errors. **Remaining:** which providers post blocks automatically vs. need our daemon to post them on observed 429s.
+
+## 11. Engineering practice
+
+- **TDD, strictly:** red → green → refactor. A failing test precedes every behavior; no daemon, broker, scheduler, or extension code lands without one.
+- **Unit tests** colocated per module (`bun test`): protocol types, definition parsing, materialization, spawn-policy snapshots, quota state machine, room routing.
+- **Integration suite** for cross-component invariants: the §5.1 delegation invariant; broker round-trip through the gateway; foreign ids return 403; shared disable returns `409 pending_policy`, queues `{credentialId, workerId}`, emits a full snapshot with a newer worker-view generation, restores the requester's locally removed credential, and leaves peers usable; dedicated disable proxies upstream; usage routes return account-filtered data; quota-park → auto-resume; end-to-end room message flow through the bus.
