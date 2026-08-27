@@ -29,6 +29,8 @@ export interface StartCredentialGatewayOptions {
 	upstreamUrl: string;
 	/** Admin bearer for the upstream broker. Never exposed to a worker. */
 	adminToken: string;
+	/** Upstream transport. Injectable so tests can serve fixture payloads. */
+	fetchUpstream?: (input: string, init?: RequestInit) => Promise<Response>;
 }
 
 export interface IssueWorkerTokenOptions {
@@ -162,6 +164,8 @@ export async function startCredentialGateway(
 	/** Dedupes repeat disables: `${workerId}:${credentialId}` -> request. */
 	const pending = new Map<string, PendingPolicyRequest>();
 
+	const fetchUpstream = options.fetchUpstream ?? fetch;
+
 	const upstreamHeaders = (extra?: Record<string, string>): Headers => {
 		const headers = new Headers(extra);
 		headers.set("Authorization", `Bearer ${adminToken}`);
@@ -178,9 +182,30 @@ export async function startCredentialGateway(
 	let lastUpstreamGeneration = 0;
 
 	const upstreamSnapshot = async (): Promise<SnapshotBody> => {
-		const res = await fetch(`${upstreamUrl}/v1/snapshot`, { headers: upstreamHeaders() });
+		const res = await fetchUpstream(`${upstreamUrl}/v1/snapshot`, { headers: upstreamHeaders() });
 		if (!res.ok) throw new Error(`upstream snapshot failed: ${res.status}`);
 		return (await res.json()) as SnapshotBody;
+	};
+
+	/**
+	 * Advance and notify every worker whose view is now stale. Reuses an
+	 * already-fetched body so it never re-enters the upstream fetch.
+	 */
+	const notifyUpstreamChange = (body: SnapshotBody): void => {
+		if (body.generation <= lastUpstreamGeneration) return;
+		lastUpstreamGeneration = body.generation;
+		for (const other of bindings.values()) {
+			other.generation += 1;
+			for (const wake of [...other.waiters]) wake();
+			if (other.streams.size === 0) continue;
+			const view = {
+				...body,
+				generation: other.generation,
+				credentials: body.credentials.filter((entry) => other.credentialIds.has(entry.id)),
+			};
+			const frame = `data: ${JSON.stringify({ kind: "snapshot", ...view })}\n\n`;
+			for (const write of other.streams) write(frame);
+		}
 	};
 
 	/**
@@ -191,30 +216,43 @@ export async function startCredentialGateway(
 	 */
 	const filteredSnapshot = async (binding: WorkerBinding): Promise<SnapshotBody> => {
 		const body = await upstreamSnapshot();
-		if (body.generation > lastUpstreamGeneration) {
-			lastUpstreamGeneration = body.generation;
-			// Advance and notify every worker: an idle worker with no poll in
-			// flight would otherwise never learn about an upstream refresh, block,
-			// or third-party disable. The already-fetched body is reused so this
-			// never re-enters the upstream fetch.
-			for (const other of bindings.values()) {
-				other.generation += 1;
-				for (const wake of [...other.waiters]) wake();
-				if (other.streams.size === 0) continue;
-				const view = {
-					...body,
-					generation: other.generation,
-					credentials: body.credentials.filter((entry) => other.credentialIds.has(entry.id)),
-				};
-				const frame = `data: ${JSON.stringify({ kind: "snapshot", ...view })}\n\n`;
-				for (const write of other.streams) write(frame);
-			}
-		}
+		notifyUpstreamChange(body);
 		return {
 			...body,
 			generation: binding.generation,
 			credentials: body.credentials.filter((entry) => binding.credentialIds.has(entry.id)),
 		};
+	};
+
+	/**
+	 * Watch upstream independently of worker traffic: a worker parked on an SSE
+	 * stream issues no requests, so a third-party refresh, block, or disable
+	 * would otherwise never reach it. Long-polls the broker's conditional
+	 * snapshot endpoint and re-arms until the gateway closes.
+	 */
+	const watchAbort = new AbortController();
+	let watching = true;
+	const watchUpstream = async (): Promise<void> => {
+		while (watching) {
+			try {
+				const seen = lastUpstreamGeneration;
+				const res = await fetchUpstream(`${upstreamUrl}/v1/snapshot?wait=25`, {
+					headers: upstreamHeaders({ "If-None-Match": `"${seen}"` }),
+					signal: watchAbort.signal,
+				});
+				if (res.status === 200) notifyUpstreamChange((await res.json()) as SnapshotBody);
+				else await res.body?.cancel();
+				// An upstream that answers immediately without advancing — no
+				// conditional support, an eager 304, or a same-generation 200 —
+				// would spin this loop; yield so it stays a poll, not a busy-wait.
+				if (lastUpstreamGeneration === seen) await Bun.sleep(25);
+			} catch {
+				// Abort during close, or an upstream blip: exit or retry. Worker
+				// requests still detect changes through their own fetches.
+				if (!watching) return;
+				await Bun.sleep(50);
+			}
+		}
 	};
 
 	/**
@@ -283,7 +321,7 @@ export async function startCredentialGateway(
 			const path = url.pathname;
 
 			if (path === "/v1/healthz") {
-				return await fetch(`${upstreamUrl}/v1/healthz`);
+				return await fetchUpstream(`${upstreamUrl}/v1/healthz`);
 			}
 
 			const auth = req.headers.get("Authorization");
@@ -358,7 +396,7 @@ export async function startCredentialGateway(
 				}
 
 				if (action !== "disable") {
-					return await fetch(`${upstreamUrl}${path}`, {
+					return await fetchUpstream(`${upstreamUrl}${path}`, {
 						method: "POST",
 						headers: upstreamHeaders({ "Content-Type": "application/json" }),
 						body: await req.text(),
@@ -371,7 +409,7 @@ export async function startCredentialGateway(
 				);
 				const isShared = new Set(sharedWith.map((other) => other.workerId)).size > 1;
 				if (!isShared) {
-					return await fetch(`${upstreamUrl}${path}`, {
+					return await fetchUpstream(`${upstreamUrl}${path}`, {
 						method: "POST",
 						headers: upstreamHeaders({ "Content-Type": "application/json" }),
 						body: await req.text(),
@@ -398,7 +436,7 @@ export async function startCredentialGateway(
 			// ranking and quota signals (remote-store.ts:1071) — but aggregate and
 			// history responses are reduced to the worker's own accounts.
 			if (path === "/v1/usage" || path === "/v1/usage/history") {
-				const res = await fetch(`${upstreamUrl}${path}${url.search}`, {
+				const res = await fetchUpstream(`${upstreamUrl}${path}${url.search}`, {
 					headers: upstreamHeaders(),
 				});
 				if (!res.ok) return res;
@@ -427,7 +465,7 @@ export async function startCredentialGateway(
 			// Observed-usage reporting is a write of the worker's own numbers, so it
 			// carries no cross-account read and stays available.
 			if (path === "/v1/usage/observed") {
-				return await fetch(`${upstreamUrl}${path}`, {
+				return await fetchUpstream(`${upstreamUrl}${path}`, {
 					method: req.method,
 					headers: upstreamHeaders({ "Content-Type": "application/json" }),
 					body: await req.text(),
@@ -438,6 +476,10 @@ export async function startCredentialGateway(
 			return json(403, { error: "admin only" });
 		},
 	});
+
+	// Prime the baseline generation, then watch upstream in the background.
+	notifyUpstreamChange(await upstreamSnapshot());
+	const watchTask = watchUpstream();
 
 	let closed = false;
 	return {
@@ -460,6 +502,10 @@ export async function startCredentialGateway(
 		close: async () => {
 			if (closed) return;
 			closed = true;
+			watching = false;
+			// Abort the in-flight long-poll so close does not block on it.
+			watchAbort.abort();
+			await watchTask;
 			bindings.clear();
 			await server.stop(true);
 		},

@@ -733,6 +733,35 @@ describe("upstream change propagation", () => {
 		expect(after.generation).toBeGreaterThan(before.generation);
 		expect(after.credentials.map((c) => c.id)).toEqual([up.ids.openai]);
 	});
+
+	test("an idle SSE stream receives a third-party change without polling", async () => {
+		const up = await upstream();
+		const gateway = await gatewayFor(up);
+		const worker = gateway.issueWorkerToken({
+			workerId: "reviewer",
+			credentialIds: [up.ids.openai, up.ids.anthropic],
+		});
+
+		// The worker only opens a stream — it issues no snapshot requests, so the
+		// gateway's own upstream watcher is the only path that can wake it.
+		const events = await readEvents(
+			`${gateway.url}/v1/snapshot/stream`,
+			worker.token,
+			2,
+			async () => {
+				await fetch(`${up.url}/v1/credential/${up.ids.anthropic}/disable`, {
+					method: "POST",
+					headers: { Authorization: `Bearer ${ADMIN_TOKEN}`, "Content-Type": "application/json" },
+					body: JSON.stringify({ cause: "rotated" }),
+				});
+			},
+		);
+
+		const initial = events[0] as unknown as SnapshotResponse;
+		const pushed = events[1] as unknown as SnapshotResponse;
+		expect(pushed.generation).toBeGreaterThan(initial.generation);
+		expect(pushed.credentials.map((c) => c.id)).toEqual([up.ids.openai]);
+	});
 });
 
 // ── Account filtering (pure) ─────────────────────────────────────────────────
@@ -824,5 +853,132 @@ describe("usage account filtering", () => {
 		expect(rows.filter((r) => historyMatchesIdentity(r, alice))).toEqual([rows[0]]);
 		expect(rows.filter((r) => historyMatchesIdentity(r, bob))).toEqual([rows[1]]);
 		expect(rows.filter((r) => historyMatchesIdentity(r, apiKeyOnly))).toEqual([]);
+	});
+});
+
+// ── Route-level account isolation ────────────────────────────────────────────
+
+describe("usage routes isolate same-provider accounts", () => {
+	const ALICE_ID = 101;
+	const BOB_ID = 202;
+
+	const aliceReport = {
+		provider: "anthropic",
+		fetchedAt: 1,
+		limits: [],
+		metadata: { accountId: "acct-alice", email: "alice@example.com" },
+	};
+	const bobReport = {
+		provider: "anthropic",
+		fetchedAt: 1,
+		limits: [],
+		metadata: { accountId: "acct-bob", email: "bob@example.com" },
+	};
+
+	/** Upstream stub: two OAuth accounts on one provider, plus their usage. */
+	const stubUpstream = async (input: string, init?: RequestInit): Promise<Response> => {
+		const url = new URL(String(input));
+		const path = url.pathname;
+		const body = (value: unknown) =>
+			new Response(JSON.stringify(value), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+
+		if (path === "/v1/snapshot") {
+			// Honor the conditional long-poll the gateway's watcher issues, so it
+			// parks instead of spinning on an unchanging fixture.
+			const seen = new Headers(init?.headers).get("If-None-Match");
+			if (seen === '"7"') {
+				// Park like a real conditional long-poll until the gateway aborts.
+				const { promise, reject } = Promise.withResolvers<Response>();
+				init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+				return await promise;
+			}
+			return body({
+				generation: 7,
+				credentials: [
+					{
+						id: ALICE_ID,
+						provider: "anthropic",
+						credential: { type: "oauth", accountId: "acct-alice", email: "alice@example.com" },
+					},
+					{
+						id: BOB_ID,
+						provider: "anthropic",
+						credential: { type: "oauth", accountId: "acct-bob", email: "bob@example.com" },
+					},
+				],
+			});
+		}
+		if (path === "/v1/usage") return body({ generatedAt: 1, reports: [aliceReport, bobReport] });
+		if (path === "/v1/usage/history") {
+			return body({
+				generatedAt: 1,
+				entries: [
+					{ provider: "anthropic", accountId: "acct-alice", email: "alice@example.com", limitId: "5h" },
+					{ provider: "anthropic", accountId: "acct-bob", email: "bob@example.com", limitId: "5h" },
+				],
+			});
+		}
+		return new Response("not found", { status: 404 });
+	};
+
+	async function stubbedGateway(): Promise<CredentialGateway> {
+		const gateway = await startCredentialGateway({
+			upstreamUrl: "http://upstream.invalid",
+			adminToken: ADMIN_TOKEN,
+			fetchUpstream: stubUpstream,
+		});
+		cleanups.push(() => gateway.close());
+		return gateway;
+	}
+
+	test("each worker's /v1/usage carries only its own account", async () => {
+		const gateway = await stubbedGateway();
+		const alice = gateway.issueWorkerToken({ workerId: "alice", credentialIds: [ALICE_ID] });
+		const bob = gateway.issueWorkerToken({ workerId: "bob", credentialIds: [BOB_ID] });
+
+		const read = async (token: string) =>
+			(await (
+				await fetch(`${gateway.url}/v1/usage`, { headers: { Authorization: `Bearer ${token}` } })
+			).json()) as { reports: { metadata: { accountId: string } }[] };
+
+		expect((await read(alice.token)).reports.map((r) => r.metadata.accountId)).toEqual([
+			"acct-alice",
+		]);
+		expect((await read(bob.token)).reports.map((r) => r.metadata.accountId)).toEqual(["acct-bob"]);
+	});
+
+	test("each worker's /v1/usage/history carries only its own account", async () => {
+		const gateway = await stubbedGateway();
+		const alice = gateway.issueWorkerToken({ workerId: "alice", credentialIds: [ALICE_ID] });
+		const bob = gateway.issueWorkerToken({ workerId: "bob", credentialIds: [BOB_ID] });
+
+		const read = async (token: string) =>
+			(await (
+				await fetch(`${gateway.url}/v1/usage/history`, {
+					headers: { Authorization: `Bearer ${token}` },
+				})
+			).json()) as { entries: { accountId: string }[] };
+
+		expect((await read(alice.token)).entries.map((e) => e.accountId)).toEqual(["acct-alice"]);
+		expect((await read(bob.token)).entries.map((e) => e.accountId)).toEqual(["acct-bob"]);
+	});
+
+	test("a worker bound to both accounts sees both", async () => {
+		const gateway = await stubbedGateway();
+		const both = gateway.issueWorkerToken({
+			workerId: "both",
+			credentialIds: [ALICE_ID, BOB_ID],
+		});
+
+		const res = (await (
+			await fetch(`${gateway.url}/v1/usage`, {
+				headers: { Authorization: `Bearer ${both.token}` },
+			})
+		).json()) as { reports: { metadata: { accountId: string } }[] };
+
+		expect(res.reports.map((r) => r.metadata.accountId)).toEqual(["acct-alice", "acct-bob"]);
 	});
 });
