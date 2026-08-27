@@ -218,9 +218,17 @@ describe("spawn → room message → delegate → park → auto-resume", () => {
 	});
 
 	test("a quota block parks the worker and auto-resume delivers the backlog", async () => {
-		const d = await daemon([{ text: "Reviewed." }, { text: "Caught up." }]);
+		// The post-resume turn dispatches `task`, so the delivered prompt leaves
+		// an observable trace in the real child rather than only a state flag.
+		const d = await daemon([
+			{ tool: "task", arguments: { agent: "scout", prompt: "Catch up" } },
+			{ text: "Caught up." },
+		]);
 		await d.rooms.createRoom({ id: "#reviews", kind: "channel" });
 		const worker = await d.spawn();
+
+		const dispatched: string[] = [];
+		worker.onToolCall((name) => dispatched.push(name));
 
 		const block: QuotaBlock = {
 			credentialId: 7,
@@ -238,6 +246,7 @@ describe("spawn → room message → delegate → park → auto-resume", () => {
 		expect(
 			await d.supervisor.post({ room: "#reviews", author: "@you", body: "While parked." }),
 		).toEqual([]);
+		expect(dispatched).toEqual([]);
 
 		// The daemon armed a one-shot from the verified deadline; no human acts.
 		expect(d.timers).toHaveLength(1);
@@ -247,9 +256,11 @@ describe("spawn → room message → delegate → park → auto-resume", () => {
 		d.timers[0].callback();
 		await d.supervisor.settled();
 
-		// The timer alone restarted the worker AND delivered the backlog.
+		// The timer alone restarted the worker AND ran a real turn against the
+		// backlog: the child dispatched a tool, and nothing is left pending.
 		expect(worker.state).toBe("running");
-		expect(await d.supervisor.deliver("reviewer")).toBe(false);
+		expect(dispatched).toContain("task");
+		expect(await d.rooms.unreadCount("reviewer", "#reviews")).toBe(0);
 	});
 
 	test("a parked worker resumes as a fresh session and still delegates", async () => {
