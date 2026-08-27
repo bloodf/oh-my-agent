@@ -28,6 +28,7 @@ import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
 
 import { resolveSandboxLaunch } from "./launch-gate";
 import type { SandboxLaunch } from "./launch-gate";
+import type { SandboxPolicy } from "./sandbox";
 
 import type { WorkerLayout } from "../daemon/materializer";
 import type { PeerDefinition } from "../shared/agent-definition";
@@ -152,6 +153,30 @@ async function writeSandboxShim(layout: WorkerLayout, plan: SandboxLaunchPlan): 
 }
 
 /**
+ * The sandbox policy a peer runs under. Exported so tests exercise the same
+ * construction production uses — a duplicated policy in a test can pass while
+ * this one drifts.
+ */
+export function buildWorkerPolicy(
+	peer: PeerDefinition,
+	layout: WorkerLayout,
+	cwd: string,
+): SandboxPolicy {
+	const extraRoots =
+		typeof peer.sandbox === "object" && Array.isArray(peer.sandbox.extraRoots)
+			? peer.sandbox.extraRoots
+			: [];
+	return {
+		workspace: cwd,
+		workerHome: layout.home,
+		runtimePaths: ["/usr/bin", "/bin", "/usr/lib"],
+		inferenceGateway: layout.inferenceGateway,
+		loopbackPorts: [layout.inferenceGateway.port],
+		extraRoots,
+	};
+}
+
+/**
  * Gate an opted-in peer: probe the adapter and gateway bridge, compile its
  * policy, and return the argv. Fails closed — an opted-in agent never
  * downgrades to an unsandboxed launch.
@@ -163,19 +188,8 @@ async function gatePeer(
 	options: StartWorkerOptions,
 ): Promise<SandboxLaunchPlan> {
 	const adapter = options.sandboxAdapter ?? {};
-	const extraRoots =
-		typeof peer.sandbox === "object" && Array.isArray(peer.sandbox.extraRoots)
-			? peer.sandbox.extraRoots
-			: [];
 	return await resolveSandboxLaunch({
-		policy: {
-			workspace: cwd,
-			workerHome: layout.home,
-			runtimePaths: ["/usr/bin", "/bin", "/usr/lib"],
-			inferenceGateway: layout.inferenceGateway,
-			loopbackPorts: [layout.inferenceGateway.port],
-			extraRoots,
-		},
+		policy: buildWorkerPolicy(peer, layout, cwd),
 		command: ["bun", options.cliPath ?? resolveOmpCli()],
 		platform: adapter.platform ?? process.platform,
 		...(adapter.which ? { which: adapter.which } : { which: defaultWhich }),

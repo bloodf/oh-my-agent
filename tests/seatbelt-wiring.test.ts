@@ -22,6 +22,7 @@ import type { WorkerLayout } from "../src/daemon/materializer";
 import { parsePeerDefinition } from "../src/shared/agent-definition";
 import type { PeerDefinition } from "../src/shared/agent-definition";
 import { resolveSandboxLaunch } from "../src/worker/launch-gate";
+import { buildWorkerPolicy } from "../src/worker/lifecycle";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -70,26 +71,16 @@ async function materialized(
 /** Gate a materialized worker on Darwin with stubbed probes. */
 async function profileFor(port: number, overrides: Record<string, unknown> = {}) {
 	const { cwd, layout, parsedPeer } = await materialized(port, overrides);
-	const extraRoots =
-		typeof parsedPeer.sandbox === "object" && Array.isArray(parsedPeer.sandbox.extraRoots)
-			? parsedPeer.sandbox.extraRoots
-			: [];
 
 	const launch = await resolveSandboxLaunch({
-		policy: {
-			workspace: cwd,
-			workerHome: layout.home,
-			runtimePaths: ["/usr/bin", "/bin"],
-			inferenceGateway: layout.inferenceGateway,
-			loopbackPorts: [layout.inferenceGateway.port],
-			extraRoots,
-		},
+		// The same builder `startWorker` uses, so a drift in production policy
+		// construction fails these tests rather than hiding behind a copy.
+		policy: buildWorkerPolicy(parsedPeer, layout, cwd),
 		command: ["bun", "/path/to/cli.js"],
 		platform: "darwin",
 		which: async () => "/usr/bin/sandbox-exec",
 		probeBridge: async () => true,
 	});
-
 	return { profile: launch.args[1] as string, cwd, layout, launch };
 }
 
