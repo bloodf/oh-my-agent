@@ -87,6 +87,22 @@ export class AccountStateMachine {
     );
   }
 
+  /**
+   * Latest deadline among still-active blocks, or `undefined` when none is
+   * active. A resume must be armed for this instant: firing at an earlier
+   * block's deadline would find a later block still active, retire the timer,
+   * and leave the account parked forever.
+   */
+  activeUntilMs(): number | undefined {
+    const now = this.dep.now();
+    let latest: number | undefined;
+    for (const block of this.blocks) {
+      if (block.blockedUntilMs <= now) continue;
+      if (latest === undefined || block.blockedUntilMs > latest) latest = block.blockedUntilMs;
+    }
+    return latest;
+  }
+
   tick(generation?: number): void {
     if (generation !== undefined && generation !== this.generation) return;
 
