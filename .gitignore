@@ -5,3 +5,18 @@ node_modules/
 dist/
 build/
 out/
+# dinostack (agentic-engineering) - .agentic/ runtime state; see the !.agentic/<file> negations below for what is committed
+.agentic/*
+!.agentic/config.json
+!.agentic/qa-regressions.md
+!.agentic/session-log/
+!.agentic/session-log/**
+!.agentic/learnings.md
+!.agentic/team.yml
+!.agentic/skill-candidates.md
+!.agentic/qa.md
+!.agentic/deploy.md
+!.agentic/tracking.md
+!.agentic/phase0-classifiers.yml
+!.agentic/deferred-work.jsonl
+!.agentic/presets.yml
