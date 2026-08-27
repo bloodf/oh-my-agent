@@ -20,8 +20,9 @@
  * @Environment bun
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
 import { materializeWorker } from "../src/daemon/materializer";
@@ -29,6 +30,7 @@ import { parsePeerDefinition } from "../src/shared/agent-definition";
 import type { PeerDefinition } from "../src/shared/agent-definition";
 import { classifyAgentSpawn, startWorker } from "../src/worker/lifecycle";
 import type { WorkerHandle } from "../src/worker/lifecycle";
+import { resolveSandboxLaunch } from "../src/worker/launch-gate";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -301,7 +303,136 @@ describe("§5.1 delegation contract", () => {
 	});
 });
 
-// ── Two spawn verbs ──────────────────────────────────────────────────────────
+// ── Sandbox wiring (§7) ──────────────────────────────────────────────────────
+
+describe("sandbox wiring", () => {
+	test("a sandboxed worker actually runs under the resolved argv", async () => {
+		const { cwd, parsedPeer, layout } = await workerFixture({}, [{ text: "ok" }]);
+		// Stand-in for sandbox-exec: records the payload it was handed, then
+		// execs it. If the shim bypassed the gate, this file never appears.
+		const marker = join(layout.root, "sandbox-invoked");
+		const wrapper = join(layout.root, "fake-sandbox");
+		await writeFile(
+			wrapper,
+			[
+				"#!/bin/sh",
+				"# Stand-in for sandbox-exec: consumes `-p <profile>`, records the",
+				"# payload, then execs it.",
+				'if [ "$1" = "-p" ]; then shift 2; fi',
+				`printf '%s' "$*" > ${JSON.stringify(marker)}`,
+				'exec "$@"',
+				"",
+			].join("\n"),
+			{ encoding: "utf8", mode: 0o755 },
+		);
+		// Drive the real gate, then swap only the adapter binary for the fake
+		// wrapper: the argv structure — profile flags and payload ordering — is
+		// the gate's own output, not something this test reassembled.
+		const realCli = fileURLToPath(
+			import.meta.resolve("@oh-my-pi/pi-coding-agent/package.json"),
+		).replace(/package\.json$/, "dist/cli.js");
+		const gated = await resolveSandboxLaunch({
+			policy: {
+				workspace: cwd,
+				workerHome: layout.home,
+				runtimePaths: ["/usr/bin", "/bin"],
+				inferenceGateway: { host: "127.0.0.1", port: 9999 },
+				loopbackPorts: [9999],
+			},
+			command: ["bun", realCli],
+			platform: "darwin",
+			which: async () => "/usr/bin/sandbox-exec",
+			probeBridge: async () => true,
+			// Only the adapter binary is substituted; every profile flag and the
+			adapterCommand: wrapper,
+		});
+
+		expect(gated.sandboxed).toBe(true);
+		expect(gated.args).toContain("-p");
+
+		const handle = await startWorker({
+			peer: parsedPeer,
+			layout,
+			cwd,
+			// The gate's result, verbatim.
+			sandbox: gated,
+		});
+		cleanups.push(() => handle.stop());
+
+		expect(handle.state).toBe("running");
+		// The profile was consumed and the real CLI invocation reached the
+		// wrapper as its payload.
+		const recorded = await readFile(marker, "utf8");
+		// The `-p <profile>` pair was consumed by the adapter, not forwarded.
+		expect(recorded.split(" ")).not.toContain("-p");
+		expect(recorded).not.toContain("deny network");
+		expect(recorded.startsWith("bun ")).toBe(true);
+		expect(recorded).toContain("cli.js");
+		expect(recorded).toContain("--mode");
+	});
+
+	test("stopping a sandboxed worker terminates the sandboxed child", async () => {
+		const { cwd, parsedPeer, layout } = await workerFixture({}, [{ text: "ok" }]);
+
+		// Records the grandchild pid so the test can check it really died: the
+		// parent kills the shim, and an unforwarded signal would orphan it.
+		const pidFile = join(layout.root, "child-pid");
+		const wrapper = join(layout.root, "fake-sandbox");
+		await writeFile(
+			wrapper,
+			[
+				"#!/bin/sh",
+				'if [ "$1" = "-p" ]; then shift 2; fi',
+				"# exec keeps the RPC stdin pipe attached; $$ is the pid the payload",
+				"# inherits, so recording it identifies the sandboxed child.",
+				`printf '%s' "$$" > ${JSON.stringify(pidFile)}`,
+				'exec "$@"',
+				"",
+			].join("\n"),
+			{ encoding: "utf8", mode: 0o755 },
+		);
+
+		const realCli = fileURLToPath(
+			import.meta.resolve("@oh-my-pi/pi-coding-agent/package.json"),
+		).replace(/package\.json$/, "dist/cli.js");
+
+		const gated = await resolveSandboxLaunch({
+			policy: {
+				workspace: cwd,
+				workerHome: layout.home,
+				runtimePaths: ["/usr/bin", "/bin"],
+				inferenceGateway: { host: "127.0.0.1", port: 9999 },
+				loopbackPorts: [9999],
+			},
+			command: ["bun", realCli],
+			platform: "darwin",
+			which: async () => "/usr/bin/sandbox-exec",
+			probeBridge: async () => true,
+			adapterCommand: wrapper,
+		});
+
+		const handle = await startWorker({ peer: parsedPeer, layout, cwd, sandbox: gated });
+		const childPid = Number(await readFile(pidFile, "utf8"));
+		expect(childPid).toBeGreaterThan(0);
+
+		await handle.stop();
+
+		// `kill -0` throws once the process is gone.
+		let alive = true;
+		try {
+			process.kill(childPid, 0);
+		} catch {
+			alive = false;
+		}
+		expect(alive).toBe(false);
+	});
+
+	test("an unsandboxed worker writes no shim", async () => {
+		const handle = await start();
+
+		expect(await Bun.file(join(handle.layout.root, "sandbox-shim.ts")).exists()).toBe(false);
+	});
+});
 
 describe("classifyAgentSpawn — subtask vs durable peer", () => {
 	test("a one-shot subtask payload is rejected as a peer spawn", () => {
