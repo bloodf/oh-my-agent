@@ -33,21 +33,36 @@ export function nextCronTime(expr: string, afterMs: number): number {
   const fields = expr.trim().split(/\s+/);
   if (fields.length !== 5) throw new Error("Invalid cron expression: expected 5 fields");
 
-  const minute = parseField(fields[0], 0, 59);
-  const hour = parseField(fields[1], 0, 23);
-  const dayOfMonth = parseField(fields[2], 1, 31);
-  const month = parseField(fields[3], 1, 12);
-  const dayOfWeek = parseField(fields[4], 0, 6);
+  const minuteField = fields[0];
+  const hourField = fields[1];
+  const dayOfMonthField = fields[2];
+  const monthField = fields[3];
+  const dayOfWeekField = fields[4];
+  const minute = parseField(minuteField, 0, 59);
+  const hour = parseField(hourField, 0, 23);
+  const dayOfMonth = parseField(dayOfMonthField, 1, 31);
+  const month = parseField(monthField, 1, 12);
+  const dayOfWeek = parseField(dayOfWeekField, 0, 6);
+  const dayOfMonthWildcard = dayOfMonthField === "*";
+  const dayOfWeekWildcard = dayOfWeekField === "*";
 
   let candidate = Math.floor(afterMs / 60_000) * 60_000 + 60_000;
 
   for (let i = 0; i < MAX_ITER; i++) {
     const d = new Date(candidate);
+    const dayOfMonthMatches = dayOfMonth.includes(d.getUTCDate());
+    const dayOfWeekMatches = dayOfWeek.includes(d.getUTCDay());
+    const dayMatches = dayOfMonthWildcard && dayOfWeekWildcard
+      ? true
+      : dayOfMonthWildcard
+        ? dayOfWeekMatches
+        : dayOfWeekWildcard
+          ? dayOfMonthMatches
+          : dayOfMonthMatches || dayOfWeekMatches;
 
     if (
       month.includes(d.getUTCMonth() + 1) &&
-      dayOfMonth.includes(d.getUTCDate()) &&
-      dayOfWeek.includes(d.getUTCDay()) &&
+      dayMatches &&
       hour.includes(d.getUTCHours()) &&
       minute.includes(d.getUTCMinutes())
     ) {
