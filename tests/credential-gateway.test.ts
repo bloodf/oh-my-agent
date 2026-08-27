@@ -1009,4 +1009,55 @@ describe("usage routes isolate same-provider accounts", () => {
 		await gateway.close();
 		await expect(fetch(`${url}/v1/healthz`)).rejects.toThrow();
 	});
+
+	test("close() completes while a worker is parked on a long-poll", async () => {
+		const up = await upstream();
+		const gateway = await gatewayFor(up);
+		const worker = gateway.issueWorkerToken({
+			workerId: "parked",
+			credentialIds: [up.ids.openai],
+		});
+
+		// Read the binding's current generation rather than guessing it: a wrong
+		// value returns 200 immediately, parks nothing, and makes this vacuous.
+		const seed = await fetch(`${gateway.url}/v1/snapshot`, {
+			headers: { Authorization: `Bearer ${worker.token}` },
+		});
+		const generation = seed.headers.get("ETag")?.replace(/"/g, "");
+		expect(generation).toBeTruthy();
+
+		// `wait` is in seconds, and the gateway keys off `If-None-Match`. The
+		// request stays in flight until the generation moves or 30s elapse, and
+		// `server.stop(true)` waits for in-flight requests, so shutdown must wake
+		// this waiter or a daemon with any parked worker hangs on exit.
+		let settled = false;
+		const parked = fetch(`${gateway.url}/v1/snapshot?wait=30`, {
+			headers: {
+				Authorization: `Bearer ${worker.token}`,
+				"If-None-Match": `"${generation}"`,
+			},
+		})
+			.catch(() => undefined)
+			.finally(() => {
+				settled = true;
+			});
+
+		// Poll until the waiter is registered rather than sleeping and hoping.
+		const deadline = Date.now() + 2_000;
+		while (gateway.parkedWaiterCount() === 0) {
+			if (Date.now() > deadline) throw new Error("request never parked");
+			await new Promise((r) => setTimeout(r, 10));
+		}
+		// It is genuinely blocked, not already answered.
+		expect(settled).toBe(false);
+
+		const start = Date.now();
+		await gateway.close();
+		const elapsed = Date.now() - start;
+
+		// Bounded, and far below the 30s the client asked for.
+		expect(elapsed).toBeLessThan(5_000);
+		await parked;
+		expect(settled).toBe(true);
+	});
 });

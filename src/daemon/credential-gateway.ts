@@ -57,6 +57,11 @@ export interface CredentialGateway {
 	revokeWorkerToken(token: string): void;
 	/** Queued shared-account disables awaiting human policy approval. */
 	pendingPolicyRequests(): PendingPolicyRequest[];
+	/**
+	 * Worker requests currently parked on a conditional long-poll. Shutdown must
+	 * release these before stopping the server, so it is observable.
+	 */
+	parkedWaiterCount(): number;
 	close(): Promise<void>;
 }
 
@@ -499,6 +504,8 @@ export async function startCredentialGateway(
 			bindings.delete(token);
 		},
 		pendingPolicyRequests: () => [...pending.values()],
+		parkedWaiterCount: () =>
+			[...bindings.values()].reduce((n, b) => n + b.waiters.size, 0),
 		close: async () => {
 			if (closed) return;
 			closed = true;
@@ -506,6 +513,14 @@ export async function startCredentialGateway(
 			// Abort the in-flight long-poll so close does not block on it.
 			watchAbort.abort();
 			await watchTask;
+			// Release every parked worker request before stopping the server.
+			// `server.stop(true)` waits for in-flight requests, and a conditional
+			// long-poll is in-flight for its full `waitMs` unless woken. A daemon
+			// shutting down with any parked worker would otherwise hang.
+			for (const binding of bindings.values()) {
+				for (const wake of [...binding.waiters]) wake();
+				for (const send of [...binding.streams]) binding.streams.delete(send);
+			}
 			bindings.clear();
 			await server.stop(true);
 		},
