@@ -16,7 +16,7 @@ The TUI (EP-05) reaches whoever is at the terminal that launched the daemon. Lon
 - HTTP and WebSocket API over the daemon's existing state.
 - Browser client: channel list, transcript, thread pane, composer.
 - Create and configure agents and channels from the UI.
-- Membership: add and remove agents from channels.
+- Membership: add and remove agents from channels, applied to live workers.
 - Reactions as agent status, settable through the toolbelt.
 
 ## Not in scope
@@ -31,6 +31,7 @@ The TUI (EP-05) reaches whoever is at the terminal that launched the daemon. Lon
 - [ ] An agent added to a channel receives its next message.
 - [ ] A reply appears in a thread without cluttering the channel root.
 - [ ] An agent can set a reaction, and it appears in an open browser without a refresh.
+- [ ] A membership change reaches a running agent on the next post, with no restart.
 - [ ] Closing the browser does not stop or park any agent.
 
 ## Decisions

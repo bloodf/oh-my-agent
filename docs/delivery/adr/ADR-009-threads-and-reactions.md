@@ -16,6 +16,7 @@ Add `parent_id` to messages and a uniquely-keyed `reactions` table. Threads are 
 - Status costs no extra messages, so a busy channel does not fill with acknowledgements.
 - The emoji set is closed, because a free-form vocabulary cannot render as status.
 - Wake semantics are deliberately unchanged: a threaded reply is still an unread message, and a reaction never marks a message read.
+- The console cannot be a thin CRUD layer over SQLite. `Supervisor.register` caches each peer's rooms in a private `Set` that `post()` filters against, so a membership write that stops at the database leaves a running agent deaf to its new channel (T-605).
 
 ## Alternatives considered
 
