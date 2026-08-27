@@ -1,0 +1,639 @@
+/**
+ * Credential Gateway RED integration tests.
+ *
+ * Imports the production gateway module directly — this file will not compile
+ * until src/daemon/credential-gateway.ts exists.
+ *
+ * The gateway speaks the OMP broker protocol (not a custom HTTP API):
+ *   /v1/healthz  /v1/snapshot  /v1/snapshot/stream
+ *   /v1/credential/:id/refresh|block|disable  DELETE /v1/credential/:id/blocks
+ *   /v1/usage
+ *
+ * RemoteAuthCredentialStore is the consumer under test: constructed with
+ * new AuthBrokerClient({url: gateway.url, token}), call refreshSnapshot(),
+ * then read listAuthCredentials().
+ */
+import { describe, expect, test, beforeEach } from "bun:test";
+import { mkdtemp, rm } from "fs/promises";
+import { join } from "path";
+import { tmpdir } from "os";
+import {
+  AuthBrokerClient,
+  RemoteAuthCredentialStore,
+  startAuthBroker,
+} from "@oh-my-pi/pi-ai/auth-broker";
+import type {
+  SnapshotEntry,
+  SnapshotStreamSnapshotEvent,
+} from "@oh-my-pi/pi-ai/auth-broker";
+import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
+import type { StoredAuthCredential } from "@oh-my-pi/pi-ai/auth-storage";
+
+/** Direct production import — RED until src/daemon/credential-gateway.ts lands */
+import { startCredentialGateway } from "../src/daemon/credential-gateway";
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+let _idSeq = 1;
+function freshId(): number { return _idSeq++; }
+
+/** Poll listAuthCredentials until predicate passes, timeout, or throws. */
+async function waitFor(
+  store: RemoteAuthCredentialStore,
+  predicate: (creds: StoredAuthCredential[]) => boolean,
+  timeoutMs = 2000,
+  intervalMs = 50,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const creds = store.listAuthCredentials();
+    if (predicate(creds)) return;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  const creds = store.listAuthCredentials();
+  if (!predicate(creds)) {
+    throw new Error(
+      `waitFor timed out after ${timeoutMs}ms; creds=${JSON.stringify(creds.map((c) => c.id))}`,
+    );
+  }
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+describe("credential-gateway RED", () => {
+
+  beforeEach(() => { _idSeq = 1; });
+
+  // ── Auth ─────────────────────────────────────────────────────────────────
+
+  test("unknown gateway token → 401 on snapshot", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+
+    try {
+      const res = await fetch(`${gw.url}/v1/snapshot`, {
+        headers: { Authorization: "Bearer unknown-token" },
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      await gw.close();
+      await broker.close();
+      storage.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("healthz requires no auth", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+
+    try {
+      const res = await fetch(`${gw.url}/v1/healthz`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as { ok: boolean };
+      expect(body.ok).toBe(true);
+    } finally {
+      await gw.close();
+      await broker.close();
+      storage.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ── Credential scoping: listAuthCredentials filtered to bound ids ───────────
+
+  test("RemoteAuthCredentialStore.listAuthCredentials sees only bound ids", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const adminClient = new AuthBrokerClient({ url: broker.url, token: "admin-token" });
+    const credA = await adminClient.uploadCredential("openai", { type: "api_key", key: "sk-a" });
+    const credB = await adminClient.uploadCredential("anthropic", { type: "api_key", key: "sk-b" });
+    const credC = await adminClient.uploadCredential("google", { type: "api_key", key: "sk-c" });
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+
+    // Worker-1: bound to A and C, not B
+    const w1Token = gw.issueWorkerToken({ workerId: "w1", credentialIds: [credA.id, credC.id] });
+
+    const w1Client = new AuthBrokerClient({ url: gw.url, token: w1Token });
+    const w1Store = new RemoteAuthCredentialStore({ client: w1Client, streamSnapshots: false });
+    await w1Store.refreshSnapshot();
+
+    try {
+      const ids = w1Store.listAuthCredentials().map((c: StoredAuthCredential) => c.id);
+      expect(ids).toContain(credA.id);
+      expect(ids).toContain(credC.id);
+      expect(ids).not.toContain(credB.id);
+    } finally {
+      w1Store.close();
+      await gw.close();
+      await broker.close();
+      storage.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ── Snapshot SSE filtered first event ───────────────────────────────────
+
+  test("SSE first event is full snapshot filtered to bound ids", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const adminClient = new AuthBrokerClient({ url: broker.url, token: "admin-token" });
+    const cred1 = await adminClient.uploadCredential("openai", { type: "api_key", key: "sk-s1" });
+    const cred2 = await adminClient.uploadCredential("anthropic", { type: "api_key", key: "sk-s2" });
+    const cred3 = await adminClient.uploadCredential("google", { type: "api_key", key: "sk-s3" });
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+
+    // Bound to cred1 and cred3 only
+    const wToken = gw.issueWorkerToken({ workerId: "sse-w", credentialIds: [cred1.id, cred3.id] });
+
+    const wClient = new AuthBrokerClient({ url: gw.url, token: wToken });
+    const wStore = new RemoteAuthCredentialStore({
+      client: wClient,
+      streamSnapshots: true,
+      backgroundIdleMs: 60_000, // keep stream alive for test
+    });
+    await wStore.refreshSnapshot(); // trigger initial snapshot load
+
+    const ac = new AbortController();
+    const events: SnapshotStreamSnapshotEvent[] = [];
+
+    try {
+      for await (const ev of wClient.openSnapshotStream({ signal: ac.signal })) {
+        events.push(ev as SnapshotStreamSnapshotEvent);
+        break; // first event only
+      }
+
+      expect(events).toHaveLength(1);
+      const ids = events[0]!.credentials.map((c: SnapshotEntry) => c.id);
+      expect(ids).toContain(cred1.id);
+      expect(ids).toContain(cred3.id);
+      expect(ids).not.toContain(cred2.id);
+    } finally {
+      ac.abort();
+      wStore.close();
+      await gw.close();
+      await broker.close();
+      storage.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ── Foreign credential operations → 403 ─────────────────────────────────
+
+  test("gateway returns 403 for foreign credential disable", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const adminClient = new AuthBrokerClient({ url: broker.url, token: "admin-token" });
+    const foreignId = freshId(); // never bound to any worker
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+
+    gw.issueWorkerToken({ workerId: "w-f", credentialIds: [freshId()] }); // unrelated binding
+    const wToken = gw.issueWorkerToken({ workerId: "w-f", credentialIds: [freshId()] });
+
+    try {
+      const res = await fetch(`${gw.url}/v1/credential/${foreignId}/disable`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${wToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ cause: "foreign-test" }),
+      });
+      expect(res.status).toBe(403);
+    } finally {
+      await gw.close();
+      await broker.close();
+      storage.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ── Upstream uses admin token (gateway proxies with upstreamToken) ───────
+
+  test("upstream receives admin token on proxied requests", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const adminClient = new AuthBrokerClient({ url: broker.url, token: "admin-token" });
+    const cred = await adminClient.uploadCredential("openai", { type: "api_key", key: "sk-proxy" });
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+
+    gw.issueWorkerToken({ workerId: "w-p", credentialIds: [cred.id] });
+    const wToken = gw.issueWorkerToken({ workerId: "w-p", credentialIds: [cred.id] });
+
+    // Worker token talks to gateway; gateway proxies with admin-token
+    // If admin-token were NOT forwarded, upstream would 401
+    const res = await fetch(`${gw.url}/v1/credential/${cred.id}/disable`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${wToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ cause: "proxy-test" }),
+    });
+    // 409 = shared-disable (worker bound in two places) means admin-token was forwarded
+    expect(res.status).toBe(409);
+
+    await gw.close();
+    await broker.close();
+    storage.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // ── Shared disable: 409 + pending_policy + requester SSE full snapshot ───────
+
+  test("shared credential disable returns 409 and requester store recovers credential", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const adminClient = new AuthBrokerClient({ url: broker.url, token: "admin-token" });
+    const sharedCred = await adminClient.uploadCredential("openai", { type: "api_key", key: "sk-shared" });
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+
+    // Establish TWO active tokens both bound to sharedCred
+    const w1Token = gw.issueWorkerToken({ workerId: "w1", credentialIds: [sharedCred.id] });
+    const w2Token = gw.issueWorkerToken({ workerId: "w2", credentialIds: [sharedCred.id] });
+
+    // Both workers get their own RemoteAuthCredentialStore with SSE enabled
+    const w1Client = new AuthBrokerClient({ url: gw.url, token: w1Token });
+    const w2Client = new AuthBrokerClient({ url: gw.url, token: w2Token });
+
+    const w1Store = new RemoteAuthCredentialStore({
+      client: w1Client,
+      streamSnapshots: true,
+      backgroundIdleMs: 60_000,
+    });
+    const w2Store = new RemoteAuthCredentialStore({
+      client: w2Client,
+      streamSnapshots: true,
+      backgroundIdleMs: 60_000,
+    });
+
+    await w1Store.refreshSnapshot();
+    await w2Store.refreshSnapshot();
+
+    // Verify both see the credential before disable
+    const idsBefore1 = w1Store.listAuthCredentials().map((c: StoredAuthCredential) => c.id);
+    const idsBefore2 = w2Store.listAuthCredentials().map((c: StoredAuthCredential) => c.id);
+    expect(idsBefore1).toContain(sharedCred.id);
+    expect(idsBefore2).toContain(sharedCred.id);
+
+    // Worker-1 calls deleteAuthCredential → triggers shared disable
+    w1Store.deleteAuthCredential(sharedCred.id, "worker-shared-disable");
+
+    // Wait for the requester's store to see the credential removed via SSE
+    await waitFor(w1Store, (creds) => !creds.map((c) => c.id).includes(sharedCred.id));
+
+    // Peer store must remain usable with the credential still visible
+    const idsAfter2 = w2Store.listAuthCredentials().map((c: StoredAuthCredential) => c.id);
+    expect(idsAfter2).toContain(sharedCred.id);
+
+    // Worker-1's own store has already removed the credential (immediate local effect)
+    const idsAfter1 = w1Store.listAuthCredentials().map((c: StoredAuthCredential) => c.id);
+    expect(idsAfter1).not.toContain(sharedCred.id);
+
+    w1Store.close();
+    w2Store.close();
+    await gw.close();
+    await broker.close();
+    storage.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // ── approvePendingDisable ─────────────────────────────────────────────────
+
+  test("approvePendingDisable removes pending entry and credential converges", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const adminClient = new AuthBrokerClient({ url: broker.url, token: "admin-token" });
+    const cred = await adminClient.uploadCredential("openai", { type: "api_key", key: "sk-approve" });
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+
+    const wToken = gw.issueWorkerToken({ workerId: "w-appr", credentialIds: [cred.id] });
+
+    const wClient = new AuthBrokerClient({ url: gw.url, token: wToken });
+    const wStore = new RemoteAuthCredentialStore({
+      client: wClient,
+      streamSnapshots: false,
+    });
+    await wStore.refreshSnapshot();
+
+    // Trigger pending disable
+    wStore.deleteAuthCredential(cred.id, "pending-approve-test");
+
+    const pending = gw.pendingDisables();
+    expect(pending).toHaveLength(1);
+    const { requestId } = pending[0]!;
+
+    // Approve via daemon API
+    await gw.approvePendingDisable(requestId);
+
+    // Pending list cleared
+    expect(gw.pendingDisables()).toHaveLength(0);
+
+    // Upstream no longer has the credential
+    const snap = await adminClient.fetchSnapshot();
+    if (snap.status === 200) {
+      const ids = snap.snapshot.credentials.map((c: SnapshotEntry) => c.id);
+      expect(ids).not.toContain(cred.id);
+    }
+
+    wStore.close();
+    await gw.close();
+    await broker.close();
+    storage.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // ── rejectPendingDisable ────────────────────────────────────────────────
+
+  test("rejectPendingDisable removes pending entry and credential stays active", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const adminClient = new AuthBrokerClient({ url: broker.url, token: "admin-token" });
+    const cred = await adminClient.uploadCredential("openai", { type: "api_key", key: "sk-reject" });
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+
+    const wToken = gw.issueWorkerToken({ workerId: "w-rej", credentialIds: [cred.id] });
+
+    const wClient = new AuthBrokerClient({ url: gw.url, token: wToken });
+    const wStore = new RemoteAuthCredentialStore({
+      client: wClient,
+      streamSnapshots: false,
+    });
+    await wStore.refreshSnapshot();
+
+    wStore.deleteAuthCredential(cred.id, "reject-test");
+
+    const pending = gw.pendingDisables();
+    expect(pending).toHaveLength(1);
+    const { requestId } = pending[0]!;
+
+    await gw.rejectPendingDisable(requestId);
+    expect(gw.pendingDisables()).toHaveLength(0);
+
+    // Credential still active in upstream
+    const snap = await adminClient.fetchSnapshot();
+    if (snap.status === 200) {
+      const ids = snap.snapshot.credentials.map((c: SnapshotEntry) => c.id);
+      expect(ids).toContain(cred.id);
+    }
+
+    wStore.close();
+    await gw.close();
+    await broker.close();
+    storage.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // ── Dedicated disable: upstream removes credential ─────────────────────────
+
+  test("dedicated disable removes credential from upstream snapshot", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const adminClient = new AuthBrokerClient({ url: broker.url, token: "admin-token" });
+    const cred = await adminClient.uploadCredential("openai", { type: "api_key", key: "sk-dedicated" });
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+
+    // Only one active token bound to this credential
+    const wToken = gw.issueWorkerToken({ workerId: "w-ded", credentialIds: [cred.id] });
+
+    const wClient = new AuthBrokerClient({ url: gw.url, token: wToken });
+    const wStore = new RemoteAuthCredentialStore({
+      client: wClient,
+      streamSnapshots: false,
+    });
+    await wStore.refreshSnapshot();
+
+    wStore.deleteAuthCredential(cred.id, "dedicated-disable");
+
+    // Upstream snapshot no longer contains the credential
+    const snap = await adminClient.fetchSnapshot();
+    if (snap.status === 200) {
+      const ids = snap.snapshot.credentials.map((c: SnapshotEntry) => c.id);
+      expect(ids).not.toContain(cred.id);
+    }
+
+    wStore.close();
+    await gw.close();
+    await broker.close();
+    storage.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // ── Token revocation ───────────────────────────────────────────────────
+
+  test("revokeToken makes token invalid", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const adminClient = new AuthBrokerClient({ url: broker.url, token: "admin-token" });
+    const cred = await adminClient.uploadCredential("openai", { type: "api_key", key: "sk-revoke" });
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+
+    const wToken = gw.issueWorkerToken({ workerId: "w-rev", credentialIds: [cred.id] });
+    gw.revokeToken(wToken);
+
+    const res = await fetch(`${gw.url}/v1/snapshot`, {
+      headers: { Authorization: `Bearer ${wToken}` },
+    });
+    expect(res.status).toBe(401);
+
+    await gw.close();
+    await broker.close();
+    storage.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // ── Close ─────────────────────────────────────────────────────────────
+
+  test("gateway close stops server — fetch throws", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gw-red-"));
+    const dbPath = join(dir, "auth.db");
+    const store = await SqliteAuthCredentialStore.open(dbPath);
+    const storage = new AuthStorage(store);
+    await storage.reload();
+
+    const broker = startAuthBroker({
+      storage,
+      bearerTokens: ["admin-token"],
+      version: "gw-test",
+      disableRefresher: true,
+    });
+
+    const gw = await startCredentialGateway({
+      upstreamUrl: broker.url,
+      upstreamToken: "admin-token",
+    });
+    const url = gw.url;
+
+    await gw.close();
+    await broker.close();
+    storage.close();
+    await rm(dir, { recursive: true, force: true });
+
+    await expect(fetch(`${url}/v1/healthz`)).rejects.toThrow();
+  });
+});
