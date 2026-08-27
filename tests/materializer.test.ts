@@ -54,6 +54,7 @@ function minimalPeer(overrides: Record<string, unknown> = {}): PeerDefinition {
 			{
 				name: "reviewer",
 				description: "Reviews PRs.",
+				model: "anthropic/claude-sonnet-4-5",
 				spawns: ["scout"],
 				workspace: "/home/user/project",
 				...overrides,
@@ -304,6 +305,50 @@ describe("config generation", () => {
 			expect(cfg.indexOf("alpha")).toBeLessThan(cfg.indexOf("middle"));
 			expect(cfg.indexOf("middle")).toBeLessThan(cfg.indexOf("zebra"));
 			expect(cfg).not.toContain("scout");
+		});
+	});
+
+	test("the declared model is transport-routable to the gateway", async () => {
+		await withTempRoot(async (root) => {
+			const result = await materialize({
+				rootDir: root,
+				parsedPeer: minimalPeer(),
+				discoveredAgentNames: [],
+				inferenceGateway: GATEWAY,
+			});
+
+			const models = await readFile(result.modelsPath, "utf8");
+
+			// The peer's own provider is the one redirected, so its bundled model
+			// id keeps the pi-native transport.
+			expect(result.provider).toBe("anthropic");
+			expect(result.modelId).toBe("claude-sonnet-4-5");
+			expect(models).toContain("  anthropic:");
+			expect(models).toContain(`baseUrl: ${GATEWAY.url}`);
+			expect(models).toContain("transport: pi-native");
+
+			// `finalizeCustomModel` (custom-models.ts:124-148) builds config models
+			// with no `transport` field, so a `models:` entry can never carry
+			// pi-native — those turns would leave for the real provider endpoint
+			// and bypass the credential gateway entirely.
+			expect(models).not.toMatch(/^\s+models:/m);
+		});
+	});
+
+	test("an unqualified or missing model is rejected before materialization", async () => {
+		await withTempRoot(async (root) => {
+			// A bare id cannot be routed: the provider is what gets redirected.
+			await expect(
+				materialize({
+					rootDir: root,
+					parsedPeer: minimalPeer({ model: "claude-sonnet-4-5" }),
+					discoveredAgentNames: [],
+					inferenceGateway: GATEWAY,
+				}),
+			).rejects.toThrow(/provider\/id/);
+
+			// Nothing was written: the worker dir must not exist yet.
+			expect(await Bun.file(join(root, ...AGENT_DIR_SEGMENTS, "models.yml")).exists()).toBe(false);
 		});
 	});
 
