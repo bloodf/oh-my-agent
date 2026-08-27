@@ -655,3 +655,164 @@ describe("Vixie cron: DOM and DOW both restricted", () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// One-shot timers: quota auto-resume and wake (§4.4)
+// ---------------------------------------------------------------------------
+
+describe("Scheduler.addOnce", () => {
+  test("fires once at the requested epoch and does not reschedule", () => {
+    const clock = makeFakeClock(1_000_000);
+    const { scheduler, captured } = makeScheduler(clock);
+    scheduler.start();
+
+    let fired = 0;
+    scheduler.addOnce("resume:acct-1", clock.now + 60_000, () => {
+      fired += 1;
+    });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].delayMs).toBe(60_000);
+
+    captured[0].callback();
+    expect(fired).toBe(1);
+    // A quota resume must not re-arm: the block is cleared once served.
+    expect(captured).toHaveLength(1);
+  });
+
+  test("a deadline already past fires on the next tick, not never", () => {
+    const clock = makeFakeClock(1_000_000);
+    const { scheduler, captured } = makeScheduler(clock);
+    scheduler.start();
+
+    scheduler.addOnce("resume:late", clock.now - 5_000, () => {});
+
+    expect(captured[0].delayMs).toBe(0);
+  });
+
+  test("re-adding the same id replaces the pending deadline", () => {
+    const clock = makeFakeClock(1_000_000);
+    const { scheduler, captured } = makeScheduler(clock);
+    scheduler.start();
+
+    const fired: string[] = [];
+    scheduler.addOnce("resume:acct-1", clock.now + 60_000, () => {
+      fired.push("first");
+    });
+    scheduler.addOnce("resume:acct-1", clock.now + 10_000, () => {
+      fired.push("second");
+    });
+
+    expect(captured).toHaveLength(2);
+    expect(captured[1].delayMs).toBe(10_000);
+
+    // The superseded timer must be inert even if its callback still runs.
+    captured[0].callback();
+    captured[1].callback();
+    expect(fired).toEqual(["second"]);
+  });
+
+  test("remove cancels a pending one-shot", () => {
+    const clock = makeFakeClock(1_000_000);
+    const { scheduler, captured } = makeScheduler(clock);
+    scheduler.start();
+
+    let fired = 0;
+    scheduler.addOnce("resume:acct-1", clock.now + 60_000, () => {
+      fired += 1;
+    });
+    scheduler.remove("resume:acct-1");
+
+    captured[0].callback();
+    expect(fired).toBe(0);
+  });
+
+  test("stop cancels pending one-shots", () => {
+    const clock = makeFakeClock(1_000_000);
+    const { scheduler, captured } = makeScheduler(clock);
+    scheduler.start();
+
+    let fired = 0;
+    scheduler.addOnce("resume:acct-1", clock.now + 60_000, () => {
+      fired += 1;
+    });
+    scheduler.stop();
+
+    captured[0].callback();
+    expect(fired).toBe(0);
+  });
+
+  test("a one-shot added before start arms on start", () => {
+    const clock = makeFakeClock(1_000_000);
+    const { scheduler, captured } = makeScheduler(clock);
+
+    scheduler.addOnce("resume:acct-1", clock.now + 60_000, () => {});
+    expect(captured).toHaveLength(0);
+
+    scheduler.start();
+    expect(captured).toHaveLength(1);
+    expect(captured[0].delayMs).toBe(60_000);
+  });
+
+  test("handler errors are reported and do not reschedule", () => {
+    const clock = makeFakeClock(1_000_000);
+    const captured: CapturedTimer[] = [];
+    const errors: string[] = [];
+    const scheduler = new Scheduler({
+      now: () => clock.now,
+      setTimer: (callback, delayMs) => {
+        captured.push({ delayMs, callback });
+        return captured.length;
+      },
+      clearTimer: () => {},
+      onError: (_err, jobId) => errors.push(jobId),
+    });
+    scheduler.start();
+
+    scheduler.addOnce("resume:boom", clock.now + 1_000, () => {
+      throw new Error("resume failed");
+    });
+    captured[0].callback();
+
+    expect(errors).toEqual(["resume:boom"]);
+    expect(captured).toHaveLength(1);
+  });
+});
+
+describe("quota auto-resume scheduling", () => {
+  test("a subscription block schedules resume at blockedUntilMs", () => {
+    const clock = makeFakeClock(1_000_000);
+    const { scheduler, captured } = makeScheduler(clock);
+    scheduler.start();
+
+    const resumed: string[] = [];
+    const account = new AccountStateMachine({
+      accountId: "acct-1",
+      mode: "subscription",
+      now: () => clock.now,
+      onWarning: () => {},
+      onPark: () => {},
+      onResume: (runIds) => resumed.push(...runIds),
+    });
+    account.addRun("run-1");
+
+    const block: QuotaBlock = {
+      credentialId: 7,
+      providerKey: "anthropic",
+      scope: "account",
+      blockedUntilMs: clock.now + 900_000,
+    };
+    const generation = account.applyBlock(block);
+
+    // The daemon arms a one-shot from the verified deadline, then ticks the
+    // account at the same generation so a stale block cannot resume early.
+    scheduler.addOnce(`resume:acct-1`, block.blockedUntilMs, () => {
+      clock.now = block.blockedUntilMs;
+      account.tick(generation);
+    });
+
+    expect(captured[0].delayMs).toBe(900_000);
+    captured[0].callback();
+    expect(resumed).toEqual(["run-1"]);
+  });
+});

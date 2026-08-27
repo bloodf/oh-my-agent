@@ -23,6 +23,12 @@ export interface ScheduledTask {
   handler: () => void | Promise<void>;
 }
 
+/** A deadline-driven job: fires once, then retires. */
+interface OneShotTask {
+  atMs: number;
+  handler: () => void | Promise<void>;
+}
+
 // ---------------------------------------------------------------------------
 // Cron
 // ---------------------------------------------------------------------------
@@ -136,6 +142,7 @@ export class Scheduler {
   private running = false;
   private timers = new Map<string, TimerHandle>();
   private tasks = new Map<string, ScheduledTask>();
+  private onceTasks = new Map<string, OneShotTask>();
   private versions = new Map<string, number>();
 
   constructor(
@@ -153,6 +160,9 @@ export class Scheduler {
     this.globalGen++;
     for (const [name, task] of this.tasks) {
       this.scheduleNext(name, task);
+    }
+    for (const [name, task] of this.onceTasks) {
+      this.scheduleOnce(name, task);
     }
   }
 
@@ -177,7 +187,53 @@ export class Scheduler {
       this.timers.delete(name);
     }
     this.tasks.delete(name);
+    this.onceTasks.delete(name);
     this.versions.delete(name);
+  }
+
+  /**
+   * Fire `handler` once at `atMs`, then retire the job. Used for quota
+   * auto-resume, where the deadline comes from a verified `blockedUntilMs`
+   * rather than a recurring expression. A deadline already in the past fires
+   * on the next tick instead of being dropped.
+   */
+  addOnce(name: string, atMs: number, handler: () => void | Promise<void>): void {
+    const task: OneShotTask = { atMs, handler };
+    this.onceTasks.set(name, task);
+    if (this.running) this.scheduleOnce(name, task);
+  }
+
+  private scheduleOnce(name: string, task: OneShotTask): void {
+    const jobVer = (this.versions.get(name) ?? 0) + 1;
+    this.versions.set(name, jobVer);
+
+    const prev = this.timers.get(name);
+    if (prev !== undefined) {
+      this.deps.clearTimer(prev);
+      this.timers.delete(name);
+    }
+
+    const delayMs = Math.max(0, task.atMs - this.deps.now());
+    const tid = this.deps.setTimer(() => {
+      if (!this.running) return;
+      if (this.versions.get(name) !== jobVer) return;
+
+      // Retire before running: a one-shot never re-arms, and the handler may
+      // schedule its own successor under the same name.
+      this.timers.delete(name);
+      this.onceTasks.delete(name);
+
+      try {
+        const ret = task.handler();
+        if (ret instanceof Promise) {
+          void ret.catch((err: unknown) => this.deps.onError!(err, name));
+        }
+      } catch (err) {
+        this.deps.onError!(err, name);
+      }
+    }, delayMs);
+
+    this.timers.set(name, tid);
   }
 
   private scheduleNext(name: string, task: ScheduledTask): void {
