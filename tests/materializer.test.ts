@@ -17,10 +17,13 @@
  *
  * @Environment bun
  */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs/promises";
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+const realRename = fs.rename;
 
 import type { PeerDefinition } from "../src/shared/agent-definition";
 import { fingerprintPeerDefinition, parsePeerDefinition } from "../src/shared/agent-definition";
@@ -645,6 +648,38 @@ describe("rebuild semantics", () => {
 
 			expect(await readFile(good.generatedAgentPath, "utf8")).toBe(goodAgent);
 			expect(await readFile(good.configPath, "utf8")).toBe(goodConfig);
+		});
+	});
+
+	test("a failed directory swap restores the previous materialization", async () => {
+		await withTempRoot(async (root) => {
+			const good = await materialize({
+				rootDir: root,
+				parsedPeer: minimalPeer(),
+				discoveredAgentNames: [],
+				inferenceGateway: GATEWAY,
+			});
+			const goodAgent = await readFile(good.generatedAgentPath, "utf8");
+			// Fail only the staging→agentDir swap, so the restore rename can run.
+			const spy = spyOn(fs, "rename").mockImplementation(async (from, to) => {
+				if (String(from).includes(".staging-")) throw new Error("simulated rename failure");
+				return await realRename(from as string, to as string);
+			});
+
+			try {
+				await expect(
+					materialize({
+						rootDir: root,
+						parsedPeer: minimalPeer({ spawns: ["scout", "beta"] }),
+						discoveredAgentNames: [],
+						inferenceGateway: GATEWAY,
+					}),
+				).rejects.toThrow(/simulated rename failure/);
+			} finally {
+				spy.mockRestore();
+			}
+
+			expect(await readFile(good.generatedAgentPath, "utf8")).toBe(goodAgent);
 		});
 	});
 });

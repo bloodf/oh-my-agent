@@ -287,9 +287,24 @@ export async function materializeWorker(options: MaterializeOptions): Promise<Wo
 			await mkdir(dir, { recursive: true });
 		}
 
-		// Swap last: until this point the previous materialization is untouched.
-		await rm(agentDir, { recursive: true, force: true });
-		await rename(staging, agentDir);
+		// Swap last: move the old tree aside rather than deleting it, so a failed
+		// rename can put it back instead of leaving the worker with no agent dir.
+		const previous = `${agentDir}.previous`;
+		await rm(previous, { recursive: true, force: true });
+		const hadPrevious = await rename(agentDir, previous).then(
+			() => true,
+			(error: NodeJS.ErrnoException) => {
+				if (error.code === "ENOENT") return false;
+				throw error;
+			},
+		);
+		try {
+			await rename(staging, agentDir);
+		} catch (error) {
+			if (hadPrevious) await rename(previous, agentDir);
+			throw error;
+		}
+		await rm(previous, { recursive: true, force: true });
 	} finally {
 		await rm(staging, { recursive: true, force: true });
 	}
