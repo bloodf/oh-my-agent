@@ -29,7 +29,7 @@ The daemon records who deployed whom, enforces the hierarchy rules, and never le
 | [`src/daemon/db.ts`](../../../src/daemon/db.ts) | Edited | `agents.parent` column (recreate per the pre-release precedent), tree reads, orphan listing. |
 | [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | Spawn with parent: cycle rejection, account inheritance, family channel; kill cascades with an explicit keep-children reparent; boot refuses orphaned agents and reports them. |
 | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Edited | Serves T-801's new methods against the store and registry; status carries parent/children. |
-| `tests/daemon-hierarchy.test.ts` (to be created) | New | Tree, cascade, orphan, and cycle cases over the real socket. |
+| [`tests/daemon-hierarchy.test.ts`](../../../tests/daemon-hierarchy.test.ts) | New | Tree, cascade, orphan, and cycle cases over the real socket. |
 
 ## Steps
 

@@ -30,4 +30,4 @@ Parentage is daemon spawn-time state (an `agents.parent` column), never frontmat
 
 | Claim | Source |
 |---|---|
-| Hierarchy design in the tree | `docs/delivery/tasks/T-802-daemon-hierarchy.md` |
+| Hierarchy design in the tree | [`docs/delivery/tasks/T-802-daemon-hierarchy.md`](../../../docs/delivery/tasks/T-802-daemon-hierarchy.md) |

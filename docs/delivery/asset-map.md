@@ -16,9 +16,9 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `node_modules/@oh-my-pi/pi-ai/src/auth-broker/remote-store.ts` | yes | — | [T-303](tasks/T-303-client-integration.md) |
 | `package.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-502](tasks/T-502-daemon-entry-point.md), [T-702](tasks/T-702-biome-lint.md), [T-703](tasks/T-703-root-readme-and-metadata.md), [T-804](tasks/T-804-authoring-skills.md) | [T-701](tasks/T-701-ci-workflow.md) |
 | `scripts/gen-delivery-docs.py` | yes | — | [T-701](tasks/T-701-ci-workflow.md) |
-| `skills/omp-agent-authoring/SKILL.md` | not yet | [T-804](tasks/T-804-authoring-skills.md) | — |
-| `skills/omp-orchestration/SKILL.md` | not yet | [T-804](tasks/T-804-authoring-skills.md) | — |
-| `skills/omp-subagent-authoring/SKILL.md` | not yet | [T-804](tasks/T-804-authoring-skills.md) | — |
+| `skills/omp-agent-authoring/SKILL.md` | yes | [T-804](tasks/T-804-authoring-skills.md) | — |
+| `skills/omp-orchestration/SKILL.md` | yes | [T-804](tasks/T-804-authoring-skills.md) | — |
+| `skills/omp-subagent-authoring/SKILL.md` | yes | [T-804](tasks/T-804-authoring-skills.md) | — |
 | `src/console/app.js` | yes | [T-603](tasks/T-603-console-client.md), [T-605](tasks/T-605-console-management.md) | — |
 | `src/console/index.html` | yes | [T-603](tasks/T-603-console-client.md) | — |
 | `src/console/style.css` | yes | [T-603](tasks/T-603-console-client.md) | — |
@@ -57,7 +57,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/contracts/spawn-policy.contract.test.ts` | yes | [T-005](tasks/T-005-spawn-policy-contract.md) | — |
 | `tests/credential-gateway.test.ts` | yes | [T-301](tasks/T-301-credential-gateway.md), [T-302](tasks/T-302-shared-disable-recovery.md) | — |
 | `tests/daemon-boot.test.ts` | yes | [T-510](tasks/T-510-broker-hosting-resolution.md) | — |
-| `tests/daemon-hierarchy.test.ts` | not yet | [T-802](tasks/T-802-daemon-hierarchy.md) | — |
+| `tests/daemon-hierarchy.test.ts` | yes | [T-802](tasks/T-802-daemon-hierarchy.md) | — |
 | `tests/daemon-main.test.ts` | yes | [T-502](tasks/T-502-daemon-entry-point.md), [T-511](tasks/T-511-operator-steering.md), [T-512](tasks/T-512-sandboxed-on-the-wire.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md) | — |
 | `tests/daemon-persistence.test.ts` | yes | [T-508](tasks/T-508-daemon-persistence.md) | — |
 | `tests/end-to-end.test.ts` | yes | [T-405](tasks/T-405-supervisor.md) | — |
@@ -76,7 +76,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/scaffold.test.ts` | yes | [T-001](tasks/T-001-package-scaffold.md) | — |
 | `tests/scheduler.test.ts` | yes | [T-403](tasks/T-403-scheduler.md) | — |
 | `tests/seatbelt-wiring.test.ts` | yes | [T-204](tasks/T-204-shared-policy-builder.md) | — |
-| `tests/skills.test.ts` | not yet | [T-804](tasks/T-804-authoring-skills.md) | — |
+| `tests/skills.test.ts` | yes | [T-804](tasks/T-804-authoring-skills.md) | — |
 | `tests/supervisor.test.ts` | yes | [T-405](tasks/T-405-supervisor.md), [T-505](tasks/T-505-definition-staleness.md), [T-506](tasks/T-506-metered-budget-wiring.md), [T-509](tasks/T-509-wake-filters.md) | — |
 | `tests/toolbelt.test.ts` | yes | [T-503](tasks/T-503-agent-toolbelt.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md), [T-604](tasks/T-604-reaction-toolbelt.md), [T-803](tasks/T-803-toolbelt-authoring.md) | — |
 | `tests/worker-lifecycle.test.ts` | yes | [T-401](tasks/T-401-worker-lifecycle.md) | — |

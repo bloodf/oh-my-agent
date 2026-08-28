@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-08](../epics/EP-08-agent-hierarchy.md) | [SP-09](../sprints/SP-09-agent-hierarchy.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-08](../epics/EP-08-agent-hierarchy.md) | [SP-09](../sprints/SP-09-agent-hierarchy.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -26,10 +26,10 @@ Creating an agent or subagent is a guided skill, not a search through the codeba
 
 | Path | Role | Note |
 |---|---|---|
-| `skills/omp-agent-authoring/SKILL.md` (to be created) | New | Authoring a peer definition: format, rooms, wake, autonomy, sandbox, spawns — with the strict parser's error codes. |
-| `skills/omp-subagent-authoring/SKILL.md` (to be created) | New | Authoring native `task` subagents: when temporary is right, spawns policy, output contract. |
-| `skills/omp-orchestration/SKILL.md` (to be created) | New | The selection guide: task vs child peer vs top-level peer vs room message. |
-| `tests/skills.test.ts` (to be created) | New | OMP's real `loadSkills` discovers all three from the package root; frontmatter parses with required fields. |
+| [`skills/omp-agent-authoring/SKILL.md`](../../../skills/omp-agent-authoring/SKILL.md) | New | Authoring a peer definition: format, rooms, wake, autonomy, sandbox, spawns — with the strict parser's error codes. |
+| [`skills/omp-subagent-authoring/SKILL.md`](../../../skills/omp-subagent-authoring/SKILL.md) | New | Authoring native `task` subagents: when temporary is right, spawns policy, output contract. |
+| [`skills/omp-orchestration/SKILL.md`](../../../skills/omp-orchestration/SKILL.md) | New | The selection guide: task vs child peer vs top-level peer vs room message. |
+| [`tests/skills.test.ts`](../../../tests/skills.test.ts) | New | OMP's real `loadSkills` discovers all three from the package root; frontmatter parses with required fields. |
 | [`package.json`](../../../package.json) | Edited | Ships `skills/` in `files` if the manifest does not already cover them. |
 
 ## Steps
@@ -40,9 +40,16 @@ Creating an agent or subagent is a guided skill, not a search through the codeba
 
 ## Acceptance
 
-- [ ] All three skills are discovered by OMP's real loader from the installed package layout.
-- [ ] Each skill's frontmatter parses and carries the required fields.
-- [ ] A worker whose definition selects a skill receives it in the materialized root.
+- [x] All three skills are discovered by OMP's real loader from the installed package layout.
+- [x] Each skill's frontmatter parses and carries the required fields.
+- [x] A worker whose definition selects a skill receives it in the materialized root.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Three skills in OMP's package layout | [`skills/omp-orchestration/SKILL.md`](../../../skills/omp-orchestration/SKILL.md) |
+| Discovery pinned against the real loader, 5 tests | [`tests/skills.test.ts`](../../../tests/skills.test.ts) |
 
 ## Out of scope
 

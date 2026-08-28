@@ -44,4 +44,4 @@ The native `task` tool is a temporary subagent: its transcript folds into the pa
 | [T-801](../tasks/T-801-hierarchy-protocol.md) | Hierarchy and authoring protocol | Ready |
 | [T-802](../tasks/T-802-daemon-hierarchy.md) | Daemon hierarchy: parented spawns, cascades, orphan refusal | Ready |
 | [T-803](../tasks/T-803-toolbelt-authoring.md) | Toolbelt: create and parent agents | Ready |
-| [T-804](../tasks/T-804-authoring-skills.md) | Shipped skills for agent and subagent authoring | Ready |
+| [T-804](../tasks/T-804-authoring-skills.md) | Shipped skills for agent and subagent authoring | Done |

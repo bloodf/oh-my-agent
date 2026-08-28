@@ -2520,7 +2520,7 @@ TASKS += [
     ),
     Task(
         id="T-804", slug="authoring-skills", title="Shipped skills for agent and subagent authoring",
-        epic="EP-08", sprint="SP-09", status="Ready",
+        epic="EP-08", sprint="SP-09", status="Done",
         goal="Creating an agent or subagent is a guided skill, not a search through the codebase.",
         read_first=[
             ("Skill discovery in OMP", "node_modules/@oh-my-pi/pi-coding-agent/src/extensibility/skills.ts"),
@@ -2552,6 +2552,10 @@ TASKS += [
             "A worker whose definition selects a skill receives it in the materialized root.",
         ],
         depends_on=["T-501"],
+        evidence=[
+            ("Three skills in OMP's package layout", "skills/omp-orchestration/SKILL.md"),
+            ("Discovery pinned against the real loader, 5 tests", "tests/skills.test.ts"),
+        ],
         out_of_scope=["Auto-learning skills from sessions (OMP's managed-skills feature is not ours to drive)."],
     ),
 ]
