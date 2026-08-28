@@ -62,6 +62,19 @@ export interface AgentRow {
 	/** Project directory the worker edits. Not its synthetic root. */
 	cwd: string;
 	startedAt: number;
+	/**
+	 * Who deployed this peer. `null` or absent for a root.
+	 *
+	 * Spawn-time daemon state, never frontmatter (ADR-011): the same definition
+	 * deploys under different parents, so the tree cannot live in the file the
+	 * strict parser reads. Cooperative metadata — the socket trusts every
+	 * caller equally today, so nothing may be authorized off this.
+	 *
+	 * Optional on write because a root is the overwhelmingly common case and
+	 * the honest default; always present on read, where `null` says "root"
+	 * rather than "not asked".
+	 */
+	parent?: string | null;
 }
 
 export interface RunRow {
@@ -109,6 +122,7 @@ interface RawAgentRow {
 	worker_pid: number | null;
 	cwd: string;
 	started_at: number;
+	parent: string | null;
 }
 
 interface RawRunRow {
@@ -143,6 +157,14 @@ export class DaemonDb {
 	 * Open or create the database. Idempotent: every statement is `IF NOT
 	 * EXISTS`, so booting against a database an earlier daemon wrote adds
 	 * nothing and loses nothing.
+	 *
+	 * The one exception is a pre-hierarchy `agents` table, which is dropped and
+	 * recreated rather than migrated. This is pre-release, and the registry is
+	 * a write-through cache of state the peer store and a boot can rebuild, so
+	 * carrying a migration path for a shape nobody has shipped costs more than
+	 * the rows are worth. `runs` references `agents(name)`, so it goes with it:
+	 * leaving run history behind a recreated parent table would leave rows
+	 * pointing at agents the foreign key no longer covers.
 	 */
 	static async open(path: string): Promise<DaemonDb> {
 		const dir = dirname(path);
@@ -150,6 +172,20 @@ export class DaemonDb {
 		const db = new Database(path);
 		db.exec("PRAGMA foreign_keys = ON");
 		db.exec("PRAGMA journal_mode = WAL");
+
+		// Recreate, do not migrate: an `agents` table without `parent` predates
+		// the hierarchy and cannot answer who deployed whom.
+		const columns = db.prepare("PRAGMA table_info(agents)").all() as {
+			name: string;
+		}[];
+		if (
+			columns.length > 0 &&
+			!columns.some((column) => column.name === "parent")
+		) {
+			db.exec("DROP TABLE IF EXISTS runs");
+			db.exec("DROP TABLE IF EXISTS agents");
+		}
+
 		db.exec(`
       CREATE TABLE IF NOT EXISTS agents (
         name            TEXT PRIMARY KEY,
@@ -157,8 +193,10 @@ export class DaemonDb {
         status          TEXT NOT NULL CHECK (status IN ('running', 'parked', 'stopped')),
         worker_pid      INTEGER,
         cwd             TEXT NOT NULL,
-        started_at      INTEGER NOT NULL
+        started_at      INTEGER NOT NULL,
+        parent          TEXT REFERENCES agents(name) ON DELETE SET NULL
       );
+      CREATE INDEX IF NOT EXISTS agents_parent_idx ON agents(parent);
       CREATE TABLE IF NOT EXISTS runs (
         id             INTEGER PRIMARY KEY AUTOINCREMENT,
         agent          TEXT NOT NULL,
@@ -194,14 +232,15 @@ export class DaemonDb {
 	upsertAgent(agent: AgentRow): void {
 		this.db
 			.prepare(
-				`INSERT INTO agents (name, definition_path, status, worker_pid, cwd, started_at)
-				 VALUES (?, ?, ?, ?, ?, ?)
+				`INSERT INTO agents (name, definition_path, status, worker_pid, cwd, started_at, parent)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT (name) DO UPDATE SET
 				   definition_path = excluded.definition_path,
 				   status          = excluded.status,
 				   worker_pid      = excluded.worker_pid,
 				   cwd             = excluded.cwd,
-				   started_at      = excluded.started_at`,
+				   started_at      = excluded.started_at,
+				   parent          = excluded.parent`,
 			)
 			.run(
 				agent.name,
@@ -210,7 +249,23 @@ export class DaemonDb {
 				agent.workerPid,
 				agent.cwd,
 				agent.startedAt,
+				// Absent means root; SQLite needs the null spelled out.
+				agent.parent ?? null,
 			);
+	}
+
+	/**
+	 * Detach a peer's children, making each of them a root.
+	 *
+	 * The explicit half of the kill contract: a cascade removes the subtree, so
+	 * the only way a child outlives its parent is this reparent, and it is
+	 * written through immediately because a restart that restored the old edge
+	 * would resurrect a parent the operator deliberately detached.
+	 */
+	reparentChildrenToRoot(parent: string): void {
+		this.db
+			.prepare("UPDATE agents SET parent = NULL WHERE parent = ?")
+			.run(parent);
 	}
 
 	/**
@@ -227,7 +282,7 @@ export class DaemonDb {
 	listAgents(): AgentRow[] {
 		const rows = this.db
 			.prepare(
-				"SELECT name, definition_path, status, worker_pid, cwd, started_at FROM agents ORDER BY name",
+				"SELECT name, definition_path, status, worker_pid, cwd, started_at, parent FROM agents ORDER BY name",
 			)
 			.all() as RawAgentRow[];
 		return rows.map((row) => ({
@@ -237,7 +292,64 @@ export class DaemonDb {
 			workerPid: row.worker_pid,
 			cwd: row.cwd,
 			startedAt: row.started_at,
+			parent: row.parent,
 		}));
+	}
+
+	/** Names of the peers deployed directly under `parent`. */
+	childrenOf(parent: string): string[] {
+		const rows = this.db
+			.prepare("SELECT name FROM agents WHERE parent = ? ORDER BY name")
+			.all(parent) as { name: string }[];
+		return rows.map((row) => row.name);
+	}
+
+	/**
+	 * The chain from `name`'s parent up to its root, nearest first.
+	 *
+	 * Walked in SQL with a recursive CTE rather than read back row by row, and
+	 * bounded by the visited set: a cycle is refused at spawn, but this must
+	 * terminate against a database an older or buggier writer left behind
+	 * rather than spin forever inside a boot.
+	 */
+	ancestorsOf(name: string): string[] {
+		const rows = this.db
+			.prepare(
+				`WITH RECURSIVE chain(name, parent, depth) AS (
+				   SELECT name, parent, 0 FROM agents WHERE name = ?
+				   UNION
+				   SELECT a.name, a.parent, chain.depth + 1
+				     FROM agents a
+				     JOIN chain ON a.name = chain.parent
+				    WHERE chain.depth < (SELECT COUNT(*) FROM agents)
+				 )
+				 SELECT name FROM chain WHERE name != ? ORDER BY depth`,
+			)
+			.all(name, name) as { name: string }[];
+		return rows.map((row) => row.name);
+	}
+
+	/**
+	 * Persisted agents whose ancestry no longer resolves, given the peers that
+	 * still have definitions on disk. Each is reported with the ancestor that
+	 * broke the chain.
+	 *
+	 * Transitive on purpose: a grandchild whose own parent still exists is
+	 * orphaned all the same once the peer above that is gone, and starting it
+	 * would place it under a peer the same boot just refused.
+	 */
+	listOrphans(known: Iterable<string>): { name: string; missing: string }[] {
+		const present = new Set(known);
+		const orphans: { name: string; missing: string }[] = [];
+		for (const row of this.listAgents()) {
+			if (!present.has(row.name)) continue;
+			if (row.parent == null) continue;
+			const missing = [row.parent, ...this.ancestorsOf(row.parent)].find(
+				(ancestor) => !present.has(ancestor),
+			);
+			if (missing !== undefined) orphans.push({ name: row.name, missing });
+		}
+		return orphans;
 	}
 
 	// ── Runs ──────────────────────────────────────────────────────────────────

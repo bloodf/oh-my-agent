@@ -50,6 +50,7 @@ import { startCredentialGateway } from "./credential-gateway";
 import type { RunTrigger } from "./db";
 import { DaemonDb } from "./db";
 import { materializeWorker } from "./materializer";
+import type { PeerDefinitionFields } from "./peer-store";
 import { createPeerStore, resolvePeerStoreRoots } from "./peer-store";
 import { nextCronTime, Scheduler } from "./scheduler";
 import type { DaemonContext, PeerRecord, ScheduleRecord } from "./socket";
@@ -411,21 +412,140 @@ export async function bootDaemon(
 			return sources;
 		};
 
-		/** Materialize, launch, and register one peer. Idempotent by name. */
-		const spawnPeer = async (name: string): Promise<AgentSpawnResult> => {
-			const existing = peers.get(name);
-			if (existing && existing.worker.state !== "stopped") {
-				return { name, state: existing.worker.state };
+		/**
+		 * Parentage as the daemon knows it, keyed by child.
+		 *
+		 * Spawn-time state, never frontmatter (ADR-011). Seeded from the
+		 * persisted registry at boot so the tree outlives a restart, and the
+		 * only writer is `spawnPeer` (an edge appears) or the kill path (an
+		 * edge is removed).
+		 */
+		const parents = new Map<string, string>();
+
+		/**
+		 * The configuration each account was first registered under.
+		 *
+		 * The supervisor refuses to see one account described two ways, which
+		 * is correct — an account cannot be metered and unmetered at once — but
+		 * a child placed on its parent's account arrives declaring nothing.
+		 * Remembering the account's own configuration is what lets it join
+		 * without contradicting the peer that established it.
+		 */
+		const accountConfigs = new Map<
+			string,
+			{ mode: "subscription" | "metered"; budgetUsd: number | undefined }
+		>();
+		for (const row of db.listAgents()) {
+			// Both spellings of "root": absent on write, null on read.
+			if (row.parent != null) parents.set(row.name, row.parent);
+		}
+
+		/** The family channel a parent's children read in place of its rooms. */
+		const familyChannel = (parent: string): string => `#${parent}-team`;
+
+		/**
+		 * Walk from `parent` to the root, or throw naming the loop it closes.
+		 *
+		 * The path is the whole point of the message: told only that a spawn
+		 * was rejected, a caller cannot see which existing edge made its
+		 * request impossible.
+		 */
+		const assertNoCycle = (child: string, parent: string): void => {
+			const path = [child];
+			let cursor: string | undefined = parent;
+			while (cursor !== undefined) {
+				path.push(cursor);
+				if (cursor === child) {
+					throw new InvalidParamsError(
+						"parent",
+						`Spawning ${child} under ${parent} would close a cycle: ${path.reverse().join(" -> ")}`,
+					);
+				}
+				cursor = parents.get(cursor);
 			}
+		};
+
+		/** Every peer beneath `name`, deepest last. */
+		const descendantsOf = (name: string): string[] => {
+			const found: string[] = [];
+			const frontier = [name];
+			while (frontier.length > 0) {
+				const current = frontier.pop() as string;
+				for (const [child, parent] of parents) {
+					if (parent !== current || found.includes(child)) continue;
+					found.push(child);
+					frontier.push(child);
+				}
+			}
+			return found;
+		};
+
+		/** Materialize, launch, and register one peer. Idempotent by name. */
+		const spawnPeer = async (
+			name: string,
+			options: { parent?: string } = {},
+		): Promise<AgentSpawnResult> => {
 			const definition = definitions.get(name);
 			if (!definition) {
 				throw new InvalidParamsError("name", `Unknown peer: ${name}`);
 			}
 
-			const accountId = accountIdFor(definition);
+			// Parentage is validated before anything is built, and before the
+			// idempotence shortcut below: an impossible edge must be refused on
+			// its own terms rather than answered "already running", which would
+			// report success for a spawn that never happened.
+			const parent = options.parent;
+			if (parent !== undefined) {
+				const record = peers.get(parent);
+				if (!record) {
+					throw new InvalidParamsError("parent", `Unknown parent: ${parent}`);
+				}
+				// Cycles before liveness. A loop is a structural fact about the
+				// tree that no restart can repair, while "stopped" is a passing
+				// condition — and a cascade stops the very ancestors a cycle runs
+				// through, so checking liveness first answers "parent is stopped"
+				// for a request that would still be impossible once it was not.
+				assertNoCycle(name, parent);
+				if (record.worker.state === "stopped") {
+					throw new InvalidParamsError(
+						"parent",
+						`Parent ${parent} is stopped and cannot deploy ${name}`,
+					);
+				}
+			}
+
+			const existing = peers.get(name);
+			if (existing && existing.worker.state !== "stopped") {
+				return { name, state: existing.worker.state };
+			}
+			const parentRecord = parent === undefined ? undefined : peers.get(parent);
+
+			// Inheritance is exactly two things (ADR-011): the parent's account,
+			// and a family channel in place of — never in addition to — the
+			// parent's rooms. Budget stays explicit, because a shared ceiling
+			// lets one runaway child starve its siblings invisibly.
+			const accountId = parentRecord
+				? parentRecord.accountId
+				: accountIdFor(definition);
+			const peerRooms =
+				parent === undefined
+					? (definition.rooms ?? [])
+					: [...(definition.rooms ?? []), familyChannel(parent)];
+
+			// Materialize from a definition whose rooms are the ones this peer
+			// actually subscribes to. The supervisor's staleness check subtracts
+			// membership by re-hashing the on-disk definition with the rooms the
+			// live worker's fingerprint was taken over, so a child fingerprinted
+			// over its bare `rooms:` while subscribed to the family channel
+			// compares unequal on every single delivery and rebuilds forever.
+			const materialized: PeerDefinition = {
+				...definition,
+				rooms: peerRooms,
+			};
+
 			const worker = recordRuns(
 				await workerFactory({
-					peer: definition,
+					peer: materialized,
 					cwd: projectDir,
 					rootDir: join(stateDir, "workers", name),
 					discoveredAgentNames,
@@ -444,25 +564,40 @@ export async function bootDaemon(
 				}),
 			);
 
-			const peerRooms = definition.rooms ?? [];
 			for (const room of peerRooms) await ensureRoom(room);
+
+			// Quota is an account property (ADR-006), and this peer is on the
+			// parent's account, so the account's existing configuration governs
+			// it. That is not budget inheritance in ADR-011's sense: the child
+			// gets no ceiling of its own and declares none, it is simply
+			// metered by the account it was placed on. Re-registering the same
+			// account under a second configuration is what the supervisor
+			// refuses, and rightly — one account cannot be metered and
+			// unmetered at once.
+			const accountConfig = accountConfigs.get(accountId) ?? {
+				mode:
+					definition.autonomy?.budgetUsd === undefined
+						? ("subscription" as const)
+						: ("metered" as const),
+				// The cap itself: without it a metered account's warnings and
+				// parks can never fire (T-506).
+				budgetUsd: definition.autonomy?.budgetUsd,
+			};
+			accountConfigs.set(accountId, accountConfig);
 
 			await supervisor.register({
 				worker,
 				accountId,
-				// A declared dollar cap is what makes an account metered (§9.4).
-				mode:
-					definition.autonomy?.budgetUsd === undefined
-						? "subscription"
-						: "metered",
+				mode: accountConfig.mode,
 				rooms: peerRooms,
 				// Parsed wake filters govern delivery; absent means
 				// subscription-scoped only (T-509).
 				wake: definition.wake,
-				// The cap itself: without it a metered account's warnings and
-				// parks can never fire (T-506).
-				budgetUsd: definition.autonomy?.budgetUsd,
+				budgetUsd: accountConfig.budgetUsd,
 			});
+
+			if (parent === undefined) parents.delete(name);
+			else parents.set(name, parent);
 
 			peers.set(name, {
 				worker,
@@ -471,6 +606,7 @@ export async function bootDaemon(
 					? definition.model[0]
 					: definition.model,
 				rooms: peerRooms,
+				...(parent === undefined ? {} : { parent }),
 			});
 			// Write-through: the live map above is what requests read, and this
 			// row is what a restart and the orphan sweep read instead of guessing.
@@ -481,8 +617,51 @@ export async function bootDaemon(
 				workerPid: null,
 				cwd: projectDir,
 				startedAt: now(),
+				parent: parent ?? null,
 			});
 			return { name, state: worker.state };
+		};
+
+		/**
+		 * Stop a peer and, by default, everything under it.
+		 *
+		 * Cascading is the default because a child under a dead parent answers
+		 * to nobody, and ADR-011 makes that state impossible rather than merely
+		 * rare. `keepChildren` is the explicit opt-out and reparents to root,
+		 * written through immediately so a restart cannot resurrect the edge an
+		 * operator just cut.
+		 */
+		const killPeer = async (
+			name: string,
+			options: { keepChildren: boolean },
+		): Promise<void> => {
+			const doomed = options.keepChildren
+				? [name]
+				: [name, ...descendantsOf(name)];
+			// Deepest first: a parent outliving its children for the duration of
+			// the sweep is the ordering that never shows a live orphan.
+			for (const peerName of doomed.reverse()) {
+				const record = peers.get(peerName);
+				if (!record) continue;
+				try {
+					await record.worker.stop();
+				} catch (error) {
+					log(`stopping ${peerName}: ${String(error)}`);
+				}
+				db.markAgentStatus(peerName, "stopped");
+				if (peerName === name) continue;
+				// A cascaded child keeps its edge: the subtree is stopped, not
+				// rearranged, so a later restart rebuilds the same shape.
+			}
+
+			if (!options.keepChildren) return;
+			for (const [child, parent] of [...parents]) {
+				if (parent !== name) continue;
+				parents.delete(child);
+				const record = peers.get(child);
+				if (record) peers.set(child, { ...record, parent: undefined });
+			}
+			db.reparentChildrenToRoot(name);
 		};
 
 		/** Arm one cron schedule; the handler posts the prompt into its room. */
@@ -542,9 +721,68 @@ export async function bootDaemon(
 			db.listSchedules().map((schedule) => [schedule.id, schedule]),
 		);
 
-		for (const definition of definitions.values()) {
+		/**
+		 * Peers in an order that starts a parent before its children.
+		 *
+		 * `spawnPeer` reads the live parent record for the account and family
+		 * channel a child inherits, so a child started first would inherit from
+		 * a peer that does not exist yet. A definition whose parent is missing
+		 * never reaches this list — it is refused above as an orphan.
+		 */
+		const bootOrder = (names: string[]): string[] => {
+			const ordered: string[] = [];
+			const placed = new Set<string>();
+			const place = (name: string): void => {
+				if (placed.has(name)) return;
+				placed.add(name);
+				const parent = parents.get(name);
+				if (parent !== undefined && names.includes(parent)) place(parent);
+				ordered.push(name);
+			};
+			for (const name of names) place(name);
+			return ordered;
+		};
+
+		/**
+		 * Agents refused at boot because their parent is gone, by vanished
+		 * parent.
+		 *
+		 * Status-only. Deliberately not a `peers` entry carrying a stub worker:
+		 * `kill`, `inject`, `logs_tail`, and the shutdown sweep all drive
+		 * `peers` records, and a placeholder among them would be a fake worker
+		 * those paths would dutifully operate on. An orphan has no lifecycle, so
+		 * it is held where only status reads it.
+		 */
+		const orphans = new Map<string, string>();
+
+		// An agent whose ancestry no longer resolves is refused, not resumed
+		// (ADR-011): orphanhood is made an impossible steady state rather than
+		// swept up after the fact. The database walks the chain, so a grandchild
+		// whose own parent survives is still refused when the peer above that is
+		// gone — starting it would place it under a peer this same boot refused.
+		//
+		// The recorded edge stays the peer that actually deployed it, never the
+		// ancestor that vanished: those differ below the first generation, and
+		// reporting the break as the parent would draw an edge nobody created.
+		// Which ancestor broke is said in the log, where the operator looks.
+		for (const orphan of db.listOrphans(definitions.keys())) {
+			orphans.set(orphan.name, parents.get(orphan.name) ?? orphan.missing);
+			db.markAgentStatus(orphan.name, "stopped");
+			log(
+				`peer ${orphan.name} not started: its ancestor ${orphan.missing} is gone from the registry`,
+			);
+		}
+		const startable = [...definitions.keys()].filter(
+			(name) => !orphans.has(name),
+		);
+
+		for (const name of bootOrder(startable)) {
+			const definition = definitions.get(name);
+			if (!definition) continue;
 			try {
-				await spawnPeer(definition.name);
+				// The persisted edge, not a fresh root: a boot that dropped it
+				// would silently flatten the tree on every restart.
+				await spawnPeer(definition.name, { parent: parents.get(name) });
 			} catch (error) {
 				// One peer that cannot start must not take the daemon with it: the
 				// operator needs a running socket to see what failed and why.
@@ -695,16 +933,41 @@ export async function bootDaemon(
 
 		await sweepOrphanWorkers();
 
+		/**
+		 * Write a definition through the store, then refresh the daemon's own
+		 * view of it.
+		 *
+		 * The store is disk; `definitions` is what `spawnPeer` resolves a name
+		 * against. Updating only the first is what makes a freshly created peer
+		 * answer "unknown peer" on the spawn its creator was told to make next,
+		 * so both move together or neither does.
+		 */
+		const writeDefinition = async (
+			fields: PeerDefinitionFields,
+			options: { overwrite: boolean },
+		): Promise<PeerDefinition> => {
+			const definition = await store.write(fields, options);
+			definitions.set(definition.name, definition);
+			if (!discoveredAgentNames.includes(definition.name)) {
+				discoveredAgentNames.push(definition.name);
+			}
+			return definition;
+		};
+
 		const context: DaemonContext = {
 			rooms,
 			supervisor,
 			peers,
 			knownRooms,
 			schedules,
+			orphans,
+			store,
+			writeDefinition,
 			startedAt: now(),
 			now,
 			ensureRoom,
 			spawnPeer,
+			killPeer,
 			armSchedule,
 			bumpAccount,
 		};

@@ -1057,8 +1057,18 @@ describe("bootDaemon — protocol errors", () => {
 			chat_wait: { room: "#reviews", sinceId: 999, timeoutMs: 50 },
 			chat_react: { messageId: 1, actor: "reviewer", emoji: "👀" },
 			chat_unreact: { messageId: 1, actor: "reviewer", emoji: "👀" },
+			agent_create: {
+				name: "created-peer",
+				description: "created over the socket",
+				body: "You are a created peer.",
+			},
 			agent_spawn: { name: "researcher" },
 			agent_status: {},
+			definition_get: { name: "reviewer" },
+			definition_update: {
+				name: "reviewer",
+				changes: { description: "updated over the socket" },
+			},
 			task_handoff: {
 				fromAgent: "researcher",
 				toAgent: "reviewer",
