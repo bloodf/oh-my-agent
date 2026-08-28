@@ -18,7 +18,7 @@ An operator can stand up an agent or channel, and manage membership, without edi
 
 ## Files this task may change
 
-- `src/console/app.ts`
+- `src/console/app.js`
 - `src/daemon/console-api.ts`
 - `src/daemon/peer-store.ts`
 - `src/daemon/supervisor.ts`
@@ -27,8 +27,8 @@ An operator can stand up an agent or channel, and manage membership, without edi
 
 | Path | Role | Note |
 |---|---|---|
-| `src/console/app.ts` (to be created) | Edited | Forms and membership controls. |
-| [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | Write routes. |
+| [`src/console/app.js`](../../../src/console/app.js) | Edited | Forms and membership controls (the client is plain JS; T-603). |
+| [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | Write routes, including the reaction-toggle route the T-603 client already calls. |
 | [`src/daemon/peer-store.ts`](../../../src/daemon/peer-store.ts) | Edited | Writing a definition, not only reading one. |
 | [`src/daemon/supervisor.ts`](../../../src/daemon/supervisor.ts) | Edited | Live membership: the running peer's cached room set. |
 | [`src/rooms/store.ts`](../../../src/rooms/store.ts) | Read | Durable subscriptions; T-402 owns it. |

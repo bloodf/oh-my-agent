@@ -2119,14 +2119,14 @@ TASKS += [
             ("Supervisor room filtering", "src/daemon/supervisor.ts"),
         ],
         files=[
-            "src/console/app.ts",
+            "src/console/app.js",
             "src/daemon/console-api.ts",
             "src/daemon/peer-store.ts",
             "src/daemon/supervisor.ts",
         ],
         assets=[
-            ("src/console/app.ts", "Edited", "Forms and membership controls."),
-            ("src/daemon/console-api.ts", "Edited", "Write routes."),
+            ("src/console/app.js", "Edited", "Forms and membership controls (the client is plain JS; T-603)."),
+            ("src/daemon/console-api.ts", "Edited", "Write routes, including the reaction-toggle route the T-603 client already calls."),
             ("src/daemon/peer-store.ts", "Edited", "Writing a definition, not only reading one."),
             ("src/daemon/supervisor.ts", "Edited", "Live membership: the running peer's cached room set."),
             ("src/rooms/store.ts", "Read", "Durable subscriptions; T-402 owns it."),

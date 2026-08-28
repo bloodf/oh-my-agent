@@ -16,8 +16,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `node_modules/@oh-my-pi/pi-ai/src/auth-broker/remote-store.ts` | yes | — | [T-303](tasks/T-303-client-integration.md) |
 | `package.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-502](tasks/T-502-daemon-entry-point.md), [T-702](tasks/T-702-biome-lint.md), [T-703](tasks/T-703-root-readme-and-metadata.md) | [T-701](tasks/T-701-ci-workflow.md) |
 | `scripts/gen-delivery-docs.py` | yes | — | [T-701](tasks/T-701-ci-workflow.md) |
-| `src/console/app.js` | yes | [T-603](tasks/T-603-console-client.md) | — |
-| `src/console/app.ts` | not yet | [T-605](tasks/T-605-console-management.md) | — |
+| `src/console/app.js` | yes | [T-603](tasks/T-603-console-client.md), [T-605](tasks/T-605-console-management.md) | — |
 | `src/console/index.html` | yes | [T-603](tasks/T-603-console-client.md) | — |
 | `src/console/style.css` | yes | [T-603](tasks/T-603-console-client.md) | — |
 | `src/daemon/account-registry.ts` | yes | [T-404](tasks/T-404-account-registry.md) | [T-405](tasks/T-405-supervisor.md), [T-506](tasks/T-506-metered-budget-wiring.md) |
