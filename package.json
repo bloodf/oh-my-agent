@@ -24,7 +24,8 @@
 		"omp-agent": "src/daemon/main.ts"
 	},
 	"files": [
-		"src"
+		"src",
+		"skills"
 	],
 	"peerDependencies": {
 		"@oh-my-pi/pi-coding-agent": "^18.0.7"
