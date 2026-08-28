@@ -1,12 +1,12 @@
 {
-  "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "lib": ["ESNext"],
-    "moduleResolution": "bundler",
-    "noEmit": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "types": ["bun"]
-  }
+	"compilerOptions": {
+		"target": "ESNext",
+		"module": "ESNext",
+		"lib": ["ESNext"],
+		"moduleResolution": "bundler",
+		"noEmit": true,
+		"strict": true,
+		"skipLibCheck": true,
+		"types": ["bun"]
+	}
 }
