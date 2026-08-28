@@ -18,9 +18,13 @@
  * @Environment bun
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+	createPeerStore,
+	type PeerDefinitionFields,
+} from "../src/daemon/peer-store";
 import { Scheduler } from "../src/daemon/scheduler";
 import type {
 	ControlSocket,
@@ -33,6 +37,7 @@ import { Supervisor } from "../src/daemon/supervisor";
 import type { ExtensionIO } from "../src/extension/commands";
 import {
 	agentsCommand,
+	editCommand,
 	injectCommand,
 	killCommand,
 	logsCommand,
@@ -75,7 +80,10 @@ interface CapturedIo extends ExtensionIO {
 	confirms: { title: string; message: string }[];
 	confirmAnswer: boolean;
 	selectAnswer: string | undefined;
+	selectAnswers: (string | undefined)[];
 	selects: { title: string; options: string[] }[];
+	editorAnswers: (string | undefined)[];
+	editors: { title: string; prefill: string }[];
 }
 
 function fakeIo(answer = true): CapturedIo {
@@ -85,7 +93,10 @@ function fakeIo(answer = true): CapturedIo {
 		confirms: [],
 		confirmAnswer: answer,
 		selectAnswer: undefined,
+		selectAnswers: [],
 		selects: [],
+		editorAnswers: [],
+		editors: [],
 		notify(message) {
 			io.notices.push(message);
 		},
@@ -98,7 +109,13 @@ function fakeIo(answer = true): CapturedIo {
 		},
 		async select(title, options) {
 			io.selects.push({ title, options });
-			return io.selectAnswer;
+			return io.selectAnswers.length > 0
+				? io.selectAnswers.shift()
+				: io.selectAnswer;
+		},
+		async editor(title, prefill = "") {
+			io.editors.push({ title, prefill });
+			return io.editorAnswers.shift();
 		},
 	};
 	return io;
@@ -168,6 +185,7 @@ async function startDaemon(
 	options: {
 		schedules?: Map<string, ScheduleInfo>;
 		orphans?: Map<string, string>;
+		definitions?: PeerDefinitionFields[];
 		/**
 		 * Wire a `killPeer` that mirrors the production cascade (ADR-011):
 		 * without it the socket falls back to stopping one worker, and both
@@ -181,6 +199,15 @@ async function startDaemon(
 
 	const rooms = await RoomStore.open(join(dir, "rooms.db"));
 	cleanups.push(async () => rooms.close());
+	const storeRoot = join(dir, "definitions");
+	await mkdir(storeRoot, { recursive: true });
+	const store = createPeerStore({
+		user: join(dir, "empty-user-definitions"),
+		project: storeRoot,
+	});
+	for (const definition of options.definitions ?? []) {
+		await store.write(definition, { overwrite: true });
+	}
 	const workers = new Map<string, ReturnType<typeof stubWorker>>();
 	const supervisor = new Supervisor({
 		rooms,
@@ -248,6 +275,9 @@ async function startDaemon(
 		supervisor,
 		peers: peerMap,
 		knownRooms,
+		store,
+		writeDefinition: async (fields, writeOptions) =>
+			await store.write(fields, writeOptions),
 		...(options.orphans === undefined ? {} : { orphans: options.orphans }),
 		schedules,
 		startedAt: Date.now(),
@@ -1153,6 +1183,120 @@ describe("manager kill cascade", () => {
 	});
 });
 
+describe("editing flows", () => {
+	const definition = (overrides: Partial<PeerDefinitionFields> = {}) => ({
+		name: "alpha",
+		description: "Alpha peer.",
+		model: ["@review", "anthropic/claude-sonnet-4-5"],
+		spawns: ["scout"],
+		body: "You are alpha.",
+		...overrides,
+	});
+
+	test("definition get, edit, and update round-trips through the real socket", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }], {
+			definitions: [definition()],
+		});
+		const io = fakeIo();
+		io.selectAnswers = ["Definition"];
+		io.editorAnswers = [
+			'---\nname: "alpha"\ndescription: "Edited alpha."\nmodel: ["@review"]\nspawns: ["scout"]\n---\nYou are edited alpha.\n',
+		];
+
+		await editCommand(daemon.client, io, "alpha");
+
+		const fetched = await daemon.client.call<{
+			definition: { description: string; body: string };
+		}>("definition_get", { name: "alpha" });
+		expect(io.editors[0]?.prefill).toContain('description: "Alpha peer."');
+		expect(fetched.definition.description).toBe("Edited alpha.");
+		expect(fetched.definition.body.trim()).toBe("You are edited alpha.");
+	});
+
+	test("a refused definition reopens with the error and exact draft intact", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }], {
+			definitions: [definition()],
+		});
+		const io = fakeIo();
+		const refused =
+			'---\nname: "alpha"\ndescription: "Still here."\nspawns: []\n---\nOperator text survives.\n';
+		io.selectAnswers = ["Definition"];
+		io.editorAnswers = [refused, undefined];
+
+		await editCommand(daemon.client, io, "alpha");
+
+		expect(io.editors).toHaveLength(2);
+		expect(io.editors[1]?.title.toLowerCase()).toContain("spawns");
+		expect(io.editors[1]?.prefill).toBe(refused);
+	});
+
+	test("a removed field is refused instead of silently surviving the patch", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }], {
+			definitions: [definition()],
+		});
+		const io = fakeIo();
+		const removedModel =
+			'---\nname: "alpha"\ndescription: "Alpha peer."\nspawns: ["scout"]\n---\nOperator draft.\n';
+		io.selectAnswers = ["Definition"];
+		io.editorAnswers = [removedModel, undefined];
+
+		await editCommand(daemon.client, io, "alpha");
+
+		expect(io.editors[1]?.title).toContain("removing model");
+		expect(io.editors[1]?.prefill).toBe(removedModel);
+	});
+
+	test("model editing selects a configured role or free input", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }], {
+			definitions: [definition()],
+		});
+		const configured = fakeIo();
+		configured.selectAnswers = ["Model", "anthropic/claude-sonnet-4-5"];
+		await editCommand(daemon.client, configured, "alpha");
+		expect(configured.selects[1]?.options).toEqual([
+			"@review",
+			"anthropic/claude-sonnet-4-5",
+			"Enter another model…",
+		]);
+
+		const free = fakeIo();
+		free.selectAnswers = ["Model", "Enter another model…"];
+		free.editorAnswers = ["openai/gpt-5"];
+		await editCommand(daemon.client, free, "alpha");
+		const fetched = await daemon.client.call<{
+			definition: { model?: string[] };
+		}>("definition_get", { name: "alpha" });
+		expect(fetched.definition.model).toEqual(["openai/gpt-5"]);
+	});
+
+	test("policy updates surface rebuildRequired and next-delivery behavior", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }], {
+			definitions: [definition()],
+		});
+		const io = fakeIo();
+		io.selectAnswers = ["Definition"];
+		io.editorAnswers = [
+			'---\nname: "alpha"\ndescription: "Alpha peer."\nmodel: ["@review"]\nspawns: ["scout"]\n---\nChanged policy.\n',
+		];
+
+		await editCommand(daemon.client, io, "alpha");
+
+		expect(io.notices.join("\n")).toContain("rebuildRequired: true");
+		expect(io.notices.join("\n")).toContain("next delivery");
+	});
+
+	test("an absent daemon degrades to one operator notice", async () => {
+		const io = fakeIo();
+		await editCommand(
+			createDaemonClient(join(tmpdir(), "definitely-absent-edit.sock")),
+			io,
+			"alpha",
+		);
+		expect(io.notices).toEqual([DAEMON_UNAVAILABLE]);
+		expect(io.editors).toEqual([]);
+	});
+});
+
 describe("manager edit seam", () => {
 	test("the edit action calls the T-903 flow and reports its message", async () => {
 		const daemon = await startDaemon([{ name: "alpha" }]);
@@ -1176,20 +1320,40 @@ describe("manager edit seam", () => {
 		expect(component.render(80).join("\n")).toContain("Edited alpha.");
 	});
 
-	test("without T-903 the default seam says editing is not built yet", async () => {
-		const daemon = await startDaemon([{ name: "alpha" }]);
-		const state = new ManagerState(daemon.client);
-		await state.load();
-		const component = createManagerComponent(state, {
-			done: () => {},
-			requestRender: () => {},
+	test("the production manager action runs the shared definition flow", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }], {
+			definitions: [
+				{
+					name: "alpha",
+					description: "Alpha peer.",
+					model: ["@review"],
+					spawns: ["scout"],
+					body: "You are alpha.",
+				},
+			],
 		});
-
-		component.handleInput("\r");
-		component.handleInput("\r");
-		await settle(component);
-
-		expect(component.render(80).join("\n")).toContain("not available yet");
+		const io = fakeIo();
+		io.selectAnswers = ["Model", "@review"];
+		await openManager(daemon.client, io, {
+			mode: "tui",
+			hasUI: true,
+			custom: async (factory) => {
+				const component = factory(
+					{ requestRender: () => {} },
+					{},
+					{},
+					() => {},
+				);
+				component.handleInput("\r");
+				component.handleInput("\r");
+				await settle(component);
+				expect(component.render(80).join("\n")).toContain(
+					"rebuildRequired: false",
+				);
+				return undefined as never;
+			},
+		});
+		expect(io.selects[0]?.options).toEqual(["Definition", "Model"]);
 	});
 });
 

@@ -1,32 +1,38 @@
 /**
- * Purpose: Slash-command logic for the T-504/T-511 operator surface — peer,
- * room, schedule, log-tail, and instruction-injection commands. Each command
- * is a plain exported function over two thin seams (`DaemonClient`,
- * `ExtensionIO`), so the test suite drives them against the real protocol
- * server without OMP running.
+ * Purpose: Slash-command logic for the T-504/T-511/T-903 operator surface —
+ * peer, room, schedule, log-tail, instruction-injection, and definition/model
+ * editing commands. Each command is a plain exported function over two thin
+ * seams (`DaemonClient`, `ExtensionIO`), so the test suite drives them against
+ * the real protocol server without OMP running.
  *
  * Public API: `DaemonClient`, `DaemonUnavailableError`, `ExtensionIO`, and
  * one exported function per command.
  *
- * Upstream deps: `../shared/protocol` (wire shapes), `./widget`
- * (`createDaemonClient`, `DAEMON_UNAVAILABLE`).
+ * Upstream deps: `../shared/protocol` (wire shapes),
+ * `../shared/agent-definition` (edit validation), `../daemon/peer-store`
+ * (canonical markdown rendering), `./widget` (daemon availability).
  *
  * Downstream consumers: `./index`, which adapts these onto OMP's
  * `ExtensionAPI`; `tests/extension.test.ts`.
  *
  * Failure modes: a missing daemon surfaces as one clear notice, never a
- * stack trace; a protocol-level refusal (unknown peer, unknown schedule)
- * lands as the server's message. Destructive kills confirm through
- * `ExtensionIO.confirm` before the wire call.
+ * stack trace; a protocol-level refusal lands as the server's message.
+ * Definition refusals reopen the editor with the rejected text intact.
+ * Destructive kills confirm through `ExtensionIO.confirm` before the wire call.
  *
  * Performance: one socket round trip per command; `/agents` reuses the
  * `agent_status` listing, so no N+1.
  */
+import { renderPeerDefinition } from "../daemon/peer-store";
+import { parsePeerDefinition } from "../shared/agent-definition";
 import type {
 	AgentSpawnResult,
 	AgentStatus,
 	AgentStatusResult,
 	ChatReadResult,
+	DefinitionData,
+	DefinitionGetResult,
+	DefinitionUpdateResult,
 	InjectResult,
 	JsonRpcFailure,
 	JsonRpcSuccess,
@@ -55,6 +61,8 @@ export interface ExtensionIO {
 	confirm(title: string, message: string): Promise<boolean>;
 	/** Single-choice selection; resolves undefined on cancel/Esc. */
 	select(title: string, options: string[]): Promise<string | undefined>;
+	/** Multi-line editor; resolves undefined on cancel/Esc. */
+	editor?(title: string, prefill?: string): Promise<string | undefined>;
 }
 
 /** Raised by the client when the socket is absent; handled as data. */
@@ -170,6 +178,163 @@ export async function agentsCommand(
 			agents.length === 0 ? "No agents registered." : formatAgentTree(agents),
 		);
 	});
+}
+
+const EDITABLE_DEFINITION_KEYS = [
+	"description",
+	"model",
+	"tools",
+	"spawns",
+	"thinkingLevel",
+	"output",
+	"blocking",
+	"autoloadSkills",
+	"readSummarize",
+	"prewalk",
+	"advisor",
+	"body",
+	"workspace",
+	"rooms",
+	"wake",
+	"autonomy",
+	"sandbox",
+	"mcps",
+	"skills",
+	"schedules",
+	"automations",
+] as const satisfies readonly (keyof DefinitionData)[];
+
+const FREE_MODEL = "Enter another model…";
+
+function updateMessage(result: DefinitionUpdateResult): string {
+	return result.rebuildRequired
+		? `Updated ${result.name} (rebuildRequired: true); next delivery rebuilds the worker.`
+		: `Updated ${result.name} (rebuildRequired: false).`;
+}
+
+function editableChanges(definition: DefinitionData): Partial<DefinitionData> {
+	const changes: Partial<DefinitionData> = {};
+	for (const key of EDITABLE_DEFINITION_KEYS) {
+		const value = definition[key];
+		if (value !== undefined) Object.assign(changes, { [key]: value });
+	}
+	return changes;
+}
+
+function removedEditableField(
+	before: DefinitionData,
+	after: DefinitionData,
+): string | undefined {
+	for (const key of EDITABLE_DEFINITION_KEYS) {
+		if (key !== "body" && before[key] !== undefined && after[key] === undefined)
+			return key;
+	}
+	return undefined;
+}
+
+async function editDefinition(
+	client: DaemonClient,
+	io: ExtensionIO,
+	fetched: DefinitionGetResult,
+): Promise<string | undefined> {
+	if (io.editor === undefined) return "Editor unavailable in this mode.";
+	let draft = renderPeerDefinition({
+		...editableChanges(fetched.definition),
+		name: fetched.name,
+		body: fetched.definition.body,
+	});
+	let title = `Edit definition: ${fetched.name}`;
+	for (;;) {
+		const submitted = await io.editor(title, draft);
+		if (submitted === undefined) return undefined;
+		draft = submitted;
+		try {
+			const parsed = parsePeerDefinition(fetched.filePath, submitted);
+			if (parsed.name !== fetched.name) {
+				throw new Error(`name must remain ${fetched.name}`);
+			}
+			const removed = removedEditableField(fetched.definition, parsed);
+			if (removed !== undefined) {
+				throw new Error(
+					`removing ${removed} is not supported by definition_update`,
+				);
+			}
+			const result = await client.call<DefinitionUpdateResult>(
+				"definition_update",
+				{ name: fetched.name, changes: editableChanges(parsed) },
+			);
+			return updateMessage(result);
+		} catch (error) {
+			title = `Fix definition: ${error instanceof Error ? error.message : String(error)}`;
+		}
+	}
+}
+
+async function editModel(
+	client: DaemonClient,
+	io: ExtensionIO,
+	fetched: DefinitionGetResult,
+): Promise<string | undefined> {
+	const configured = Array.isArray(fetched.definition.model)
+		? fetched.definition.model
+		: [];
+	const selected = await io.select(`Model for ${fetched.name}`, [
+		...configured,
+		FREE_MODEL,
+	]);
+	if (selected === undefined) return undefined;
+	const model =
+		selected === FREE_MODEL
+			? io.editor === undefined
+				? undefined
+				: await io.editor(`Model for ${fetched.name}`, configured[0] ?? "")
+			: selected;
+	if (model === undefined || model.trim().length === 0) return undefined;
+	const result = await client.call<DefinitionUpdateResult>(
+		"definition_update",
+		{
+			name: fetched.name,
+			changes: { model: [model.trim()] },
+		},
+	);
+	return updateMessage(result);
+}
+
+/** `/edit <name>` — edit a definition document or choose its model. */
+export async function editCommand(
+	client: DaemonClient,
+	io: ExtensionIO,
+	name: string,
+): Promise<string | undefined> {
+	const trimmed = name.trim();
+	if (trimmed.length === 0) {
+		const usage = "usage: /edit <peer-name>";
+		io.notify(usage);
+		return usage;
+	}
+	try {
+		const fetched = await client.call<DefinitionGetResult>("definition_get", {
+			name: trimmed,
+		});
+		const kind = await io.select(`Edit ${trimmed}`, ["Definition", "Model"]);
+		const message =
+			kind === "Definition"
+				? await editDefinition(client, io, fetched)
+				: kind === "Model"
+					? await editModel(client, io, fetched)
+					: undefined;
+		if (message !== undefined) io.notify(message);
+		return message;
+	} catch (error) {
+		const message =
+			error instanceof DaemonUnavailableError
+				? DAEMON_UNAVAILABLE
+				: error instanceof Error
+					? error.message
+					: String(error);
+		io.notify(message);
+		return message;
+	}
 }
 
 /** `/spawn <name>` — start a peer from its definition. */

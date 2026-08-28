@@ -54,6 +54,7 @@ function ioFrom(ui: ExtensionUIContext): ExtensionIO {
 				title,
 				options.map((label) => ({ label })),
 			),
+		editor: async (title, prefill) => await ui.editor(title, prefill),
 	};
 }
 

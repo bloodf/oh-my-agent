@@ -10,11 +10,10 @@
  * `/manage` command body, including its degradations), and
  * `MANAGER_NEEDS_TUI`.
  *
- * Upstream deps: `./commands` (`DaemonClient`, `ExtensionIO`,
- * `DaemonUnavailableError`), `./widget` (`DAEMON_UNAVAILABLE`),
- * `../shared/protocol` (wire shapes). Nothing here touches daemon state
- * directly: every action is a socket round trip, so the manager holds no
- * state the daemon does not own.
+ * Upstream deps: `./commands` (`DaemonClient`, `ExtensionIO`, `editCommand`),
+ * `./widget` (`DAEMON_UNAVAILABLE`), `../shared/protocol` (wire shapes).
+ * Nothing here touches daemon state directly: every action is a socket round
+ * trip, so the manager holds no duplicated daemon state.
  *
  * Failure modes: an absent daemon is reported before any overlay opens, so
  * the operator never lands in an empty full-screen surface. A host without a
@@ -27,7 +26,7 @@ import type {
 	KillResult,
 	LogsTailResult,
 } from "../shared/protocol";
-import type { DaemonClient, ExtensionIO } from "./commands";
+import { type DaemonClient, type ExtensionIO, editCommand } from "./commands";
 
 /** Said when the host has no terminal UI to host the overlay. */
 export const MANAGER_NEEDS_TUI =
@@ -287,16 +286,17 @@ export type ManagerMode =
 	| { kind: "inject"; agent: AgentStatus; draft: string }
 	| { kind: "logs"; name: string; lines: string[]; offset: number };
 
-/**
- * T-903 fills this in. The manager only needs to know that an edit flow is
- * something it hands the selected agent to and awaits; until then it says so
- * rather than pretending to have edited anything.
- */
+/** A manager edit action over the selected live agent. */
 export type EditFlow = (agent: AgentStatus) => Promise<string | undefined>;
 
-/** The default seam: honest about the flow not being built yet. */
-export const openEditFlow: EditFlow = async (agent) =>
-	`Editing ${agent.name} is not available yet.`;
+/** Run the same guided flow `/edit <name>` uses. */
+export async function openEditFlow(
+	client: DaemonClient,
+	io: ExtensionIO,
+	agent: AgentStatus,
+): Promise<string | undefined> {
+	return await editCommand(client, io, agent.name);
+}
 
 /**
  * What the component needs from its host. Deliberately only two callbacks:
@@ -310,7 +310,7 @@ export interface ManagerComponentHost {
 	done: () => void;
 	/** Ask the host to repaint after asynchronous work. */
 	requestRender: () => void;
-	/** The editing flow T-903 supplies; the default says it is not built yet. */
+	/** Guided definition/model flow supplied by the production manager factory. */
 	editFlow?: EditFlow;
 }
 
@@ -389,11 +389,10 @@ export function createManagerComponent(
 	const chooseAction = (agent: AgentStatus, index: number): void => {
 		const action = ACTION_ORDER[index];
 		if (action === ACTIONS.edit) {
-			// T-903 owns the flow; the manager surfaces whatever it reports and
-			// never lets a rejecting flow escape as an unhandled rejection.
 			void run(async () => {
+				if (host.editFlow === undefined) return "Editing is not configured.";
 				try {
-					return (await (host.editFlow ?? openEditFlow)(agent)) ?? "";
+					return (await host.editFlow(agent)) ?? "";
 				} catch (error) {
 					return error instanceof Error ? error.message : String(error);
 				}
@@ -638,7 +637,7 @@ export interface ManagerTui {
  * Adapt `createManagerComponent` onto the factory shape `ctx.ui.custom`
  * expects: `(tui, theme, keybindings, done) => component`.
  */
-export function managerFactory(state: ManagerState) {
+export function managerFactory(state: ManagerState, editFlow?: EditFlow) {
 	return (
 		tui: ManagerTui,
 		_theme: unknown,
@@ -648,6 +647,7 @@ export function managerFactory(state: ManagerState) {
 		createManagerComponent(state, {
 			done: () => done(undefined),
 			requestRender: () => tui.requestRender(),
+			editFlow,
 		});
 }
 
@@ -688,8 +688,14 @@ export async function openManager(
 		return;
 	}
 
-	await ctx.custom<void>(managerFactory(state), {
-		overlay: true,
-		overlayOptions: { fullscreen: true },
-	});
+	await ctx.custom<void>(
+		managerFactory(
+			state,
+			async (agent) => await openEditFlow(client, io, agent),
+		),
+		{
+			overlay: true,
+			overlayOptions: { fullscreen: true },
+		},
+	);
 }
