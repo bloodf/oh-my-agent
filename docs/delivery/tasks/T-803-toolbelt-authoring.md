@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-08](../epics/EP-08-agent-hierarchy.md) | [SP-09](../sprints/SP-09-agent-hierarchy.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-08](../epics/EP-08-agent-hierarchy.md) | [SP-09](../sprints/SP-09-agent-hierarchy.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -34,9 +34,16 @@ A worker can author and deploy a child peer without leaving its run, and knows w
 
 ## Acceptance
 
-- [ ] A worker creates then spawns a child in one run, over the real socket, with the parent recorded.
-- [ ] A definition the parser rejects comes back as a tool error carrying the parser's message and no half-written file.
-- [ ] The child-vs-task guidance is asserted in the tool descriptions so it cannot silently drift.
+- [x] A worker creates then spawns a child in one run, over the real socket, with the parent recorded.
+- [x] A definition the parser rejects comes back as a tool error carrying the parser's message and no half-written file.
+- [x] The child-vs-task guidance is asserted in the tool descriptions so it cannot silently drift.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| agent_create + parented spawn tools | [`src/worker/toolbelt.ts`](../../../src/worker/toolbelt.ts) |
+| Authoring flows over the real socket | [`tests/toolbelt.test.ts`](../../../tests/toolbelt.test.ts) |
 
 ## Out of scope
 

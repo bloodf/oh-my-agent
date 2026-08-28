@@ -1,6 +1,6 @@
 # EP-08 — Agent hierarchy and authoring
 
-**Status:** Ready
+**Status:** Done
 
 *Derived from the tasks below.*
 
@@ -26,11 +26,11 @@ The native `task` tool is a temporary subagent: its transcript folds into the pa
 
 ## Acceptance
 
-- [ ] A worker creates and spawns a child through the toolbelt, and the child appears under it in status output and the TUI.
-- [ ] Killing a parent stops its subtree; a boot refuses to wake an agent whose parent is gone.
-- [ ] A cycle (`A` under `B` under `A`) is rejected at spawn.
-- [ ] A child never inherits its parent's rooms or budget by default.
-- [ ] The shipped skills are discovered by OMP's real `loadSkills` and a worker selecting them receives them in its materialized root.
+- [x] A worker creates and spawns a child through the toolbelt, and the child appears under it in status output and the TUI.
+- [x] Killing a parent stops its subtree; a boot refuses to wake an agent whose parent is gone.
+- [x] A cycle (`A` under `B` under `A`) is rejected at spawn.
+- [x] A child never inherits its parent's rooms or budget by default.
+- [x] The shipped skills are discovered by OMP's real `loadSkills` and a worker selecting them receives them in its materialized root.
 
 ## Decisions
 
@@ -43,5 +43,5 @@ The native `task` tool is a temporary subagent: its transcript folds into the pa
 |---|---|---|
 | [T-801](../tasks/T-801-hierarchy-protocol.md) | Hierarchy and authoring protocol | Done |
 | [T-802](../tasks/T-802-daemon-hierarchy.md) | Daemon hierarchy: parented spawns, cascades, orphan refusal | Done |
-| [T-803](../tasks/T-803-toolbelt-authoring.md) | Toolbelt: create and parent agents | Ready |
+| [T-803](../tasks/T-803-toolbelt-authoring.md) | Toolbelt: create and parent agents | Done |
 | [T-804](../tasks/T-804-authoring-skills.md) | Shipped skills for agent and subagent authoring | Done |

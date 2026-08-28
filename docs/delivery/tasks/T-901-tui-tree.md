@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-09](../epics/EP-09-tui-management.md) | [SP-10](../sprints/SP-10-tui-management.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-09](../epics/EP-09-tui-management.md) | [SP-10](../sprints/SP-10-tui-management.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -36,9 +36,16 @@
 
 ## Acceptance
 
-- [ ] A child renders nested under its parent; an orphaned peer is flagged.
-- [ ] Spawning with a chosen parent lands the child under it, visible on the next `/agents`.
-- [ ] Every flow degrades cleanly when the daemon is absent.
+- [x] A child renders nested under its parent; an orphaned peer is flagged.
+- [x] Spawning with a chosen parent lands the child under it, visible on the next `/agents`.
+- [x] Every flow degrades cleanly when the daemon is absent.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Tree rendering and parent picker | [`src/extension/commands.ts`](../../../src/extension/commands.ts) |
+| Tree shape, orphan marker, and wire-level parent assertions | [`tests/extension.test.ts`](../../../tests/extension.test.ts) |
 
 ## Out of scope
 

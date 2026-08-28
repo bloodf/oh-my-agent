@@ -2505,7 +2505,7 @@ TASKS += [
     ),
     Task(
         id="T-803", slug="toolbelt-authoring", title="Toolbelt: create and parent agents",
-        epic="EP-08", sprint="SP-09", status="Ready",
+        epic="EP-08", sprint="SP-09", status="Done",
         goal="A worker can author and deploy a child peer without leaving its run, and knows when not to.",
         read_first=[
             ("Toolbelt", "src/worker/toolbelt.ts"),
@@ -2527,6 +2527,7 @@ TASKS += [
             "A definition the parser rejects comes back as a tool error carrying the parser's message and no half-written file.",
             "The child-vs-task guidance is asserted in the tool descriptions so it cannot silently drift.",
         ],
+                evidence=[("agent_create + parented spawn tools", "src/worker/toolbelt.ts"), ("Authoring flows over the real socket", "tests/toolbelt.test.ts")],
         depends_on=["T-802"],
         out_of_scope=["Connection identity for spawner proof; ADR-011 records why the param is cooperative."],
     ),
@@ -2576,7 +2577,7 @@ TASKS += [
     # ── EP-09: full TUI management surface ────────────────────────────────────
     Task(
         id="T-901", slug="tui-tree", title="Hierarchy in /agents and the spawn flow",
-        epic="EP-09", sprint="SP-10", status="Ready",
+        epic="EP-09", sprint="SP-10", status="Done",
         goal="`/agents` renders the agent tree, and `/spawn` can parent a new peer.",
         read_first=[
             ("Commands", "src/extension/commands.ts"),
@@ -2599,6 +2600,7 @@ TASKS += [
             "Spawning with a chosen parent lands the child under it, visible on the next `/agents`.",
             "Every flow degrades cleanly when the daemon is absent.",
         ],
+                evidence=[("Tree rendering and parent picker", "src/extension/commands.ts"), ("Tree shape, orphan marker, and wire-level parent assertions", "tests/extension.test.ts")],
         depends_on=["T-802"],
         out_of_scope=["The full-screen manager, which is T-902."],
     ),

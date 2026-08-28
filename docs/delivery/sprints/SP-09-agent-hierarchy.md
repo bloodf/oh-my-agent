@@ -1,6 +1,6 @@
 # SP-09 — Agent hierarchy
 
-**Status:** Ready
+**Status:** Done
 
 *Derived from the tasks below.*
 
@@ -14,5 +14,5 @@ Persistent child peers under a parent: spawn-time parentage, cascades, and the a
 |---|---|---|---|
 | [T-801](../tasks/T-801-hierarchy-protocol.md) | [EP-08](../epics/EP-08-agent-hierarchy.md) | Hierarchy and authoring protocol | Done |
 | [T-802](../tasks/T-802-daemon-hierarchy.md) | [EP-08](../epics/EP-08-agent-hierarchy.md) | Daemon hierarchy: parented spawns, cascades, orphan refusal | Done |
-| [T-803](../tasks/T-803-toolbelt-authoring.md) | [EP-08](../epics/EP-08-agent-hierarchy.md) | Toolbelt: create and parent agents | Ready |
+| [T-803](../tasks/T-803-toolbelt-authoring.md) | [EP-08](../epics/EP-08-agent-hierarchy.md) | Toolbelt: create and parent agents | Done |
 | [T-804](../tasks/T-804-authoring-skills.md) | [EP-08](../epics/EP-08-agent-hierarchy.md) | Shipped skills for agent and subagent authoring | Done |
