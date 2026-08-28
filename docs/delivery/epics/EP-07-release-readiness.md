@@ -1,6 +1,6 @@
 # EP-07 — Release readiness: CI, lint, and a README a stranger can act on
 
-**Status:** In progress
+**Status:** Ready
 
 *Derived from the tasks below.*
 
@@ -32,8 +32,6 @@ Everything else in this tree is verified by a suite somebody has to remember to 
 - [ ] The root README explains what the plugin is, how to install it, and where the delivery tree lives.
 - [ ] `package.json` carries repository, homepage, bugs, keywords, and an engines constraint, and deliberately carries no license field.
 
-Unchecked items above are covered by the Ready tasks below.
-
 ## Decisions
 
 - [ADR-010](../adr/ADR-010-mit-license.md) — MIT license, chosen by the repository owner
@@ -42,7 +40,7 @@ Unchecked items above are covered by the Ready tasks below.
 
 | Task | Title | Status |
 |---|---|---|
-| [T-701](../tasks/T-701-ci-workflow.md) | CI: typecheck, test, and delivery-doc drift | In progress |
+| [T-701](../tasks/T-701-ci-workflow.md) | CI: typecheck, test, and delivery-doc drift | Done |
 | [T-702](../tasks/T-702-biome-lint.md) | Biome lint and format configuration | Done |
 | [T-703](../tasks/T-703-root-readme-and-metadata.md) | Root README and package metadata | Done |
 | [T-704](../tasks/T-704-deflake-intermittent-test.md) | Identify and fix the intermittent test failure | Ready |

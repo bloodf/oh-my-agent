@@ -1979,7 +1979,7 @@ TASKS += [
     # ── EP-07: release readiness ─────────────────────────────────────────────
     Task(
         id="T-701", slug="ci-workflow", title="CI: typecheck, test, and delivery-doc drift",
-        epic="EP-07", sprint="SP-08", status="In progress",
+        epic="EP-07", sprint="SP-08", status="Done",
         goal="A push proves the tree type-checks, the suite passes, and the delivery docs match their generator.",
         read_first=[ARCH, ("Delivery generator", "scripts/gen-delivery-docs.py"), ("Delivery tree contract", "docs/delivery/README.md")],
         files=[".github/workflows/ci.yml"],
@@ -2004,6 +2004,7 @@ TASKS += [
         ],
         evidence=[
             ("Workflow file", ".github/workflows/ci.yml"),
+            ("First push green: install, typecheck, test, lint, docs-drift (run 33134780907, 48s)", "https://github.com/bloodf/oh-my-agent/actions"),
         ],
         out_of_scope=[
             "Publishing, tagging, and release automation.",

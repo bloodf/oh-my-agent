@@ -11,7 +11,7 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**23 of 39 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
+**24 of 39 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
 Every runtime subsystem is built and under test: workers, isolation, credentials, rooms, scheduling, and quota handling. Two things keep that from meaning finished.
 
@@ -52,7 +52,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-04](epics/EP-04-autonomy-runtime.md) | Autonomy runtime: workers, rooms, scheduler, quota | Done | 5 |
 | [EP-05](epics/EP-05-operator-surface.md) | Operator surface: daemon entry point and TUI | Ready | 10 |
 | [EP-06](epics/EP-06-web-console.md) | Web console: manage agents and channels from a browser | Ready | 5 |
-| [EP-07](epics/EP-07-release-readiness.md) | Release readiness: CI, lint, and a README a stranger can act on | In progress | 4 |
+| [EP-07](epics/EP-07-release-readiness.md) | Release readiness: CI, lint, and a README a stranger can act on | Ready | 4 |
 
 ## Sprints
 
@@ -65,7 +65,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [SP-05](sprints/SP-05-operator-surface.md) | Operator surface | Ready | The parts a human touches: protocol, daemon entry point, persistence, toolbelt, and TUI. |
 | [SP-06](sprints/SP-06-conversation-model.md) | Conversation model | Ready | Threads, replies, and reactions in the store, then over the wire. |
 | [SP-07](sprints/SP-07-web-console.md) | Web console | Blocked | The browser client and the daemon API behind it. |
-| [SP-08](sprints/SP-08-release-readiness.md) | Release readiness | In progress | The things that make the repository checkable by a machine and explicable to a stranger: CI, lint, and a README. |
+| [SP-08](sprints/SP-08-release-readiness.md) | Release readiness | Ready | The things that make the repository checkable by a machine and explicable to a stranger: CI, lint, and a README. |
 
 ## Decisions
 

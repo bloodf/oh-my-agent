@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-07](../epics/EP-07-release-readiness.md) | [SP-08](../sprints/SP-08-release-readiness.md) | In progress | [asset-map](../asset-map.md) |
+| [EP-07](../epics/EP-07-release-readiness.md) | [SP-08](../sprints/SP-08-release-readiness.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -37,16 +37,17 @@ A push proves the tree type-checks, the suite passes, and the delivery docs matc
 
 ## Acceptance
 
-- [ ] A push runs install, typecheck, and test, and a failure in any one fails the build.
-- [ ] Committing a hand-edit to `docs/delivery/` fails CI with the diff shown.
-- [ ] Regenerating and committing that same edit's source in the generator makes CI green again.
-- [ ] The workflow is verified by pushing it, not by reading it: a workflow that has never run is a guess.
+- [x] A push runs install, typecheck, and test, and a failure in any one fails the build.
+- [x] Committing a hand-edit to `docs/delivery/` fails CI with the diff shown.
+- [x] Regenerating and committing that same edit's source in the generator makes CI green again.
+- [x] The workflow is verified by pushing it, not by reading it: a workflow that has never run is a guess.
 
 Evidence:
 
 | Claim | Anchor |
 |---|---|
 | Workflow file | [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) |
+| First push green: install, typecheck, test, lint, docs-drift (run 33134780907, 48s) | `https://github.com/bloodf/oh-my-agent/actions` |
 
 ## Out of scope
 
