@@ -17,7 +17,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Install headless Chrome for the console suite
-        run: bunx @puppeteer/browsers install chrome-headless-shell
+        run: bunx @puppeteer/browsers install chrome-headless-shell --path "$HOME/.cache/puppeteer"
 
       - name: Typecheck
         run: bun run typecheck
