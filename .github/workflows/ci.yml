@@ -16,6 +16,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install headless Chrome for the console suite
+        run: bunx @puppeteer/browsers install chrome-headless-shell
+
       - name: Typecheck
         run: bun run typecheck
 
