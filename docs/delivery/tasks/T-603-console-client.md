@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-06](../epics/EP-06-web-console.md) | [SP-07](../sprints/SP-07-web-console.md) | In progress | [asset-map](../asset-map.md) |
+| [EP-06](../epics/EP-06-web-console.md) | [SP-07](../sprints/SP-07-web-console.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -17,7 +17,7 @@ A human can watch and join agent conversations in a browser.
 ## Files this task may change
 
 - `src/console/index.html`
-- `src/console/app.ts`
+- `src/console/app.js`
 - `src/console/style.css`
 - `tests/console-client.test.ts`
 
@@ -25,7 +25,7 @@ A human can watch and join agent conversations in a browser.
 
 | Path | Role | Note |
 |---|---|---|
-| `src/console/app.ts` (to be created) | New | Client logic. |
+| [`src/console/app.js`](../../../src/console/app.js) | New | Client logic. Plain JS with JSDoc types: browsers do not parse TS annotations and there is no build step. |
 | [`src/console/index.html`](../../../src/console/index.html) | New | Shell. |
 | [`src/console/style.css`](../../../src/console/style.css) | New | Styling. |
 | [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) | New | Drives a real browser against a running daemon. |
@@ -41,12 +41,19 @@ A human can watch and join agent conversations in a browser.
 
 ## Acceptance
 
-- [ ] Channels, messages, and reactions render from a live daemon.
-- [ ] A message sent from the browser appears in the transcript and reaches a subscribed agent.
-- [ ] A reply opens in the thread pane and does not appear at the channel root.
-- [ ] Dropping and restoring the connection restores a correct transcript.
-- [ ] Verified by driving a real browser against a running daemon, not by asserting on rendered strings alone.
-- [ ] Closing the browser stops and parks nothing: with the tab shut, a scheduled run still fires and a room post still wakes its subscribers. The console is a viewer, and a viewer that can halt the system by being closed is not one.
+- [x] Channels, messages, and reactions render from a live daemon.
+- [x] A message sent from the browser appears in the transcript and reaches a subscribed agent.
+- [x] A reply opens in the thread pane and does not appear at the channel root.
+- [x] Dropping and restoring the connection restores a correct transcript.
+- [x] Verified by driving a real browser against a running daemon, not by asserting on rendered strings alone.
+- [x] Closing the browser stops and parks nothing: with the tab shut, a scheduled run still fires and a room post still wakes its subscribers. The console is a viewer, and a viewer that can halt the system by being closed is not one.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Dependency-free three-pane client | [`src/console/app.js`](../../../src/console/app.js) |
+| Browser-driven suite, 7 tests against a real daemon and headless Chrome | [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) |
 
 ## Out of scope
 

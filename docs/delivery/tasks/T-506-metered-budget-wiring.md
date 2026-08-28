@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -36,10 +36,17 @@ A metered account's 80% warning reaches a human where they will see it.
 
 ## Acceptance
 
-- [ ] Crossing 80% posts exactly one warning naming the account and its budget.
-- [ ] Reaching 100% parks the runs and posts a message saying a bump is required.
-- [ ] A bump resumes the account and delivers any backlog.
-- [ ] Re-crossing after a bump warns again.
+- [x] Crossing 80% posts exactly one warning naming the account and its budget.
+- [x] Reaching 100% parks the runs and posts a message saying a bump is required.
+- [x] A bump resumes the account and delivers any backlog.
+- [x] Re-crossing after a bump warns again.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Warnings and park/bump messages post through the supervisor | [`src/daemon/supervisor.ts`](../../../src/daemon/supervisor.ts) |
+| Supervisor suite: warn-once, park-at-cap, bump-resumes, re-cross cases | [`tests/supervisor.test.ts`](../../../tests/supervisor.test.ts) |
 
 ## Out of scope
 

@@ -1905,7 +1905,7 @@ TASKS += [
     ),
     Task(
         id="T-506", slug="metered-budget-wiring", title="Wire metered budget warnings into rooms",
-        epic="EP-05", sprint="SP-05", status="Ready",
+        epic="EP-05", sprint="SP-05", status="Done",
         goal="A metered account's 80% warning reaches a human where they will see it.",
         read_first=[ARCH, ("Registry", "src/daemon/account-registry.ts"), ("Supervisor", "src/daemon/supervisor.ts")],
         files=["src/daemon/supervisor.ts", "tests/supervisor.test.ts"],
@@ -1927,6 +1927,10 @@ TASKS += [
             "Re-crossing after a bump warns again.",
         ],
         depends_on=["T-502"],
+        evidence=[
+            ("Warnings and park/bump messages post through the supervisor", "src/daemon/supervisor.ts"),
+            ("Supervisor suite: warn-once, park-at-cap, bump-resumes, re-cross cases", "tests/supervisor.test.ts"),
+        ],
         out_of_scope=["Subscription accounts, which never take this path."],
     ),
     Task(
@@ -2040,12 +2044,12 @@ TASKS += [
     ),
     Task(
         id="T-603", slug="console-client", title="Browser client",
-        epic="EP-06", sprint="SP-07", status="In progress",
+        epic="EP-06", sprint="SP-07", status="Done",
         goal="A human can watch and join agent conversations in a browser.",
         read_first=[ARCH, ("Console API", "docs/delivery/tasks/T-602-console-api.md"), ("ADR-009: threads and reactions", "docs/delivery/adr/ADR-009-threads-and-reactions.md")],
-        files=["src/console/index.html", "src/console/app.ts", "src/console/style.css", "tests/console-client.test.ts"],
+        files=["src/console/index.html", "src/console/app.js", "src/console/style.css", "tests/console-client.test.ts"],
         assets=[
-            ("src/console/app.ts", "New", "Client logic."),
+            ("src/console/app.js", "New", "Client logic. Plain JS with JSDoc types: browsers do not parse TS annotations and there is no build step."),
             ("src/console/index.html", "New", "Shell."),
             ("src/console/style.css", "New", "Styling."),
             ("tests/console-client.test.ts", "New", "Drives a real browser against a running daemon."),
@@ -2067,6 +2071,10 @@ TASKS += [
             "Closing the browser stops and parks nothing: with the tab shut, a scheduled run still fires and a room post still wakes its subscribers. The console is a viewer, and a viewer that can halt the system by being closed is not one.",
         ],
         out_of_scope=["Creation forms; T-605 owns those."],
+        evidence=[
+            ("Dependency-free three-pane client", "src/console/app.js"),
+            ("Browser-driven suite, 7 tests against a real daemon and headless Chrome", "tests/console-client.test.ts"),
+        ],
         depends_on=["T-602"],
     ),
     Task(
