@@ -11,17 +11,23 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**18 of 29 tasks Done.** Test suite: 411 passing across 19 files, `tsc --noEmit` clean.
+**23 of 39 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
 Every runtime subsystem is built and under test: workers, isolation, credentials, rooms, scheduling, and quota handling. Two things keep that from meaning finished.
 
 First, there is no operator surface. The extension entry point is an empty factory and there is no daemon binary, so nothing here can currently be launched or looked at by a human (EP-05).
+
+Second, the release surface is one push old: the CI workflow, lint configuration, and root README now exist (EP-07), but the workflow has never run on a runner — T-701 stays In progress until a push proves it.
 
 The credential gateway is now verified at its consumer as well as its wire: a stock `RemoteAuthCredentialStore` drives it in [T-303](tasks/T-303-client-integration.md), which found and fixed a real shutdown defect — a daemon would hang on exit while any worker was parked on a long-poll.
 
 ## Unit contract
 
 Every task file carries the same eight sections in the same order: Goal, Read first, Files this task may change, Modules and assets in play, Steps, Acceptance, and then Out of scope, Depends on, Unblocks. Anything else is drift.
+
+`Unblocks` is derived by inverting `Depends on`, so the two halves of an edge cannot disagree. Only `Depends on` is authored.
+
+Epic and sprint status is derived from the tasks inside it, not written down separately, so a container can never claim to be further along than its children.
 
 Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`. The number tells you the parent without opening anything.
 
@@ -30,21 +36,23 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | Status | Meaning |
 |---|---|
 | Done | Shipped, tested, and committed. The evidence table names the suite and commit. |
-| In progress | Substantially built, but at least one acceptance item is unmet. The gap is named in the epic. |
+| In progress | Started, and at least one acceptance item is unmet. The gap is named in the epic. |
 | Ready | Specified and unblocked. Everything it depends on is Done. |
-| Blocked | Waiting on a listed dependency. |
+| Blocked | Waiting on a listed dependency that is not Done. |
+| Planned | Specified, but not queued: nothing is waiting on it and nobody has picked it up. |
 
 ## Epics
 
 | Epic | Title | Status | Tasks |
 |---|---|---|---|
-| [EP-00](epics/EP-00-foundations-and-contracts.md) | Foundations and OMP contracts | Done | 5 |
+| [EP-00](epics/EP-00-foundations-and-contracts.md) | Foundations and OMP contracts | Done | 6 |
 | [EP-01](epics/EP-01-agent-definitions.md) | Peer definitions and private store | Done | 1 |
-| [EP-02](epics/EP-02-worker-isolation.md) | Worker isolation: materialization, sandbox, launch gate | Done | 4 |
+| [EP-02](epics/EP-02-worker-isolation.md) | Worker isolation: materialization, sandbox, launch gate | Done | 5 |
 | [EP-03](epics/EP-03-credential-gateway.md) | Scoped credential gateway | Done | 3 |
 | [EP-04](epics/EP-04-autonomy-runtime.md) | Autonomy runtime: workers, rooms, scheduler, quota | Done | 5 |
-| [EP-05](epics/EP-05-operator-surface.md) | Operator surface: daemon entry point and TUI | Ready | 6 |
-| [EP-06](epics/EP-06-web-console.md) | Web console: manage agents and channels from a browser | Planned | 5 |
+| [EP-05](epics/EP-05-operator-surface.md) | Operator surface: daemon entry point and TUI | Ready | 10 |
+| [EP-06](epics/EP-06-web-console.md) | Web console: manage agents and channels from a browser | Ready | 5 |
+| [EP-07](epics/EP-07-release-readiness.md) | Release readiness: CI, lint, and a README a stranger can act on | In progress | 4 |
 
 ## Sprints
 
@@ -54,11 +62,17 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [SP-02](sprints/SP-02-isolation.md) | Isolation | Done | Materialized roots, compiled sandbox policies, and a launch gate that fails closed. |
 | [SP-03](sprints/SP-03-credentials.md) | Credentials | Done | A scoped gateway so a worker sees one account, not the vault, verified against the real client that consumes it. |
 | [SP-04](sprints/SP-04-autonomy.md) | Autonomy | Done | Workers, rooms, schedules, quota parking, and unattended resume. |
-| [SP-05](sprints/SP-05-operator-surface.md) | Operator surface | Ready | The parts a human touches: daemon entry point, toolbelt, and TUI. |
-| [SP-06](sprints/SP-06-conversation-model.md) | Conversation model | Planned | Threads, replies, and reactions in the store, then over the wire. |
-| [SP-07](sprints/SP-07-web-console.md) | Web console | Planned | The browser client and the daemon API behind it. |
+| [SP-05](sprints/SP-05-operator-surface.md) | Operator surface | Ready | The parts a human touches: protocol, daemon entry point, persistence, toolbelt, and TUI. |
+| [SP-06](sprints/SP-06-conversation-model.md) | Conversation model | Ready | Threads, replies, and reactions in the store, then over the wire. |
+| [SP-07](sprints/SP-07-web-console.md) | Web console | Blocked | The browser client and the daemon API behind it. |
+| [SP-08](sprints/SP-08-release-readiness.md) | Release readiness | In progress | The things that make the repository checkable by a machine and explicable to a stranger: CI, lint, and a README. |
 
 ## Decisions
+
+| ADR status | Meaning |
+|---|---|
+| Accepted | In force. The code is expected to match it, and a change needs a new ADR. |
+| Proposed | Written down and argued, but nothing is built against it yet. |
 
 | ADR | Title | Status |
 |---|---|---|
@@ -71,12 +85,15 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [ADR-007](adr/ADR-007-native-task-delegation.md) | Peers delegate coding subtasks through native task, never agent_spawn | Accepted |
 | [ADR-008](adr/ADR-008-tests-share-production-builders.md) | Tests exercise production construction, never a parallel copy | Accepted |
 | [ADR-009](adr/ADR-009-threads-and-reactions.md) | Conversation gains threads and reactions; reactions carry agent status | Proposed |
+| [ADR-010](adr/ADR-010-mit-license.md) | MIT license, chosen by the repository owner | Accepted |
 
 ## What to do next
 
-EP-05 in dependency order: [T-501](tasks/T-501-peer-store.md) then [T-502](tasks/T-502-daemon-entry-point.md). After T-502 the remaining four are independent and can run in parallel.
+EP-05 opens on two independent fronts: [T-507](tasks/T-507-control-socket-protocol.md) freezes the control-socket protocol and [T-501](tasks/T-501-peer-store.md) loads peer definitions. [T-502](tasks/T-502-daemon-entry-point.md) needs both, and [T-508](tasks/T-508-daemon-persistence.md) needs T-502 because the orphan sweep reads the registry T-502 persists. After that [T-503](tasks/T-503-agent-toolbelt.md), [T-504](tasks/T-504-tui-surface.md), [T-505](tasks/T-505-definition-staleness.md), [T-506](tasks/T-506-metered-budget-wiring.md), [T-509](tasks/T-509-wake-filters.md) are independent of each other and can run in parallel.
 
-EP-06 (the web console) starts at [T-601](tasks/T-601-conversation-model.md), which is independent of EP-05 and can run alongside it. Everything else in that epic needs the daemon API from T-502.
+[T-601](tasks/T-601-conversation-model.md) (the conversation model) depends on nothing in EP-05 and can run alongside any of it. Everything else in EP-06 needs the daemon API from T-502.
+
+EP-07 is unblocked today: [T-701](tasks/T-701-ci-workflow.md), [T-702](tasks/T-702-biome-lint.md), [T-703](tasks/T-703-root-readme-and-metadata.md) have no dependencies and are worth landing early, because CI is what stops the rest of this list from regressing silently.
 
 ## Working rules
 
@@ -88,6 +105,8 @@ EP-06 (the web console) starts at [T-601](tasks/T-601-conversation-model.md), wh
 ## Regenerating
 
 These files are generated. Edit [`gen-delivery-docs.py`](../../scripts/gen-delivery-docs.py) and re-run it; do not hand-edit the output, because hand edits are lost on the next run.
+
+The generator renders into a staging directory, runs every gate against what it just rendered, and only then replaces this tree. A failed gate leaves the previous tree exactly as it was.
 
 ```sh
 python3 scripts/gen-delivery-docs.py

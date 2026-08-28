@@ -24,6 +24,7 @@ Suites can stand up a broker and a disposable agent directory without touching t
 |---|---|---|
 | [`tests/fixtures/fake-broker.ts`](../../../tests/fixtures/fake-broker.ts) | New | Loopback broker stand-in. |
 | [`tests/fixtures/temp-agent-dir.ts`](../../../tests/fixtures/temp-agent-dir.ts) | New | Disposable `PI_CODING_AGENT_DIR`. |
+| [`tests/harness.test.ts`](../../../tests/harness.test.ts) | New | 8 tests; covers both fixtures. |
 
 ## Steps
 
@@ -57,3 +58,5 @@ Evidence:
 - T-003
 - T-004
 - T-005
+- T-007
+- T-507

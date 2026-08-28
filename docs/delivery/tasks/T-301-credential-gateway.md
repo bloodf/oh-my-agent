@@ -16,6 +16,7 @@ Each worker sees only the credentials its token is bound to, through a loopback 
 ## Files this task may change
 
 - `src/daemon/credential-gateway.ts`
+- `tests/credential-gateway.test.ts`
 
 ## Modules and assets in play
 

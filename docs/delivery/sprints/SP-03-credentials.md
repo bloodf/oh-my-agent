@@ -2,6 +2,8 @@
 
 **Status:** Done
 
+*Derived from the tasks below.*
+
 ## Theme
 
 A scoped gateway so a worker sees one account, not the vault, verified against the real client that consumes it.

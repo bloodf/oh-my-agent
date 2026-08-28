@@ -2,6 +2,8 @@
 
 **Status:** Done
 
+*Derived from the tasks below.*
+
 ## Outcome
 
 Peers run as supervised subprocesses, wake on room traffic, fire on cron, park on quota exhaustion, and resume unattended.

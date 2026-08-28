@@ -47,6 +47,7 @@ A message can reply to another, threads have roots, and any participant can reac
 ## Out of scope
 
 - Any HTTP surface; T-602 owns that.
+- Schema migration for existing room databases. Nothing is deployed yet, so a migration path would be maintenance for a population of zero; the store is recreated instead.
 
 ## Depends on
 

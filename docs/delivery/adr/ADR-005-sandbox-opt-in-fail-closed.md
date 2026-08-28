@@ -28,6 +28,6 @@ Layers 2 and 3 are on by default; the OS sandbox is opt-in per peer. Once a peer
 
 | Claim | Source |
 |---|---|
-| Layer 1 is opt-in | `ARCHITECTURE.md:141` |
+| Layer 1 is opt-in | `ARCHITECTURE.md §7` |
 | Launch gate probes then compiles | [`src/worker/launch-gate.ts`](../../../src/worker/launch-gate.ts) |
 | Policy is built once and shared with tests | [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) |

@@ -28,4 +28,4 @@ Where a test asserts on a construction production also performs, both call one e
 |---|---|
 | Shared policy builder | [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) |
 | Seatbelt suite consumes it | [`tests/seatbelt-wiring.test.ts`](../../../tests/seatbelt-wiring.test.ts) |
-| Engineering practice | `ARCHITECTURE.md:174-178` |
+| Engineering practice | `ARCHITECTURE.md §11` |

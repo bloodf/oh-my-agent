@@ -12,6 +12,7 @@ A human can watch and join agent conversations in a browser.
 
 - [ARCHITECTURE.md](../../../ARCHITECTURE.md)
 - [Console API](../../../docs/delivery/tasks/T-602-console-api.md)
+- [ADR-009: threads and reactions](../../../docs/delivery/adr/ADR-009-threads-and-reactions.md)
 
 ## Files this task may change
 
@@ -43,6 +44,7 @@ A human can watch and join agent conversations in a browser.
 - [ ] A reply opens in the thread pane and does not appear at the channel root.
 - [ ] Dropping and restoring the connection restores a correct transcript.
 - [ ] Verified by driving a real browser against a running daemon, not by asserting on rendered strings alone.
+- [ ] Closing the browser stops and parks nothing: with the tab shut, a scheduled run still fires and a room post still wakes its subscribers. The console is a viewer, and a viewer that can halt the system by being closed is not one.
 
 ## Out of scope
 
@@ -54,4 +56,4 @@ A human can watch and join agent conversations in a browser.
 
 ## Unblocks
 
-- Nothing.
+- T-605

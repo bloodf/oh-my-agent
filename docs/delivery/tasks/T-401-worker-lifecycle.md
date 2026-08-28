@@ -16,6 +16,7 @@ A peer runs as a supervised child process that parks, resumes, and delegates thr
 ## Files this task may change
 
 - `src/worker/lifecycle.ts`
+- `tests/worker-lifecycle.test.ts`
 
 ## Modules and assets in play
 

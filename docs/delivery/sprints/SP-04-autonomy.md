@@ -2,6 +2,8 @@
 
 **Status:** Done
 
+*Derived from the tasks below.*
+
 ## Theme
 
 Workers, rooms, schedules, quota parking, and unattended resume.

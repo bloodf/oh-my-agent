@@ -15,6 +15,7 @@ Schedules fire on Vixie cron semantics, and one-shot timers drive quota resume.
 ## Files this task may change
 
 - `src/daemon/scheduler.ts`
+- `tests/scheduler.test.ts`
 
 ## Modules and assets in play
 

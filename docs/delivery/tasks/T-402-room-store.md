@@ -15,6 +15,7 @@ Rooms, messages, and per-agent read cursors survive a daemon restart.
 ## Files this task may change
 
 - `src/rooms/store.ts`
+- `tests/rooms.test.ts`
 
 ## Modules and assets in play
 

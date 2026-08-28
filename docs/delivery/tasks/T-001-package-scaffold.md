@@ -18,13 +18,16 @@ OMP recognises the repository as an installable plugin exposing one extension.
 - `package.json`
 - `tsconfig.json`
 - `src/extension/index.ts`
+- `tests/scaffold.test.ts`
 
 ## Modules and assets in play
 
 | Path | Role | Note |
 |---|---|---|
 | [`package.json`](../../../package.json) | New | Declares `omp.extensions`. |
-| [`src/extension/index.ts`](../../../src/extension/index.ts) | New | Extension factory; body lands in T-501. |
+| [`tsconfig.json`](../../../tsconfig.json) | New | Strict compiler settings the `typecheck` script runs against. |
+| [`src/extension/index.ts`](../../../src/extension/index.ts) | New | Extension factory; body lands in T-504. |
+| [`tests/scaffold.test.ts`](../../../tests/scaffold.test.ts) | New | 4 tests; asserts the manifest wiring. |
 
 ## Steps
 

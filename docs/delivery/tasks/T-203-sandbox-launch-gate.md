@@ -16,6 +16,7 @@ An opted-in peer launches sandboxed or does not launch.
 ## Files this task may change
 
 - `src/worker/launch-gate.ts`
+- `tests/sandbox-gate.test.ts`
 
 ## Modules and assets in play
 
@@ -55,4 +56,5 @@ Evidence:
 
 ## Unblocks
 
+- T-204
 - T-401

@@ -2,6 +2,8 @@
 
 **Status:** Done
 
+*Derived from the tasks below.*
+
 ## Outcome
 
 The plugin package exists, and the three assumptions everything else rests on are pinned by tests that run against the real OMP build rather than a mock.
@@ -41,3 +43,4 @@ Every later epic depends on how OMP actually behaves: where it discovers agents,
 | [T-003](../tasks/T-003-discovery-contract.md) | Agent discovery precedence contract | Done |
 | [T-004](../tasks/T-004-broker-contract.md) | Auth broker wire-protocol contract | Done |
 | [T-005](../tasks/T-005-spawn-policy-contract.md) | Spawn policy enforcement contract | Done |
+| [T-007](../tasks/T-007-hermetic-child-environments.md) | Hermetic child-process environments | Done |

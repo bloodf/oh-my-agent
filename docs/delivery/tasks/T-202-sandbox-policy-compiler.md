@@ -15,6 +15,7 @@ One typed policy compiles to a macOS Seatbelt profile or Linux `bwrap` argv.
 ## Files this task may change
 
 - `src/worker/sandbox.ts`
+- `tests/sandbox.test.ts`
 
 ## Modules and assets in play
 

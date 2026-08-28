@@ -24,6 +24,7 @@ A metered account's 80% warning reaches a human where they will see it.
 | Path | Role | Note |
 |---|---|---|
 | [`src/daemon/supervisor.ts`](../../../src/daemon/supervisor.ts) | Edited | `onWarning` is currently an empty callback. |
+| [`tests/supervisor.test.ts`](../../../tests/supervisor.test.ts) | Edited | Warning and bump cases; T-405 owns the file. |
 | [`src/daemon/account-registry.ts`](../../../src/daemon/account-registry.ts) | Read | Already emits the warning. |
 | [`src/rooms/store.ts`](../../../src/rooms/store.ts) | Read | Delivery surface. |
 

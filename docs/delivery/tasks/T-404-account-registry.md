@@ -17,6 +17,7 @@ Quota exhaustion parks every run on the account and arms an unattended resume.
 
 - `src/daemon/quota-state.ts`
 - `src/daemon/account-registry.ts`
+- `tests/account-registry.test.ts`
 
 ## Modules and assets in play
 

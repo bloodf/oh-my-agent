@@ -26,6 +26,6 @@ A top-level peer coordinates, and in OMP coordination is the native `task` tool.
 
 | Claim | Source |
 |---|---|
-| Delegation contract | `ARCHITECTURE.md:101-108` |
+| Delegation contract | `ARCHITECTURE.md §5.1` |
 | Spawn classification | [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) |
 | Enforcement pinned against OMP | [`tests/contracts/spawn-policy.contract.test.ts`](../../../tests/contracts/spawn-policy.contract.test.ts) |

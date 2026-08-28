@@ -24,6 +24,7 @@ A browser can read and change agents, channels, and messages over HTTP, and rece
 | Path | Role | Note |
 |---|---|---|
 | `src/daemon/console-api.ts` (to be created) | New | HTTP and WebSocket surface. |
+| `tests/console-api.test.ts` (to be created) | New | Route, wake, and socket cases. |
 | [`src/rooms/store.ts`](../../../src/rooms/store.ts) | Read | Backing state. |
 | [`src/daemon/supervisor.ts`](../../../src/daemon/supervisor.ts) | Read | Posting must route through it. |
 

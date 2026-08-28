@@ -15,10 +15,10 @@ Status: design. Everything here is grounded in verified OMP surfaces (docs + `di
 > - **[Partial]** — some of the described behavior exists; the marker says what is missing.
 > - **[Planned]** — no implementation yet. The marker names the delivery task that would build it.
 >
-> Current build: 402 tests across 18 files. The runtime is largely built; the
-> operator surface (daemon binary, control socket, toolbelt, TUI) is not. See
-> [`docs/delivery/README.md`](docs/delivery/README.md) for the task-level state,
-> and treat that tree as authoritative when it disagrees with this document.
+> Current suite state lives in [`docs/delivery/README.md`](docs/delivery/README.md).
+> The runtime is largely built; the operator surface (daemon binary, control
+> socket, toolbelt, TUI) is not. Treat the delivery tree as authoritative when
+> it disagrees with this document.
 
 
 ## 1. Goals
@@ -74,8 +74,10 @@ marker.*
 ### 4.1 Daemon — [Planned]
 
 *No daemon binary exists: `package.json` declares no `bin`, and no module boots the
-subsystems together. Delivery task [T-502](docs/delivery/tasks/T-502-daemon-entry-point.md).
-Broker hosting resolution is built ([`src/daemon/boot.ts`](src/daemon/boot.ts),
+subsystems together. Delivery task [T-502](docs/delivery/tasks/T-502-daemon-entry-point.md)
+owns the entry point; T-507 owns the control-socket protocol contract; T-508 owns
+durable agents, runs, and schedules plus the startup orphan sweep. Broker hosting
+resolution is built ([`src/daemon/boot.ts`](src/daemon/boot.ts),
 `tests/daemon-boot.test.ts`, 14 tests).*
 
 - `omp-agent daemon` — long-running Bun process, detached from any TTY; **this** is what "keeps working while I'm away" means.
@@ -102,11 +104,12 @@ and the agent toolbelt are not written: no `chat_send`, `chat_read`, `chat_wait`
 delivery and wake are built ([`src/daemon/supervisor.ts`](src/daemon/supervisor.ts),
 `tests/supervisor.test.ts`, 13 tests). Mention parsing and per-agent wake filters are
 not implemented: `wake` is parsed from a definition but nothing consumes it, so a
-wake is triggered by subscription alone. `Supervisor.post()` accepts any author
-including `@you`, so human posting works at the API; no human-facing surface exists
-to call it ([T-504](docs/delivery/tasks/T-504-tui-surface.md)).*
+wake is triggered by subscription alone. T-509 owns wake filters and mention parsing.
+`Supervisor.post()` accepts any author including `@you`, so human posting works at
+the API; no human-facing surface exists to call it
+([T-504](docs/delivery/tasks/T-504-tui-surface.md)).*
 
-- Rooms = channels (`#general`, `#reviews`, …) and DMs (`@researcher`). SQLite-backed, append-only messages with per-agent read cursors.
+- Rooms = channels (`#general`, `#reviews`, …) and DMs (`@researcher`). SQLite-backed, append-only messages with per-agent read cursors. This flat log becomes threads and reactions under ADR-009 when EP-06 lands.
 - Wakeups: a parked (idle) agent is resumed by the daemon when it is `@mentioned` or a room it subscribes to gets a message matching its wake filter — the daemon calls `session.prompt()` / RPC prompt with the pending messages batched into one turn.
 - Humans are first-class participants: the TUI extension posts into rooms as `@you`.
 
@@ -114,9 +117,10 @@ to call it ([T-504](docs/delivery/tasks/T-504-tui-surface.md)).*
 
 *Cron evaluation and one-shot timers are built ([`src/daemon/scheduler.ts`](src/daemon/scheduler.ts),
 `tests/scheduler.test.ts`, 47 tests), including Vixie DOM/DOW semantics, and drive
-quota auto-resume. Schedules are held in memory, not SQLite, and nothing arms a
-definition's `schedules:` or `automations:` blocks — the parser accepts them and no
-consumer reads them. Arming belongs to [T-502](docs/delivery/tasks/T-502-daemon-entry-point.md).*
+quota auto-resume. Schedules are held in memory, not SQLite; T-508 owns their
+persistence. Nothing arms a definition's `schedules:` or `automations:` blocks —
+the parser accepts them and no consumer reads them. Arming belongs to
+[T-502](docs/delivery/tasks/T-502-daemon-entry-point.md).*
 
 - Cron expressions + one-shot timers stored in SQLite; on fire → spawn agent or post a message into a room (which may wake subscribers).
 - Automations are markdown too: prompt body + `schedule:` frontmatter.
@@ -133,12 +137,20 @@ from T-502.*
 - Custom renderer for room transcripts; ask-dialogs for confirmations.
 - Talks **only** to the daemon socket — no direct DB access, so the TUI and daemon can't race.
 
+### 4.6 Web console — [Planned]
+
+*No browser operator surface exists. EP-06 tasks T-601 (conversation model), T-602
+(console API), T-603 (console client), T-604 (reaction toolbelt), and T-605 (console
+management) own it. The console manages agents and channels, posts as the human,
+and receives live membership updates while talking only to the daemon socket like
+the TUI. Threads and reactions follow ADR-009.*
+
 ## 5. Agent definitions — [Implemented]
 
 *[`src/shared/agent-definition.ts`](src/shared/agent-definition.ts), covered by
-`tests/agent-definition.test.ts` (59 tests). Note one deviation from the text
-below: an unknown key raises `PeerParsingError` at parse time rather than warning
-at spawn, because a silently tolerated typo in `sandbox:` is an unenforced policy.*
+`tests/agent-definition.test.ts` (59 tests). An unknown key raises
+`PeerParsingError` at parse time because a silently tolerated typo in `sandbox:` is
+an unenforced policy.*
 
 Definitions use OMP's task-agent format verbatim — but they are **not** stored in OMP's discovery roots. `~/.omp/agent/agents/` is global: OMP merges it into every session, so parking peer definitions there would surface them in the `/agents` hub of every unrelated OMP session. See §5.2 for where they actually live.
 
@@ -157,7 +169,7 @@ autonomy: { max_turns: 40, budget_usd: 2.50 }
 You are the code reviewer for this team. When woken with new messages…
 ```
 
-OMP-known keys behave identically to native task agents (so definitions stay portable); oh-my-agent reads its extra keys (`rooms`, `wake`, `autonomy`, `workspace`, `sandbox`) and ignores none silently — unknown keys warn at spawn.
+OMP-known keys behave identically to native task agents (so definitions stay portable); oh-my-agent reads its extra keys (`rooms`, `wake`, `autonomy`, `workspace`, `sandbox`) and ignores none silently — unknown keys raise `PeerParsingError` at parse time.
 
 ### 5.1 Delegation contract (worker agents are orchestrators) — [Implemented]
 
@@ -181,12 +193,12 @@ A top-level worker agent's job is to **coordinate**, and in OMP coordination mea
 `tests/materializer.test.ts`, 30 tests) including the synthetic root, the `spawns:`
 closure, the `task.disabledAgents` snapshot, and atomic swap with restore. Reading
 definitions from the two private store paths is not: nothing enumerates them
-([T-501](docs/delivery/tasks/T-501-peer-store.md)). Startup orphan sweep is also
-unbuilt.*
+([T-501](docs/delivery/tasks/T-501-peer-store.md)). The startup orphan sweep is
+also unbuilt; T-508 owns it with run persistence.*
 
 - **Source of truth is plugin-private.** Peer definitions live in `~/.omp/agent/oh-my-agent/agents/*.md` (user) and `<project>/.omp/oh-my-agent/agents/*.md` (project). Neither path is an OMP discovery root, so normal OMP sessions never see them. A user who *wants* a definition available to plain OMP copies it into the global root explicitly.
 - **Materialize per worker at spawn.** The daemon builds a synthetic user root per worker under `~/.omp/agent/oh-my-agent/workers/<agent>/home/`. It owns `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME`; the canonical OMP agent dir is `<home>/.omp/agent`, and its `agents/` contains only the worker's own definition plus definitions named by `spawns:`. This is required because `discoverAgents()` consults generic native config roots as well as `getAgentDir()`; `PI_CODING_AGENT_DIR` alone does not reroot both. The dir starts with no `agent.db`; never seed it from the user's credential store.
-- **Wire-up per worker mode.** RPC workers launch with all five synthetic user-root variables plus `PI_CODING_AGENT_DIR=<home>/.omp/agent` and blank default-profile selectors. They receive no upstream broker/provider credentials. The daemon first exposes the worker's account-filtered broker protocol through the scoped credential gateway (§9.6), then creates a per-worker OMP auth-gateway whose `RemoteAuthCredentialStore` connects **only to that scoped endpoint/token**. Worker-local `models.yml` sets `transport: pi-native`, the inference-gateway `baseUrl`, and its separate per-worker inference bearer; model turns flow `worker → pi-native inference gateway → scoped credential gateway → upstream broker/provider`. The inference gateway never receives the vault-wide broker token or an unfiltered snapshot. Sandboxed MCP/network tools likewise require declared loopback host bridges. Process cwd remains the assigned project for project `.omp/agents` discovery. Contract tests must prove both credential filtering and pi-native model routing.
+- **Wire-up per worker mode.** RPC workers launch with all five synthetic user-root variables plus `PI_CODING_AGENT_DIR=<home>/.omp/agent`. They blank inherited config-root selectors (`PI_CONFIG_DIR`, `CLAUDE_CONFIG_DIR`, and profile selectors) because OMP's `RpcClient` merges the worker env over `Bun.env`; T-205 owns this launch wiring. They receive no upstream broker/provider credentials. The daemon first exposes the worker's account-filtered broker protocol through the scoped credential gateway (§9.6), then creates a per-worker OMP auth-gateway whose `RemoteAuthCredentialStore` connects **only to that scoped endpoint/token**. Worker-local `models.yml` sets `transport: pi-native`, the inference-gateway `baseUrl`, and its separate per-worker inference bearer; model turns flow `worker → pi-native inference gateway → scoped credential gateway → upstream broker/provider`. The inference gateway never receives the vault-wide broker token or an unfiltered snapshot. Sandboxed MCP/network tools likewise require declared loopback host bridges. Process cwd remains the assigned project for project `.omp/agents` discovery. Contract tests must prove both credential filtering and pi-native model routing.
 - **`spawns:` policy is the enforcement — materialization is not.** Discovery precedence (`discoverAgents`, `src/task/discovery.ts`) consults the nearest project `.omp/agents` *before* the active agent dir, and extension + bundled roots after it. Workers keep the project `cwd` (they edit the project tree), so an unmaterialized project agent — or any extension/bundled agent — remains discoverable regardless of what the worker dir contains. Materialization only curates the user-root slice; the actual allowlist is §5.1's `spawns:` policy, checked at dispatch time. As defense-in-depth, at spawn the daemon snapshots `discoverAgents(workerCwd)` and writes every discovered name outside the worker's allowlist into the worker's `task.disabledAgents` — a static deny-list (filtered after discovery, preflight-enforced at dispatch): agents appearing after spawn stay enabled until the next materialization, so it hardens listings but never replaces `spawns:`.
 - **Cleanup.** Materialized dirs are ephemeral; the daemon rebuilds them on every spawn (definitions may have changed) and sweeps orphans at startup.
 
@@ -197,8 +209,8 @@ unbuilt.*
 covered by `tests/rooms.test.ts` (25 tests). Not built: `agents`, `runs`, and
 `schedules`. Agent and schedule state currently lives in memory inside the
 supervisor, registry, and scheduler, so nothing survives a restart yet; run
-history has no storage at all. Persisting these belongs to
-[T-502](docs/delivery/tasks/T-502-daemon-entry-point.md).*
+history has no storage at all. T-502 opens the store; T-508 owns persistence,
+including the startup sweep that depends on the `runs` table.*
 
 ```
 agents(name, definition_path, status, worker_pid, cwd, started_at, …)
@@ -237,9 +249,9 @@ Defaults: layer 2 + 3 on, layer 1 opt-in (it constrains tooling and needs per-OS
 ## 8. Repo layout — [Partial]
 
 *`src/daemon/`, `src/worker/`, `src/shared/`, and `tests/` exist as shown.
-`src/extension/` holds only a no-op factory, there is no socket server in
+`src/extension/` remains a no-op factory until T-504, there is no socket server in
 `src/daemon/`, no toolbelt in `src/worker/`, and no `agents/` example directory
-yet.*
+exists yet; T-501 owns shipping it.*
 
 ```
 oh-my-agent/
@@ -283,13 +295,14 @@ phased delivery) states intent and is not met: the operator surface is unbuilt.*
 
 ## 11. Engineering practice — [Implemented]
 
-*Followed throughout: 402 tests across 18 files, `tsc --noEmit` clean. Two
-practices were added after this document was written, both from defects found in
-review: every regression test is proven non-vacuous by reverting the fix and
-confirming failure, and a test that asserts on a construction production performs
-must call the same builder rather than rebuilding it (see
+*Followed throughout: `tsc --noEmit` clean; current suite state lives in
+[`docs/delivery/README.md`](docs/delivery/README.md). Two practices were added after
+this document was written, both from defects found in review: every regression test
+is proven non-vacuous by reverting the fix and confirming failure, and a test that
+asserts on a construction production performs must call the same builder rather
+than rebuilding it (see
 [ADR-008](docs/delivery/adr/ADR-008-tests-share-production-builders.md)).*
 
 - **TDD, strictly:** red → green → refactor. A failing test precedes every behavior; no daemon, broker, scheduler, or extension code lands without one.
 - **Unit tests** colocated per module (`bun test`): protocol types, definition parsing, materialization, spawn-policy snapshots, quota state machine, room routing.
-- **Integration suite** for cross-component invariants. Built: the §5.1 delegation invariant; broker round-trip through the gateway; foreign ids return 403; shared disable returns `409 pending_policy`, queues `{credentialId, workerId}`, emits a full snapshot with a newer worker-view generation, and leaves peers usable; dedicated disable proxies upstream; usage routes return account-filtered data; quota-park → auto-resume; end-to-end room message flow through the bus. **Not yet built:** proving a real `RemoteAuthCredentialStore` restores the credential it removed locally — the gateway suites drive the wire with `fetch`, so the client's reaction to that response is inferred from upstream source rather than exercised ([T-303](docs/delivery/tasks/T-303-client-integration.md)).
+- **Integration suite** for cross-component invariants. Built: the §5.1 delegation invariant; broker round-trip through the gateway; foreign ids return 403; shared disable returns `409 pending_policy`, queues `{credentialId, workerId}`, emits a full snapshot with a newer worker-view generation, and leaves peers usable; dedicated disable proxies upstream; usage routes return account-filtered data; quota-park → auto-resume; end-to-end room message flow through the bus; T-303 proves a real `RemoteAuthCredentialStore` restores its locally removed credential through [`src/daemon/credential-gateway.ts`](src/daemon/credential-gateway.ts) (`tests/gateway-client.test.ts`, 8 tests).

@@ -29,4 +29,4 @@ The daemon keeps an account registry. Metered accounts warn at 80% of `budget_us
 |---|---|
 | Account registry and resume arming | [`src/daemon/account-registry.ts`](../../../src/daemon/account-registry.ts) |
 | Quota state machine | [`src/daemon/quota-state.ts`](../../../src/daemon/quota-state.ts) |
-| Upstream produces the block deadline | `ARCHITECTURE.md:172` |
+| Upstream produces the block deadline | `ARCHITECTURE.md §10 open question 5` |

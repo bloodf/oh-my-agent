@@ -13,6 +13,7 @@ An agent can mark a message with an emoji to signal what it is doing about it.
 - [ARCHITECTURE.md](../../../ARCHITECTURE.md)
 - [Toolbelt](../../../docs/delivery/tasks/T-503-agent-toolbelt.md)
 - [Conversation model](../../../docs/delivery/tasks/T-601-conversation-model.md)
+- [ADR-009: threads and reactions](../../../docs/delivery/adr/ADR-009-threads-and-reactions.md)
 
 ## Files this task may change
 
@@ -24,6 +25,7 @@ An agent can mark a message with an emoji to signal what it is doing about it.
 | Path | Role | Note |
 |---|---|---|
 | `src/worker/toolbelt.ts` (to be created) | Edited | Adds `chat_react`. |
+| `tests/toolbelt.test.ts` (to be created) | Edited | Reaction cases beside T-503's chat cases. |
 | [`src/rooms/store.ts`](../../../src/rooms/store.ts) | Read | `react` and `unreact` exist after T-601. |
 
 ## Steps

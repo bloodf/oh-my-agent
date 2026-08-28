@@ -16,6 +16,7 @@ Each worker gets a private user root containing only the definitions it is allow
 ## Files this task may change
 
 - `src/daemon/materializer.ts`
+- `tests/materializer.test.ts`
 
 ## Modules and assets in play
 
@@ -60,4 +61,5 @@ Evidence:
 
 ## Unblocks
 
+- T-205
 - T-401

@@ -2,6 +2,8 @@
 
 **Status:** Done
 
+*Derived from the tasks below.*
+
 ## Outcome
 
 A worker starts in a synthetic user root it cannot escape by accident, and an opted-in worker starts under a real OS sandbox or does not start at all.
@@ -42,3 +44,4 @@ This is the epic where an intuitive mental model is wrong and expensive. `worksp
 | [T-202](../tasks/T-202-sandbox-policy-compiler.md) | Typed sandbox policy compiler | Done |
 | [T-203](../tasks/T-203-sandbox-launch-gate.md) | Sandbox launch gate | Done |
 | [T-204](../tasks/T-204-shared-policy-builder.md) | Share the worker policy builder with tests | Done |
+| [T-205](../tasks/T-205-worker-env-scrub.md) | Worker env scrub | Done |

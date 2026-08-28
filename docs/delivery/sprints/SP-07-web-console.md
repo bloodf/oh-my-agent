@@ -1,6 +1,8 @@
 # SP-07 — Web console
 
-**Status:** Planned
+**Status:** Blocked
+
+*Derived from the tasks below.*
 
 ## Theme
 

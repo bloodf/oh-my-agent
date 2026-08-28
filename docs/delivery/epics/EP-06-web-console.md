@@ -1,6 +1,8 @@
 # EP-06 — Web console: manage agents and channels from a browser
 
-**Status:** Planned
+**Status:** Ready
+
+*Derived from the tasks below.*
 
 ## Outcome
 
@@ -27,7 +29,7 @@ The TUI (EP-05) reaches whoever is at the terminal that launched the daemon. Lon
 
 ## Acceptance
 
-- [ ] A channel created in the UI is visible to a worker, and one created by a worker appears in the UI.
+- [ ] A channel created in the UI is immediately visible to a worker. Worker-side channel creation is deliberately not in this epic: no task builds such a tool, and an acceptance item nothing implements is a promise that quietly fails.
 - [ ] An agent added to a channel receives its next message.
 - [ ] A reply appears in a thread without cluttering the channel root.
 - [ ] An agent can set a reaction, and it appears in an open browser without a refresh.

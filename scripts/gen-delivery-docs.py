@@ -11,6 +11,7 @@ Run: python3 scripts/gen-delivery-docs.py
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 
@@ -18,6 +19,25 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DELIVERY = os.path.join(ROOT, "docs", "delivery")
 
 # ── Contract ──────────────────────────────────────────────────────────────────
+
+# One vocabulary for every unit in the tree. The dataclasses, the README legend,
+# and the gates all read this list, so adding a sixth status is one edit and a
+# typo in a task literal is a gate failure rather than a new status nobody
+# defined.
+STATUS_LEGEND: list[tuple[str, str]] = [
+    ("Done", "Shipped, tested, and committed. The evidence table names the suite and commit."),
+    ("In progress", "Started, and at least one acceptance item is unmet. The gap is named in the epic."),
+    ("Ready", "Specified and unblocked. Everything it depends on is Done."),
+    ("Blocked", "Waiting on a listed dependency that is not Done."),
+    ("Planned", "Specified, but not queued: nothing is waiting on it and nobody has picked it up."),
+]
+STATUSES: tuple[str, ...] = tuple(s for s, _ in STATUS_LEGEND)
+
+ADR_STATUS_LEGEND: list[tuple[str, str]] = [
+    ("Accepted", "In force. The code is expected to match it, and a change needs a new ADR."),
+    ("Proposed", "Written down and argued, but nothing is built against it yet."),
+]
+ADR_STATUSES: tuple[str, ...] = tuple(s for s, _ in ADR_STATUS_LEGEND)
 
 
 @dataclass
@@ -27,7 +47,7 @@ class Task:
     title: str
     epic: str
     sprint: str
-    status: str  # Done | Ready | Blocked
+    status: str  # one of STATUSES
     goal: str
     read_first: list[tuple[str, str]]
     files: list[str]
@@ -36,8 +56,10 @@ class Task:
     acceptance: list[str]
     out_of_scope: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
-    unblocks: list[str] = field(default_factory=list)
     evidence: list[tuple[str, str]] = field(default_factory=list)  # (claim, anchor)
+    # No `unblocks`: it is the inverse of `depends_on` and is derived at render
+    # time. Authoring both halves of an edge is how T-302, T-503, and T-603 all
+    # ended up pointing at tasks that did not point back.
 
 
 @dataclass
@@ -45,13 +67,17 @@ class Epic:
     id: str
     slug: str
     title: str
-    status: str
     outcome: str
     why: str
     scope: list[str]
     non_goals: list[str]
     acceptance: list[str]
     adrs: list[str] = field(default_factory=list)
+    # Status is derived from the tasks inside. An override is allowed for the
+    # case derivation cannot see, but it must say why, in the document, next to
+    # the status it contradicts.
+    status_override: str | None = None
+    status_note: str | None = None
 
 
 @dataclass
@@ -59,8 +85,9 @@ class Sprint:
     id: str
     slug: str
     title: str
-    status: str
     theme: str
+    status_override: str | None = None
+    status_note: str | None = None
 
 
 @dataclass
@@ -68,12 +95,51 @@ class ADR:
     id: str
     slug: str
     title: str
-    status: str
+    status: str  # one of ADR_STATUSES
     context: str
     decision: str
     consequences: list[str]
     alternatives: list[tuple[str, str]]  # (option, why rejected)
     evidence: list[tuple[str, str]]
+
+
+def container_status(unit: Epic | Sprint, children: list[Task]) -> tuple[str, str | None]:
+    """Derive an epic's or sprint's status from the tasks it holds.
+
+    A container has no independent progress: it is exactly as far along as its
+    children. Writing the status by hand let `EP-05` sit at `Ready` while
+    holding six unstarted tasks, and nothing could tell the difference between
+    that and a deliberate claim. Returns `(status, annotation)`; the annotation
+    is non-empty only for a manual override.
+    """
+    if unit.status_override:
+        return unit.status_override, unit.status_note
+    if not children:
+        return "Planned", None
+    have = {t.status for t in children}
+    if have == {"Done"}:
+        return "Done", None
+    if "In progress" in have:
+        return "In progress", None
+    if "Ready" in have:
+        return "Ready", None
+    if "Blocked" in have:
+        return "Blocked", None
+    return "Planned", None
+
+
+def status_cell(status: str, note: str | None) -> str:
+    return f"{status} ({note})" if note else status
+
+
+def anchor_path(anchor: str) -> str:
+    """The file part of an evidence anchor.
+
+    Anchors are either `path`, `path:lines`, or `path §N`. Splitting on `:`
+    alone kept `ARCHITECTURE.md §7` intact only by accident, so the section form
+    is stripped explicitly.
+    """
+    return anchor.split(":")[0].split(" §")[0].strip()
 
 
 def rel(depth: int, path: str) -> str:
@@ -128,7 +194,7 @@ def render_task(t: Task) -> str:
         parts += ["", "Evidence:", ""]
         ev_rows = []
         for c, anchor in t.evidence:
-            p = anchor.split(":")[0]
+            p = anchor_path(anchor)
             linkable = "/" in anchor and os.path.exists(os.path.join(ROOT, p))
             ev_rows.append([c, f"[`{anchor}`]({rel(d, p)})" if linkable else f"`{anchor}`"])
         parts.append(table(["Claim", "Anchor"], ev_rows))
@@ -137,20 +203,31 @@ def render_task(t: Task) -> str:
     parts += ["", "## Depends on", ""]
     parts += [f"- {x}" for x in (t.depends_on or ["Nothing."])]
     parts += ["", "## Unblocks", ""]
-    parts += [f"- {x}" for x in (t.unblocks or ["Nothing."])]
+    parts += [f"- {x}" for x in (DEPENDENTS[t.id] or ["Nothing."])]
     return "\n".join(parts) + "\n"
 
 
 def render_epic(e: Epic, tasks: list[Task]) -> str:
-    parts = [f"# {e.id} — {e.title}", "", f"**Status:** {e.status}", "", "## Outcome", "", e.outcome]
+    status, note = container_status(e, tasks)
+    parts = [
+        f"# {e.id} — {e.title}",
+        "",
+        f"**Status:** {status_cell(status, note)}",
+        "",
+        "*Derived from the tasks below.*" if not note else f"*Overridden: {note}.*",
+        "",
+        "## Outcome",
+        "",
+        e.outcome,
+    ]
     parts += ["", "## Why this is its own epic", "", e.why, "", "## In scope", ""]
     parts += [f"- {x}" for x in e.scope]
     parts += ["", "## Not in scope", ""]
     parts += [f"- {x}" for x in e.non_goals]
     parts += ["", "## Acceptance", ""]
     for a in e.acceptance:
-        parts.append(f"- [{'x' if e.status == 'Done' else ' '}] {a}")
-    if e.status == "In progress":
+        parts.append(f"- [{'x' if status == 'Done' else ' '}] {a}")
+    if status == "In progress":
         parts += ["", "Unchecked items above are covered by the Ready tasks below."]
     if e.adrs:
         parts += ["", "## Decisions", ""]
@@ -166,7 +243,18 @@ def render_epic(e: Epic, tasks: list[Task]) -> str:
 
 
 def render_sprint(s: Sprint, tasks: list[Task]) -> str:
-    parts = [f"# {s.id} — {s.title}", "", f"**Status:** {s.status}", "", "## Theme", "", s.theme]
+    status, note = container_status(s, tasks)
+    parts = [
+        f"# {s.id} — {s.title}",
+        "",
+        f"**Status:** {status_cell(status, note)}",
+        "",
+        "*Derived from the tasks below.*" if not note else f"*Overridden: {note}.*",
+        "",
+        "## Theme",
+        "",
+        s.theme,
+    ]
     parts += ["", "## Tasks", ""]
     parts.append(
         table(
@@ -196,7 +284,7 @@ def render_adr(a: ADR) -> str:
         parts += ["", "## Evidence", ""]
         rows = []
         for c, s in a.evidence:
-            path = s.split(":")[0]
+            path = anchor_path(s)
             linkable = "/" in s and os.path.exists(os.path.join(ROOT, path))
             rows.append([c, f"[`{s}`]({rel(d, path)})" if linkable else f"`{s}`"])
         parts.append(table(["Claim", "Source"], rows))
@@ -354,7 +442,7 @@ ADRS = [
             ("Warn and continue when the adapter is missing", "An agent the user believes is sandboxed would run unconfined."),
         ],
         evidence=[
-            ("Layer 1 is opt-in", "ARCHITECTURE.md:141"),
+            ("Layer 1 is opt-in", "ARCHITECTURE.md §7"),
             ("Launch gate probes then compiles", "src/worker/launch-gate.ts"),
             ("Policy is built once and shared with tests", "src/worker/lifecycle.ts"),
         ],
@@ -388,7 +476,7 @@ ADRS = [
         evidence=[
             ("Account registry and resume arming", "src/daemon/account-registry.ts"),
             ("Quota state machine", "src/daemon/quota-state.ts"),
-            ("Upstream produces the block deadline", "ARCHITECTURE.md:172"),
+            ("Upstream produces the block deadline", "ARCHITECTURE.md §10 open question 5"),
         ],
     ),
     ADR(
@@ -415,7 +503,7 @@ ADRS = [
             ("Custom subagent spawner", "Reimplements OMP isolation and merge-back, and diverges on every upstream change."),
         ],
         evidence=[
-            ("Delegation contract", "ARCHITECTURE.md:101-108"),
+            ("Delegation contract", "ARCHITECTURE.md §5.1"),
             ("Spawn classification", "src/worker/lifecycle.ts"),
             ("Enforcement pinned against OMP", "tests/contracts/spawn-policy.contract.test.ts"),
         ],
@@ -446,7 +534,7 @@ ADRS = [
         evidence=[
             ("Shared policy builder", "src/worker/lifecycle.ts"),
             ("Seatbelt suite consumes it", "tests/seatbelt-wiring.test.ts"),
-            ("Engineering practice", "ARCHITECTURE.md:174-178"),
+            ("Engineering practice", "ARCHITECTURE.md §11"),
         ],
     ),
     ADR(
@@ -483,6 +571,40 @@ ADRS = [
             ("Delivery is subscription-scoped and must stay so", "src/daemon/supervisor.ts"),
         ],
     ),
+    ADR(
+        id="ADR-010",
+        slug="mit-license",
+        title="MIT license, chosen by the repository owner",
+        status="Accepted",
+        context=(
+            "The repository is public and ships package metadata pointing at it. A "
+            "public repo with no `LICENSE` is not public domain: it is all-rights-reserved "
+            "by default, so a reader may look but has no grant to use, fork, or depend on "
+            "it. Adding a `license` field to `package.json` while no license text exists "
+            "would be worse than the silence, because tooling would report a grant that was "
+            "never made. The choice was deferred to the owner rather than made by the "
+            "generator, because a license binds every future contributor."
+        ),
+        decision=(
+            "MIT. The owner chose it on 2026-08-27, and the two halves land in one change: "
+            "the `LICENSE` text and the `license` field in `package.json`, so tooling never "
+            "reports a grant without text behind it."
+        ),
+        consequences=[
+            "T-703 ships both halves together; a `license` field without a `LICENSE` file (or the reverse) is the mismatch this record exists to prevent.",
+            "Publishing to a registry is unblocked; the deferral was the only thing standing in its way.",
+            "Contributors get a permissive grant with no patent clause; that simplicity is accepted as the cost of MIT.",
+        ],
+        alternatives=[
+            ("Keep deferring", "A public repo without a license is all-rights-reserved; the deferral was a forcing function, not an end state."),
+            ("Apache-2.0", "The patent grant is real, but the project is a local plugin and MIT's brevity fits its surface."),
+            ("Set `license: UNLICENSED`", "Accurate for a private package, misleading for a public repository that intends to be usable."),
+        ],
+        evidence=[
+            ("MIT license text", "./LICENSE"),
+            ("Package license field", "./package.json"),
+        ],
+    ),
 ]
 
 ADR_FILE = {a.id: f"{a.id}-{a.slug}.md" for a in ADRS}
@@ -496,7 +618,6 @@ EPICS = [
         id="EP-00",
         slug="foundations-and-contracts",
         title="Foundations and OMP contracts",
-        status="Done",
         outcome=(
             "The plugin package exists, and the three assumptions everything else rests on "
             "are pinned by tests that run against the real OMP build rather than a mock."
@@ -527,7 +648,6 @@ EPICS = [
         id="EP-01",
         slug="agent-definitions",
         title="Peer definitions and private store",
-        status="Done",
         outcome=(
             "A peer is described by one markdown file with YAML frontmatter, parsed into a "
             "typed definition with a stable fingerprint."
@@ -557,7 +677,6 @@ EPICS = [
         id="EP-02",
         slug="worker-isolation",
         title="Worker isolation: materialization, sandbox, launch gate",
-        status="Done",
         outcome=(
             "A worker starts in a synthetic user root it cannot escape by accident, and an "
             "opted-in worker starts under a real OS sandbox or does not start at all."
@@ -589,7 +708,6 @@ EPICS = [
         id="EP-03",
         slug="credential-gateway",
         title="Scoped credential gateway",
-        status="Done",
         outcome=(
             "Workers reach model credentials only through a loopback gateway that shows each "
             "one exactly the accounts it is bound to."
@@ -621,7 +739,6 @@ EPICS = [
         id="EP-04",
         slug="autonomy-runtime",
         title="Autonomy runtime: workers, rooms, scheduler, quota",
-        status="Done",
         outcome=(
             "Peers run as supervised subprocesses, wake on room traffic, fire on cron, park on "
             "quota exhaustion, and resume unattended."
@@ -653,7 +770,6 @@ EPICS = [
         id="EP-05",
         slug="operator-surface",
         title="Operator surface: daemon entry point and TUI",
-        status="Ready",
         outcome=(
             "A user can start the daemon, see what their agents are doing, and steer them from "
             "inside the OMP TUI."
@@ -664,9 +780,12 @@ EPICS = [
             "daemon binary. Until this epic lands the system is complete and unusable."
         ),
         scope=[
+            "A frozen control-socket protocol the daemon serves and every client speaks.",
             "A `daemon` entry point that boots the broker, gateway, store, and supervisor.",
             "Peer store loading definitions from the private user and project paths.",
+            "Durable daemon state: agents, runs, and schedules that survive a restart.",
             "Toolbelt extension exposing chat and agent tools to workers.",
+            "Wake filters: mention and room subscription semantics in the delivery path.",
             "TUI commands, a status widget, and ask-dialogs.",
         ],
         non_goals=[
@@ -674,9 +793,12 @@ EPICS = [
         ],
         acceptance=[
             "`omp-agent daemon` starts, serves a socket, and survives its launching terminal closing.",
+            "The socket answers every method the protocol declares, or reports method-not-found with the protocol version.",
+            "Agents, runs, and schedules survive a daemon restart, and orphaned worker directories are swept at boot.",
             "`/agents` lists peers with state, and shows a shield only for sandboxed ones.",
             "`/rooms` reads and posts as `@you`.",
             "A worker can call `chat_send` and `chat_wait` against the daemon's bus.",
+            "An `@name` mention wakes that peer when it opted in, and a room post wakes only its subscribers.",
         ],
         adrs=["ADR-001", "ADR-005"],
     ),
@@ -684,7 +806,6 @@ EPICS = [
         id="EP-06",
         slug="web-console",
         title="Web console: manage agents and channels from a browser",
-        status="Planned",
         outcome=(
             "A browser UI where a human creates agents and channels, puts agents in "
             "channels, and holds a Slack-like conversation with them: replies, threads, "
@@ -712,7 +833,7 @@ EPICS = [
             "Editing or deleting another participant's messages.",
         ],
         acceptance=[
-            "A channel created in the UI is visible to a worker, and one created by a worker appears in the UI.",
+            "A channel created in the UI is immediately visible to a worker. Worker-side channel creation is deliberately not in this epic: no task builds such a tool, and an acceptance item nothing implements is a promise that quietly fails.",
             "An agent added to a channel receives its next message.",
             "A reply appears in a thread without cluttering the channel root.",
             "An agent can set a reaction, and it appears in an open browser without a refresh.",
@@ -720,6 +841,41 @@ EPICS = [
             "Closing the browser does not stop or park any agent.",
         ],
         adrs=["ADR-009"],
+    ),
+    Epic(
+        id="EP-07",
+        slug="release-readiness",
+        title="Release readiness: CI, lint, and a README a stranger can act on",
+        outcome=(
+            "Every push is type-checked, tested, and checked for delivery-doc drift by a "
+            "machine, the code has one enforced style, and the repository's front door "
+            "explains what this is and how to run it."
+        ),
+        why=(
+            "Everything else in this tree is verified by a suite somebody has to remember "
+            "to run. That is not verification, it is a habit, and habits do not survive a "
+            "handover. This epic is also where the delivery tree itself becomes checkable: "
+            "the generator is only a source of truth if a stale committed tree fails a "
+            "build rather than sitting there looking authoritative."
+        ),
+        scope=[
+            "GitHub Actions workflow: install, typecheck, test, and a delivery-doc regeneration diff.",
+            "Biome configuration plus lint and format scripts.",
+            "Root README and the package metadata that points at the repository.",
+        ],
+        non_goals=[
+            "Publishing to a registry, which is blocked on the license decision (ADR-010).",
+            "Choosing a license; that is the owner's call, recorded as deferred.",
+            "Release automation, tagging, or changelog generation.",
+        ],
+        acceptance=[
+            "A push runs `tsc --noEmit` and `bun test` and fails the build on either.",
+            "A commit whose `docs/delivery/` differs from what the generator produces fails CI.",
+            "`bun run lint` reports the same result locally and in CI.",
+            "The root README explains what the plugin is, how to install it, and where the delivery tree lives.",
+            "`package.json` carries repository, homepage, bugs, keywords, and an engines constraint, and deliberately carries no license field.",
+        ],
+        adrs=["ADR-010"],
     ),
 ]
 
@@ -729,21 +885,25 @@ EPIC_TITLE = {e.id: e.title for e in EPICS}
 # ── Sprints ───────────────────────────────────────────────────────────────────
 
 SPRINTS = [
-    Sprint(id="SP-01", slug="contracts-and-parsing", title="Contracts and parsing", status="Done",
+    Sprint(id="SP-01", slug="contracts-and-parsing", title="Contracts and parsing",
            theme="Pin how OMP actually behaves, and turn a peer file into a typed definition."),
-    Sprint(id="SP-02", slug="isolation", title="Isolation", status="Done",
+    Sprint(id="SP-02", slug="isolation", title="Isolation",
            theme="Materialized roots, compiled sandbox policies, and a launch gate that fails closed."),
-    Sprint(id="SP-03", slug="credentials", title="Credentials", status="Done",
+    Sprint(id="SP-03", slug="credentials", title="Credentials",
            theme="A scoped gateway so a worker sees one account, not the vault, "
                  "verified against the real client that consumes it."),
-    Sprint(id="SP-04", slug="autonomy", title="Autonomy", status="Done",
+    Sprint(id="SP-04", slug="autonomy", title="Autonomy",
            theme="Workers, rooms, schedules, quota parking, and unattended resume."),
-    Sprint(id="SP-05", slug="operator-surface", title="Operator surface", status="Ready",
-           theme="The parts a human touches: daemon entry point, toolbelt, and TUI."),
-    Sprint(id="SP-06", slug="conversation-model", title="Conversation model", status="Planned",
+    Sprint(id="SP-05", slug="operator-surface", title="Operator surface",
+           theme="The parts a human touches: protocol, daemon entry point, persistence, "
+                 "toolbelt, and TUI."),
+    Sprint(id="SP-06", slug="conversation-model", title="Conversation model",
            theme="Threads, replies, and reactions in the store, then over the wire."),
-    Sprint(id="SP-07", slug="web-console", title="Web console", status="Planned",
+    Sprint(id="SP-07", slug="web-console", title="Web console",
            theme="The browser client and the daemon API behind it."),
+    Sprint(id="SP-08", slug="release-readiness", title="Release readiness",
+           theme="The things that make the repository checkable by a machine and "
+                 "explicable to a stranger: CI, lint, and a README."),
 ]
 
 SPRINT_FILE = {s.id: f"{s.id}-{s.slug}.md" for s in SPRINTS}
@@ -760,10 +920,12 @@ TASKS = [
         epic="EP-00", sprint="SP-01", status="Done",
         goal="OMP recognises the repository as an installable plugin exposing one extension.",
         read_first=[ARCH, ("Repo layout", "ARCHITECTURE.md")],
-        files=["package.json", "tsconfig.json", "src/extension/index.ts"],
+        files=["package.json", "tsconfig.json", "src/extension/index.ts", "tests/scaffold.test.ts"],
         assets=[
             ("package.json", "New", "Declares `omp.extensions`."),
-            ("src/extension/index.ts", "New", "Extension factory; body lands in T-501."),
+            ("tsconfig.json", "New", "Strict compiler settings the `typecheck` script runs against."),
+            ("src/extension/index.ts", "New", "Extension factory; body lands in T-504."),
+            ("tests/scaffold.test.ts", "New", "4 tests; asserts the manifest wiring."),
         ],
         steps=[
             "Create the package manifest with `omp.name`, `omp.version`, and the extension path.",
@@ -775,7 +937,6 @@ TASKS = [
             "The manifest names `src/extension/index.ts` under `omp.extensions`.",
         ],
         evidence=[("Scaffold suite, 4 tests", "tests/scaffold.test.ts"), ("Commit", "c7b90bd")],
-        unblocks=["T-002"],
     ),
     Task(
         id="T-002", slug="test-harness", title="Contract-test harness",
@@ -786,6 +947,7 @@ TASKS = [
         assets=[
             ("tests/fixtures/fake-broker.ts", "New", "Loopback broker stand-in."),
             ("tests/fixtures/temp-agent-dir.ts", "New", "Disposable `PI_CODING_AGENT_DIR`."),
+            ("tests/harness.test.ts", "New", "8 tests; covers both fixtures."),
         ],
         steps=[
             "Write a fake broker binding `127.0.0.1:0`, since `startAuthBroker` otherwise defaults to port 8765.",
@@ -798,7 +960,7 @@ TASKS = [
             "8 harness tests pass.",
         ],
         evidence=[("Harness suite, 8 tests", "tests/harness.test.ts"), ("Commit", "ff663c5")],
-        depends_on=["T-001"], unblocks=["T-003", "T-004", "T-005"],
+        depends_on=["T-001"],
     ),
     Task(
         id="T-003", slug="discovery-contract", title="Agent discovery precedence contract",
@@ -820,7 +982,7 @@ TASKS = [
             "A future OMP change to discovery order fails this suite rather than silently leaking definitions.",
         ],
         evidence=[("Discovery contract, 9 tests", "tests/contracts/discovery.contract.test.ts"), ("Commit", "eda0c5b")],
-        depends_on=["T-002"], unblocks=["T-201"],
+        depends_on=["T-002"],
     ),
     Task(
         id="T-004", slug="broker-contract", title="Auth broker wire-protocol contract",
@@ -842,7 +1004,7 @@ TASKS = [
             "Generation and ETag semantics are asserted, not assumed.",
         ],
         evidence=[("Broker contract, 8 tests", "tests/contracts/broker.contract.test.ts"), ("Commit", "f9ae30e")],
-        depends_on=["T-002"], unblocks=["T-301"],
+        depends_on=["T-002"],
     ),
     Task(
         id="T-005", slug="spawn-policy-contract", title="Spawn policy enforcement contract",
@@ -864,7 +1026,37 @@ TASKS = [
             "Stripping `task` from a `tools:` list is detectable by test, not by production surprise.",
         ],
         evidence=[("Spawn policy contract, 23 tests", "tests/contracts/spawn-policy.contract.test.ts"), ("Commit", "4cba1ad")],
-        depends_on=["T-002"], unblocks=["T-401"],
+        depends_on=["T-002"],
+    ),
+    Task(
+        id="T-007", slug="hermetic-child-environments", title="Hermetic child-process environments",
+        epic="EP-00", sprint="SP-01", status="Done",
+        goal="A test that spawns a child gets the environment it asked for, not the one the developer's shell happens to export.",
+        read_first=[ARCH, ("Discovery contract", "tests/contracts/discovery.contract.test.ts"), ("Harness", "tests/harness.test.ts")],
+        files=["tests/fixtures/hermetic-env.ts", "tests/contracts/discovery.contract.test.ts"],
+        assets=[
+            ("tests/fixtures/hermetic-env.ts", "New", "`hermeticChildEnv`: scrubbed copy of `process.env` plus overrides."),
+            ("tests/contracts/discovery.contract.test.ts", "Edited", "Spawns children through the fixture instead of spreading `process.env`."),
+            ("tests/fixtures/temp-agent-dir.ts", "Read", "Supplies the synthetic root the overrides point at."),
+        ],
+        steps=[
+            "Scrub every config-root selector OMP consults from the inherited environment: `PI_CONFIG_DIR`, `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, and the profile variables.",
+            "Apply the caller's overrides last, so the synthetic `HOME`, `XDG_*`, and agent dir are the only values in play.",
+            "Route the discovery contract's child spawns through the fixture rather than spreading `process.env`, since that spread is exactly how a developer's exported `PI_CONFIG_DIR` silently reroutes a synthetic-home test into their real profile — the test then passes while asserting nothing.",
+            "Keep the scrub list in one place so a newly added selector is one edit, not a hunt through every suite that spawns a child.",
+        ],
+        acceptance=[
+            "A child spawned through the fixture sees none of the host's config-root selectors.",
+            "With a poisoned `PI_CONFIG_DIR` exported, the discovery contract still resolves against the synthetic root.",
+            "The caller's overrides win over anything inherited.",
+            "9 discovery-contract tests pass under a deliberately poisoned host environment.",
+        ],
+        evidence=[("Discovery contract, 9 tests", "tests/contracts/discovery.contract.test.ts")],
+        depends_on=["T-002"],
+        out_of_scope=[
+            "The production worker environment, which T-205 scrubs using the same canonical list.",
+            "Credential and provider variables; this task is about config-root selectors only.",
+        ],
     ),
     # ── EP-01 ────────────────────────────────────────────────────────────────
     Task(
@@ -872,7 +1064,7 @@ TASKS = [
         epic="EP-01", sprint="SP-01", status="Done",
         goal="A markdown file with YAML frontmatter becomes a validated `PeerDefinition` with a stable fingerprint.",
         read_first=[ARCH, ("Discovery contract", "tests/contracts/discovery.contract.test.ts")],
-        files=["src/shared/agent-definition.ts"],
+        files=["src/shared/agent-definition.ts", "tests/agent-definition.test.ts"],
         assets=[
             ("src/shared/agent-definition.ts", "New", "Parser, types, fingerprint."),
             ("tests/agent-definition.test.ts", "New", "59 tests."),
@@ -891,7 +1083,7 @@ TASKS = [
             "59 tests pass.",
         ],
         evidence=[("Parser suite, 59 tests", "tests/agent-definition.test.ts"), ("Commit", "d34fafa")],
-        depends_on=["T-003"], unblocks=["T-201", "T-501"],
+        depends_on=["T-003"],
     ),
     # ── EP-02 ────────────────────────────────────────────────────────────────
     Task(
@@ -899,7 +1091,7 @@ TASKS = [
         epic="EP-02", sprint="SP-02", status="Done",
         goal="Each worker gets a private user root containing only the definitions it is allowed to see.",
         read_first=[ARCH, ("Discovery contract", "tests/contracts/discovery.contract.test.ts")],
-        files=["src/daemon/materializer.ts"],
+        files=["src/daemon/materializer.ts", "tests/materializer.test.ts"],
         assets=[
             ("src/daemon/materializer.ts", "New", "Staged write and atomic swap."),
             ("src/shared/agent-definition.ts", "Read", "Supplies the parsed definition and fingerprint."),
@@ -921,14 +1113,14 @@ TASKS = [
             "30 tests pass.",
         ],
         evidence=[("Materializer suite, 30 tests", "tests/materializer.test.ts"), ("Commits", "c0fdf23, 476bda3")],
-        depends_on=["T-003", "T-101"], unblocks=["T-401"],
+        depends_on=["T-003", "T-101"],
     ),
     Task(
         id="T-202", slug="sandbox-policy-compiler", title="Typed sandbox policy compiler",
         epic="EP-02", sprint="SP-02", status="Done",
         goal="One typed policy compiles to a macOS Seatbelt profile or Linux `bwrap` argv.",
         read_first=[ARCH],
-        files=["src/worker/sandbox.ts"],
+        files=["src/worker/sandbox.ts", "tests/sandbox.test.ts"],
         assets=[
             ("src/worker/sandbox.ts", "New", "Policy type and both compilers."),
             ("tests/sandbox.test.ts", "New", "51 tests."),
@@ -945,14 +1137,13 @@ TASKS = [
             "51 tests pass.",
         ],
         evidence=[("Sandbox suite, 51 tests", "tests/sandbox.test.ts"), ("Commit", "84ff8d9")],
-        unblocks=["T-203"],
     ),
     Task(
         id="T-203", slug="sandbox-launch-gate", title="Sandbox launch gate",
         epic="EP-02", sprint="SP-02", status="Done",
         goal="An opted-in peer launches sandboxed or does not launch.",
         read_first=[ARCH, ("Sandbox compiler", "src/worker/sandbox.ts")],
-        files=["src/worker/launch-gate.ts"],
+        files=["src/worker/launch-gate.ts", "tests/sandbox-gate.test.ts"],
         assets=[
             ("src/worker/launch-gate.ts", "New", "Probe, then compile."),
             ("src/worker/sandbox.ts", "Read", "Supplies the compiler."),
@@ -970,7 +1161,7 @@ TASKS = [
             "13 tests pass.",
         ],
         evidence=[("Launch gate suite, 13 tests", "tests/sandbox-gate.test.ts"), ("Commit", "19c2349")],
-        depends_on=["T-202"], unblocks=["T-401"],
+        depends_on=["T-202"],
     ),
     Task(
         id="T-204", slug="shared-policy-builder", title="Share the worker policy builder with tests",
@@ -995,6 +1186,50 @@ TASKS = [
         evidence=[("Seatbelt suite, 10 tests", "tests/seatbelt-wiring.test.ts"), ("Commit", "43de7fb")],
         depends_on=["T-203"],
     ),
+    Task(
+        id="T-205", slug="worker-env-scrub", title="Worker env scrub",
+        epic="EP-02", sprint="SP-02", status="Done",
+        goal="A worker's environment cannot be rerouted by whatever the machine that launched the daemon happens to export.",
+        read_first=[
+            ARCH,
+            ("Materializer", "src/daemon/materializer.ts"),
+            ("Hermetic test env", "tests/fixtures/hermetic-env.ts"),
+            ("ADR-002: private store and materialized roots", "docs/delivery/adr/ADR-002-private-store-materialized-roots.md"),
+        ],
+        files=[
+            "src/shared/env-scrub.ts",
+            "src/daemon/materializer.ts",
+            "tests/fixtures/hermetic-env.ts",
+            "tests/materializer.test.ts",
+        ],
+        assets=[
+            ("src/shared/env-scrub.ts", "New", "The one canonical scrub list plus `withoutScrubbedEnvVars`."),
+            ("src/daemon/materializer.ts", "Edited", "Neutralizes inherited selectors in the materialized worker env."),
+            ("tests/fixtures/hermetic-env.ts", "Edited", "Consumes the production list instead of keeping its own copy."),
+            ("tests/materializer.test.ts", "Edited", "Poisoned-env regression."),
+        ],
+        steps=[
+            "Put the scrub list in `src/shared/env-scrub.ts` and have both production and the test fixture read it. Two lists is one list plus a bug: the copy that is not updated is the one that matters.",
+            "Blank the selectors rather than deleting them. OMP's `RpcClient` merges the worker env over `Bun.env`, so a deleted key falls back to the host's value; only an explicit empty string overrides it.",
+            "Cover every config-root selector: `PI_CONFIG_DIR`, `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, and the profile variables.",
+            "Apply the scrub inside materialization, where the worker env is built, so no caller can construct a worker env that skips it.",
+            "Prove the regression is not vacuous: with the scrub reverted and a poisoned `PI_CONFIG_DIR` exported, the test must fail.",
+        ],
+        acceptance=[
+            "A materialized worker env blanks every selector in the canonical list.",
+            "With `PI_CONFIG_DIR` and `CLAUDE_CONFIG_DIR` exported by the host, a worker still resolves to its own materialized root.",
+            "Production and the test fixture share one scrub list, asserted by importing it in both.",
+            "The poisoned-env regression fails with the scrub reverted, proving it is not vacuous.",
+        ],
+        depends_on=["T-201"],
+        evidence=[
+            ("Canonical scrub list shared by production and the test fixture", "src/shared/env-scrub.ts"),
+            ("Poisoned-env regression, proven non-vacuous (materializer suite)", "tests/materializer.test.ts"),
+        ],
+        out_of_scope=[
+            "Broader credential-env hygiene: provider API keys inherited into the daemon host env are still visible to a worker's own process env. That is a real gap and a known follow-up, but it is a credential-scoping question (EP-03's territory) rather than a config-root one, and folding it in here would mean two unrelated threat models in one change.",
+        ],
+    ),
 ]
 
 TASKS += [
@@ -1004,7 +1239,7 @@ TASKS += [
         epic="EP-03", sprint="SP-03", status="Done",
         goal="Each worker sees only the credentials its token is bound to, through a loopback proxy.",
         read_first=[ARCH, ("Broker contract", "tests/contracts/broker.contract.test.ts")],
-        files=["src/daemon/credential-gateway.ts"],
+        files=["src/daemon/credential-gateway.ts", "tests/credential-gateway.test.ts"],
         assets=[
             ("src/daemon/credential-gateway.ts", "New", "Token issuance, filtering, generations."),
             ("tests/credential-gateway.test.ts", "New", "44 tests."),
@@ -1026,7 +1261,7 @@ TASKS += [
             "44 tests pass.",
         ],
         evidence=[("Gateway suite, 44 tests", "tests/credential-gateway.test.ts"), ("Commits", "0fea451, c5e3e75")],
-        depends_on=["T-004"], unblocks=["T-302", "T-401"],
+        depends_on=["T-004"],
     ),
     Task(
         id="T-302", slug="shared-disable-recovery", title="Shared-account disable and requester recovery",
@@ -1097,7 +1332,7 @@ TASKS += [
         epic="EP-04", sprint="SP-04", status="Done",
         goal="A peer runs as a supervised child process that parks, resumes, and delegates through native `task`.",
         read_first=[ARCH, ("Spawn policy contract", "tests/contracts/spawn-policy.contract.test.ts")],
-        files=["src/worker/lifecycle.ts"],
+        files=["src/worker/lifecycle.ts", "tests/worker-lifecycle.test.ts"],
         assets=[
             ("src/worker/lifecycle.ts", "New", "Start, park, resume, classify."),
             ("src/daemon/materializer.ts", "Read", "Supplies the layout."),
@@ -1119,14 +1354,14 @@ TASKS += [
             "22 tests pass.",
         ],
         evidence=[("Lifecycle suite, 22 tests", "tests/worker-lifecycle.test.ts"), ("Commits", "e5855e1, 4117458")],
-        depends_on=["T-005", "T-201", "T-203", "T-301"], unblocks=["T-405"],
+        depends_on=["T-005", "T-201", "T-203", "T-301"],
     ),
     Task(
         id="T-402", slug="room-store", title="Durable room store",
         epic="EP-04", sprint="SP-04", status="Done",
         goal="Rooms, messages, and per-agent read cursors survive a daemon restart.",
         read_first=[ARCH],
-        files=["src/rooms/store.ts"],
+        files=["src/rooms/store.ts", "tests/rooms.test.ts"],
         assets=[
             ("src/rooms/store.ts", "New", "SQLite-backed bus."),
             ("tests/rooms.test.ts", "New", "25 tests."),
@@ -1143,14 +1378,13 @@ TASKS += [
             "25 tests pass.",
         ],
         evidence=[("Room suite, 25 tests", "tests/rooms.test.ts"), ("Commit", "96e7d9d")],
-        unblocks=["T-405"],
     ),
     Task(
         id="T-403", slug="scheduler", title="Cron and one-shot scheduler",
         epic="EP-04", sprint="SP-04", status="Done",
         goal="Schedules fire on Vixie cron semantics, and one-shot timers drive quota resume.",
         read_first=[ARCH],
-        files=["src/daemon/scheduler.ts"],
+        files=["src/daemon/scheduler.ts", "tests/scheduler.test.ts"],
         assets=[
             ("src/daemon/scheduler.ts", "New", "`nextCronTime`, `addOnce`."),
             ("tests/scheduler.test.ts", "New", "47 tests."),
@@ -1167,14 +1401,13 @@ TASKS += [
             "47 tests pass.",
         ],
         evidence=[("Scheduler suite, 47 tests", "tests/scheduler.test.ts"), ("Commits", "2409cb9, 22b6a97, b88bab5")],
-        unblocks=["T-404"],
     ),
     Task(
         id="T-404", slug="account-registry", title="Account registry and quota state machine",
         epic="EP-04", sprint="SP-04", status="Done",
         goal="Quota exhaustion parks every run on the account and arms an unattended resume.",
         read_first=[ARCH, ("Scheduler", "src/daemon/scheduler.ts")],
-        files=["src/daemon/quota-state.ts", "src/daemon/account-registry.ts"],
+        files=["src/daemon/quota-state.ts", "src/daemon/account-registry.ts", "tests/account-registry.test.ts"],
         assets=[
             ("src/daemon/quota-state.ts", "New", "Metered and subscription transitions."),
             ("src/daemon/account-registry.ts", "New", "Registry plus resume arming."),
@@ -1193,14 +1426,14 @@ TASKS += [
             "16 tests pass.",
         ],
         evidence=[("Registry suite, 16 tests", "tests/account-registry.test.ts"), ("Commit", "2291765")],
-        depends_on=["T-403"], unblocks=["T-405"],
+        depends_on=["T-403"],
     ),
     Task(
         id="T-405", slug="supervisor", title="Supervisor: delivery, parking, resume",
         epic="EP-04", sprint="SP-04", status="Done",
         goal="A room post reaches the right peers, and an armed timer alone restarts a parked worker and runs its backlog.",
         read_first=[ARCH, ("Worker lifecycle", "src/worker/lifecycle.ts"), ("Room store", "src/rooms/store.ts")],
-        files=["src/daemon/supervisor.ts"],
+        files=["src/daemon/supervisor.ts", "tests/supervisor.test.ts", "tests/end-to-end.test.ts"],
         assets=[
             ("src/daemon/supervisor.ts", "New", "Ties runtime pieces together."),
             ("src/daemon/account-registry.ts", "Read", "Park and resume signals."),
@@ -1230,13 +1463,79 @@ TASKS += [
     ),
     # ── EP-05: remaining work ────────────────────────────────────────────────
     Task(
+        id="T-510", slug="broker-hosting-resolution", title="Broker hosting resolution at boot",
+        epic="EP-05", sprint="SP-05", status="Done",
+        goal="The daemon decides at boot whether to reuse a broker the user already runs or embed its own, and takes custody of the admin token either way.",
+        read_first=[ARCH, ("Broker contract", "tests/contracts/broker.contract.test.ts"), ("Gateway", "src/daemon/credential-gateway.ts")],
+        files=["src/daemon/boot.ts", "tests/daemon-boot.test.ts"],
+        assets=[
+            ("src/daemon/boot.ts", "New", "`resolveBrokerHosting`: discovery, probe, custody."),
+            ("tests/daemon-boot.test.ts", "New", "14 tests."),
+            ("src/daemon/credential-gateway.ts", "Read", "Fronts the resolved hosting with per-worker tokens."),
+        ],
+        steps=[
+            "Follow OMP's own discovery chain in order: `OMP_AUTH_BROKER_URL` in the environment, then `auth.broker.*` in the agent config, then the token file. Inventing a different order would make the daemon disagree with every other OMP client on the same machine.",
+            "Probe a discovered broker twice: reachable, and willing to accept the token. A configured-but-dead broker fails boot rather than silently falling back, because a silent fallback splits the user's credentials across two vaults.",
+            "Treat an external broker's token as read-only: the daemon did not mint it and must not rotate or rewrite it.",
+            "For the embedded case, start `startAuthBroker` over the shared vault and mint a fresh in-memory admin token per boot, so a token never outlives the process that owns it or lands on disk.",
+            "Expose the hosting as a value the gateway consumes; workers never see `adminToken`.",
+        ],
+        acceptance=[
+            "An `OMP_AUTH_BROKER_URL` in the environment wins over config and token file.",
+            "A configured broker that fails either probe fails boot instead of falling back to embedded.",
+            "An external broker's token is never rewritten.",
+            "The embedded broker's admin token is freshly generated and not persisted.",
+            "14 tests pass.",
+        ],
+        evidence=[("Boot suite, 14 tests", "tests/daemon-boot.test.ts")],
+        depends_on=["T-004"],
+        out_of_scope=[
+            "Composing the rest of the daemon around this, which is T-502.",
+            "Per-worker token issuance, which T-301 owns.",
+        ],
+    ),
+    Task(
+        id="T-507", slug="control-socket-protocol", title="Control-socket protocol",
+        epic="EP-05", sprint="SP-05", status="Ready",
+        goal="The daemon's JSON-RPC-over-unix-socket contract exists as one typed, versioned artifact that every client and the server share.",
+        read_first=[ARCH, ("Test harness", "tests/harness.test.ts"), ("ADR-001: RPC subprocess workers", "docs/delivery/adr/ADR-001-rpc-subprocess-workers.md")],
+        files=["src/shared/protocol.ts", "src/shared/protocol-schemas.ts", "tests/protocol.contract.test.ts"],
+        assets=[
+            ("src/shared/protocol.ts", "New", "Method names, request and response types, protocol version."),
+            ("src/shared/protocol-schemas.ts", "New", "Runtime validation for every method's params and result."),
+            ("tests/protocol.contract.test.ts", "New", "Pins the wire shape and the version field."),
+        ],
+        steps=[
+            "Declare the method set once: `status`, `chat_send`, `chat_read`, `chat_wait`, `agent_spawn`, `agent_status`, `task_handoff`, `rooms_list`, `rooms_post`, `schedules_list`, `schedules_arm`, `kill`, `bump`. Three consumers (daemon, toolbelt, TUI) are about to be written against this; a shape that lives only in the server is three shapes by the time they land.",
+            "Carry a `protocolVersion` from the first commit. Adding one later means a field that is absent on old peers and present on new ones, which is exactly the ambiguity a version exists to remove.",
+            "Validate params and results at the boundary rather than trusting the type system: types vanish at runtime, and the socket is where an unknown client reaches the daemon. Hand-roll the validation; this package carries no runtime dependencies and this task adds none.",
+            "Define the error shape too, including method-not-found, and make it carry the server's protocol version so a mismatched client learns why rather than guessing.",
+            "Keep the module free of transport and I/O. It is a contract; the moment it opens a socket it stops being shareable by both ends.",
+        ],
+        acceptance=[
+            "Every declared method has a typed request, a typed response, and runtime validation on both.",
+            "An unknown method produces the declared method-not-found error carrying the protocol version.",
+            "A malformed params payload is refused at the boundary with the offending field named.",
+            "The contract module imports no transport and no daemon state.",
+            "Changing a method's shape fails the contract suite rather than surfacing as a runtime mismatch in T-502 or T-503.",
+        ],
+        depends_on=["T-002"],
+        out_of_scope=[
+            "Serving the protocol, which is T-502.",
+            "Consuming it from a worker, which is T-503.",
+        ],
+    ),
+    Task(
         id="T-501", slug="peer-store", title="Peer store: load definitions from the private paths",
         epic="EP-05", sprint="SP-05", status="Ready",
         goal="The daemon can enumerate peer definitions from the user and project private stores.",
         read_first=[ARCH, ("Parser", "src/shared/agent-definition.ts"), ("Discovery contract", "tests/contracts/discovery.contract.test.ts")],
-        files=["src/daemon/peer-store.ts", "tests/peer-store.test.ts"],
+        files=["src/daemon/peer-store.ts", "tests/peer-store.test.ts", "agents/example-researcher.md", "agents/example-reviewer.md"],
         assets=[
             ("src/daemon/peer-store.ts", "New", "Enumerates and parses definitions."),
+            ("tests/peer-store.test.ts", "New", "Shadowing, malformed files, empty store."),
+            ("agents/example-researcher.md", "New", "Shipped example definition; §8 promises this directory exists."),
+            ("agents/example-reviewer.md", "New", "Second example, showing `spawns:` and room subscriptions."),
             ("src/shared/agent-definition.ts", "Read", "`parsePeerDefinition` already exists; do not reimplement parsing."),
             ("src/daemon/materializer.ts", "Read only, not edited by this task", "Consumes the loaded definitions."),
         ],
@@ -1244,26 +1543,38 @@ TASKS += [
             "Read `~/.omp/agent/oh-my-agent/agents/*.md` and `<project>/.omp/oh-my-agent/agents/*.md`.",
             "Let a project definition shadow a user definition of the same name, matching OMP's own precedence so users are not surprised.",
             "Parse each through `parsePeerDefinition`; surface a parse failure with its file path rather than skipping the file silently, since a silently skipped peer looks identical to a peer that never existed.",
+            "Treat a missing or empty store directory as an empty listing. A first run has no store, and a daemon that cannot boot until the user has written an agent is a daemon nobody gets to try.",
+            "Ship two example definitions under `agents/`, which the architecture's repo layout already promises: a parser with no example is a schema users reverse-engineer from source.",
             "Expose lookup by name plus a full listing for `/agents`.",
         ],
         acceptance=[
             "Definitions load from both stores, with project shadowing user.",
             "Neither path is an OMP discovery root, re-asserted here so a future refactor cannot quietly relocate the store into one.",
             "A malformed definition reports its file path and does not abort the whole listing.",
+            "A missing or empty store directory yields an empty listing, not an error.",
+            "Both shipped examples parse through `parsePeerDefinition` in the suite, so a schema change cannot leave the documentation lying.",
             "Lookup by name returns the shadowing definition.",
         ],
-        depends_on=["T-101"], unblocks=["T-502", "T-504"],
+        depends_on=["T-101"],
         out_of_scope=["Materialization, which T-201 already owns."],
     ),
     Task(
         id="T-502", slug="daemon-entry-point", title="Daemon entry point",
         epic="EP-05", sprint="SP-05", status="Ready",
-        goal="`omp-agent daemon` boots every subsystem and keeps running after its terminal closes.",
-        read_first=[ARCH, ("Broker hosting", "src/daemon/boot.ts"), ("Supervisor", "src/daemon/supervisor.ts")],
+        goal="`omp-agent daemon` boots every subsystem, serves the control protocol, and keeps running after its terminal closes.",
+        read_first=[
+            ARCH,
+            ("Broker hosting", "src/daemon/boot.ts"),
+            ("Supervisor", "src/daemon/supervisor.ts"),
+            ("Control protocol", "docs/delivery/tasks/T-507-control-socket-protocol.md"),
+            ("ADR-001: RPC subprocess workers", "docs/delivery/adr/ADR-001-rpc-subprocess-workers.md"),
+        ],
         files=["src/daemon/main.ts", "src/daemon/socket.ts", "package.json", "tests/daemon-main.test.ts"],
         assets=[
             ("src/daemon/main.ts", "New", "Composition root."),
-            ("src/daemon/socket.ts", "New", "Control socket for the TUI."),
+            ("src/daemon/socket.ts", "New", "Serves the T-507 protocol over a unix socket."),
+            ("tests/daemon-main.test.ts", "New", "Boot, socket, single-instance, shutdown."),
+            ("src/shared/protocol.ts", "Read", "The method set and version this server implements."),
             ("src/daemon/boot.ts", "Read", "`resolveBrokerHosting` already exists."),
             ("src/daemon/credential-gateway.ts", "Read", "Started here."),
             ("src/daemon/supervisor.ts", "Read", "Started here."),
@@ -1272,58 +1583,114 @@ TASKS += [
         steps=[
             "Compose boot order: resolve broker hosting, start the gateway, open the room store, construct the scheduler, registry, and supervisor.",
             "Register peers from the store and arm their schedules.",
-            "Serve a control socket and write a pidfile under the active agent dir, honoring `PI_CODING_AGENT_DIR`.",
+            "Serve the T-507 protocol on a unix socket: `status`, `chat_send`, `chat_read`, `chat_wait`, `agent_spawn`, `agent_status`, `task_handoff`, `rooms_list`, `rooms_post`, `schedules_list`, `schedules_arm`, `kill`, and `bump`. Dispatch through the shared schemas rather than hand-parsing each payload.",
+            "Write a pidfile beside the socket under the active agent dir, honoring `PI_CODING_AGENT_DIR`.",
             "Detach from the controlling TTY, since surviving a closed terminal is the product's core claim.",
             "Shut down in reverse order so a stop does not strand a parked watcher or leave a half-swapped worker dir.",
         ],
         acceptance=[
             "The daemon starts, serves its socket, and answers a status request.",
+            "It serves every method T-507 declares, or answers method-not-found carrying the protocol version.",
             "It keeps running after its launching terminal exits.",
             "A second instance for the same profile refuses to start rather than corrupting shared state.",
             "Shutdown closes the gateway, stops workers, and removes the pidfile.",
             "Boot honors `PI_CODING_AGENT_DIR` for socket and pidfile placement.",
         ],
-        depends_on=["T-501"], unblocks=["T-503", "T-504"],
-        out_of_scope=["TUI rendering, which is T-504."],
+        depends_on=["T-501", "T-507"],
+        out_of_scope=[
+            "TUI rendering, which is T-504.",
+            "Persisting agents, runs, and schedules, which is T-508.",
+        ],
+    ),
+    Task(
+        id="T-508", slug="daemon-persistence", title="Daemon persistence and orphan sweep",
+        epic="EP-05", sprint="SP-05", status="Ready",
+        goal="Agents, runs, and schedules survive a daemon restart, and worker directories left by a crash are swept at boot.",
+        read_first=[ARCH, ("Daemon entry point", "docs/delivery/tasks/T-502-daemon-entry-point.md"), ("Room store", "src/rooms/store.ts")],
+        files=["src/daemon/db.ts", "src/daemon/main.ts", "tests/daemon-persistence.test.ts"],
+        assets=[
+            ("src/daemon/db.ts", "New", "`agents`, `runs`, `schedules` tables and their accessors."),
+            ("src/daemon/main.ts", "Edited", "Opens the database and runs the sweep during boot."),
+            ("tests/daemon-persistence.test.ts", "New", "Restart survival, run records, sweep."),
+            ("src/rooms/store.ts", "Read", "The existing SQLite conventions to follow, not a second style."),
+            ("src/daemon/materializer.ts", "Read", "Owns the `workers/` layout the sweep cleans up."),
+        ],
+        steps=[
+            "Add `agents`, `runs`, and `schedules` tables, following the room store's existing SQLite conventions rather than introducing a second persistence style in the same process.",
+            "Write one run record per delivered turn: which peer, which trigger, what outcome. Without it a restart erases the only evidence of what the system did while nobody was watching, which is precisely the period this product exists to cover.",
+            "Restore registered agents and armed schedules from the database at boot, so an unattended restart resumes rather than starting empty.",
+            "Sweep orphaned `workers/` materialized directories at startup by comparing them against the persisted registry. This is why the task follows T-502: the sweep needs a registry that outlives the crash, and a sweep with no registry either deletes live state or nothing.",
+            "Make the sweep conservative and loud: report what it removed. A silent deleter of directories is not something to debug at 3am.",
+        ],
+        acceptance=[
+            "Agents, runs, and schedules reload after a daemon restart.",
+            "Every delivered turn leaves exactly one run record naming its trigger and outcome.",
+            "A `workers/` directory with no registry entry is removed at boot and reported.",
+            "A `workers/` directory that does have a registry entry is left alone.",
+            "The sweep is proven non-vacuous: with the sweep reverted, the orphan test fails.",
+        ],
+        depends_on=["T-502"],
+        out_of_scope=[
+            "Transcript storage; §10 resolves that as OMP's own JSONL plus a cursor, not a duplicate message store.",
+            "Room, message, and subscription tables, which T-402 owns.",
+        ],
     ),
     Task(
         id="T-503", slug="agent-toolbelt", title="Worker toolbelt extension",
         epic="EP-05", sprint="SP-05", status="Ready",
         goal="A worker can talk to rooms and peers through tools injected into its own session.",
-        read_first=[ARCH, ("Room store", "src/rooms/store.ts"), ("Spawn classification", "src/worker/lifecycle.ts")],
+        read_first=[
+            ARCH,
+            ("Room store", "src/rooms/store.ts"),
+            ("Spawn classification", "src/worker/lifecycle.ts"),
+            ("Control protocol", "docs/delivery/tasks/T-507-control-socket-protocol.md"),
+        ],
         files=["src/worker/toolbelt.ts", "tests/toolbelt.test.ts"],
         assets=[
             ("src/worker/toolbelt.ts", "New", "`chat_send`, `chat_read`, `chat_wait`, `agent_spawn`, `agent_status`, `task_handoff`."),
+            ("tests/toolbelt.test.ts", "New", "Tool behavior against a running daemon socket."),
+            ("src/shared/protocol.ts", "Read", "The method set these tools call; do not invent a second one."),
             ("src/rooms/store.ts", "Read", "Backing bus."),
             ("src/worker/lifecycle.ts", "Read", "`classifyAgentSpawn` already exists; reuse it."),
             ("src/daemon/socket.ts", "Read", "Transport to the daemon."),
         ],
         steps=[
             "Expose the toolbelt as an OMP extension loaded into each worker session.",
-            "Route every call over the daemon control socket, so the worker never touches the room database directly and cannot corrupt a shared writer.",
-            "Implement `chat_wait` as a blocking wait the daemon can satisfy on a wake, rather than a poll loop that burns turns.",
+            "Route every call over the daemon control socket using the T-507 client types, so the worker never touches the room database directly and cannot corrupt a shared writer.",
+            "Implement `chat_wait` as a blocking wait the daemon satisfies on a wake, rather than a poll loop that burns turns. What counts as a wake is T-509's semantics: a mention the peer opted into, or a post in a room it subscribes to, never its own post.",
             "Route `agent_spawn` through `classifyAgentSpawn` and reject a coding subtask with a message naming `task` as the correct tool.",
             "Keep the tool list additive: never emit an explicit `tools:` list that would strip native `task`.",
         ],
         acceptance=[
             "`chat_send` posts and the message is visible to a subscribed peer.",
-            "`chat_wait` blocks and returns when a matching message arrives.",
+            "`chat_wait` blocks and returns on a wake as T-509 defines it, and does not return on a post the peer would not be woken by.",
             "`agent_spawn` with a coding-subtask payload is refused and names `task`.",
             "A worker with the toolbelt still exposes native `task` in its effective tool list.",
+            "Every call goes over the socket: the suite fails if the toolbelt opens the room database itself.",
         ],
-        depends_on=["T-502"],
-        out_of_scope=["New room semantics; T-402 owns the store."],
+        depends_on=["T-502", "T-507"],
+        out_of_scope=[
+            "New room semantics; T-402 owns the store.",
+            "Wake filtering itself, which T-509 implements in the supervisor.",
+        ],
     ),
     Task(
         id="T-504", slug="tui-surface", title="TUI commands, status widget, and dialogs",
         epic="EP-05", sprint="SP-05", status="Ready",
         goal="A human can see and steer running agents from inside the OMP TUI.",
-        read_first=[ARCH, ("Extension stub", "src/extension/index.ts"), ("Isolation layers", "ARCHITECTURE.md")],
+        read_first=[
+            ARCH,
+            ("Extension stub", "src/extension/index.ts"),
+            ("Control protocol", "docs/delivery/tasks/T-507-control-socket-protocol.md"),
+            ("ADR-005: sandbox opt-in, fail closed", "docs/delivery/adr/ADR-005-sandbox-opt-in-fail-closed.md"),
+        ],
         files=["src/extension/index.ts", "src/extension/commands.ts", "src/extension/widget.ts", "tests/extension.test.ts"],
         assets=[
             ("src/extension/index.ts", "Edited", "Currently a no-op factory."),
-            ("src/extension/commands.ts", "New", "`/agents`, `/rooms`, `/schedule`."),
+            ("src/extension/commands.ts", "New", "`/agents`, `/rooms`, `/schedule`, `/spawn`, `/logs`, `/inject`."),
             ("src/extension/widget.ts", "New", "Status line."),
+            ("tests/extension.test.ts", "New", "Command output and no-daemon degradation."),
+            ("src/shared/protocol.ts", "Read", "The methods the commands call."),
             ("src/daemon/socket.ts", "Read", "Data source."),
         ],
         steps=[
@@ -1331,6 +1698,7 @@ TASKS += [
             "Show a shield only for peers actually running under an OS sandbox, never for `workspace:` scoping, because a shield on an unsandboxed agent is a false security claim.",
             "Implement `/rooms` to read a transcript and post as `@you`.",
             "Implement `/schedule` to list and arm schedules.",
+            "Implement `/spawn` to start a peer from a definition, `/logs --tail` to follow a worker's output, and inject-instructions to push a directive into a running session. §1 and §4.5 promise all three; leaving them out would ship a TUI that observes but cannot steer, which is half the point of the surface.",
             "Add a status widget with running and parked counts plus unread totals.",
             "Use ask-dialogs for destructive actions: killing a worker, bumping a metered budget.",
             "Degrade to a clear message when no daemon is running, rather than throwing inside the TUI.",
@@ -1339,10 +1707,11 @@ TASKS += [
             "`/agents` lists peers with live state from the daemon.",
             "The shield appears only for sandboxed peers, verified against one sandboxed and one unsandboxed agent.",
             "`/rooms` posts as `@you` and the message wakes a subscribed peer.",
+            "`/spawn` starts a peer that then appears in `/agents`; `/logs --tail` streams a running worker's output; injected instructions reach the live session's next turn.",
             "Killing a worker asks for confirmation first.",
             "With no daemon running, every command reports that clearly instead of raising.",
         ],
-        depends_on=["T-502"],
+        depends_on=["T-502", "T-507"],
         out_of_scope=["Bus semantics and worker lifecycle, already covered by EP-04."],
     ),
     Task(
@@ -1360,6 +1729,7 @@ TASKS += [
             ("src/daemon/supervisor.ts", "Edited", "Fingerprint check and rebuild before wake."),
             ("src/worker/lifecycle.ts", "Edited", "Replace a parked worker's layout after re-materialization."),
             ("src/daemon/peer-store.ts", "Edited", "Re-read the definition so the comparison uses current disk state."),
+            ("tests/supervisor.test.ts", "Edited", "Staleness cases; T-405 owns the file."),
             ("src/shared/agent-definition.ts", "Read", "`fingerprintPeerDefinition` already exists."),
             ("src/daemon/materializer.ts", "Read", "Performs the rebuild; T-201 owns it."),
         ],
@@ -1377,7 +1747,6 @@ TASKS += [
             "No policy-changing file is mutated under a live process.",
         ],
         depends_on=["T-501", "T-502"],
-        unblocks=["T-605"],
     ),
     Task(
         id="T-506", slug="metered-budget-wiring", title="Wire metered budget warnings into rooms",
@@ -1387,6 +1756,7 @@ TASKS += [
         files=["src/daemon/supervisor.ts", "tests/supervisor.test.ts"],
         assets=[
             ("src/daemon/supervisor.ts", "Edited", "`onWarning` is currently an empty callback."),
+            ("tests/supervisor.test.ts", "Edited", "Warning and bump cases; T-405 owns the file."),
             ("src/daemon/account-registry.ts", "Read", "Already emits the warning."),
             ("src/rooms/store.ts", "Read", "Delivery surface."),
         ],
@@ -1403,6 +1773,38 @@ TASKS += [
         ],
         depends_on=["T-502"],
         out_of_scope=["Subscription accounts, which never take this path."],
+    ),
+    Task(
+        id="T-509", slug="wake-filters", title="Wake filters and mention parsing",
+        epic="EP-05", sprint="SP-05", status="Ready",
+        goal="The parsed `wake:` configuration actually governs who a message wakes.",
+        read_first=[ARCH, ("Supervisor", "src/daemon/supervisor.ts"), ("Parser", "src/shared/agent-definition.ts")],
+        files=["src/daemon/supervisor.ts", "src/rooms/store.ts", "tests/supervisor.test.ts"],
+        assets=[
+            ("src/daemon/supervisor.ts", "Edited", "Consume `wake.mention` and `wake.rooms` in the delivery path."),
+            ("src/rooms/store.ts", "Edited", "Expose mentions alongside message text so delivery does not re-parse bodies."),
+            ("tests/supervisor.test.ts", "Edited", "Mention and subscription wake cases; T-405 owns the file."),
+            ("src/shared/agent-definition.ts", "Read", "`wake: {mention, rooms}` already parses; nothing reads it yet."),
+        ],
+        steps=[
+            "Consume the already-parsed `wake: {mention, rooms}` in delivery. The parser has produced this since T-101 and nothing has ever read it, which means a documented, validated, tested configuration key currently does nothing at all.",
+            "Parse `@name` mentions once, at post time, and carry them with the message rather than re-scanning every body per subscriber on every delivery.",
+            "Wake a peer on a mention only when its `wake.mention` is true, so opting out is real rather than advisory.",
+            "Wake on a room post only for peers subscribed to that room, which is existing behavior and must stay: keep it as a regression test rather than reimplementing it.",
+            "Never wake a peer on its own post. This is already covered and stays covered; the test moves under this task's ownership rather than being written twice.",
+        ],
+        acceptance=[
+            "`@name` in a body wakes that peer when `wake.mention` is true, and does not when it is false.",
+            "A room post wakes only that room's subscribers.",
+            "A peer's own post never wakes it, proven by the existing regression continuing to pass.",
+            "A mention of an unknown name wakes nobody and is not an error.",
+            "Mentions are parsed once per post, not once per subscriber, asserted by the parse being observable exactly once.",
+        ],
+        depends_on=["T-405"],
+        out_of_scope=[
+            "Reaction-based wakes; ADR-009 keeps a reaction from marking anything read.",
+            "The toolbelt's `chat_wait`, which consumes these semantics but is T-503.",
+        ],
     ),
 ]
 
@@ -1434,8 +1836,10 @@ TASKS += [
             "`listMessages` returns reply counts and reactions without a second query.",
             "Existing wake and unread behavior is unchanged, proven by the current room suite passing untouched.",
         ],
-        out_of_scope=["Any HTTP surface; T-602 owns that."],
-        unblocks=["T-602", "T-604"],
+        out_of_scope=[
+            "Any HTTP surface; T-602 owns that.",
+            "Schema migration for existing room databases. Nothing is deployed yet, so a migration path would be maintenance for a population of zero; the store is recreated instead.",
+        ],
     ),
     Task(
         id="T-602", slug="console-api", title="Daemon HTTP and WebSocket API",
@@ -1445,6 +1849,7 @@ TASKS += [
         files=["src/daemon/console-api.ts", "tests/console-api.test.ts"],
         assets=[
             ("src/daemon/console-api.ts", "New", "HTTP and WebSocket surface."),
+            ("tests/console-api.test.ts", "New", "Route, wake, and socket cases."),
             ("src/rooms/store.ts", "Read", "Backing state."),
             ("src/daemon/supervisor.ts", "Read", "Posting must route through it."),
         ],
@@ -1464,13 +1869,12 @@ TASKS += [
         ],
         out_of_scope=["The browser client; T-603 owns it."],
         depends_on=["T-502", "T-601"],
-        unblocks=["T-603"],
     ),
     Task(
         id="T-603", slug="console-client", title="Browser client",
         epic="EP-06", sprint="SP-07", status="Blocked",
         goal="A human can watch and join agent conversations in a browser.",
-        read_first=[ARCH, ("Console API", "docs/delivery/tasks/T-602-console-api.md")],
+        read_first=[ARCH, ("Console API", "docs/delivery/tasks/T-602-console-api.md"), ("ADR-009: threads and reactions", "docs/delivery/adr/ADR-009-threads-and-reactions.md")],
         files=["src/console/index.html", "src/console/app.ts", "src/console/style.css"],
         assets=[
             ("src/console/app.ts", "New", "Client logic."),
@@ -1491,6 +1895,7 @@ TASKS += [
             "A reply opens in the thread pane and does not appear at the channel root.",
             "Dropping and restoring the connection restores a correct transcript.",
             "Verified by driving a real browser against a running daemon, not by asserting on rendered strings alone.",
+            "Closing the browser stops and parks nothing: with the tab shut, a scheduled run still fires and a room post still wakes its subscribers. The console is a viewer, and a viewer that can halt the system by being closed is not one.",
         ],
         out_of_scope=["Creation forms; T-605 owns those."],
         depends_on=["T-602"],
@@ -1499,10 +1904,16 @@ TASKS += [
         id="T-604", slug="reaction-toolbelt", title="Agents set reactions as status",
         epic="EP-06", sprint="SP-07", status="Blocked",
         goal="An agent can mark a message with an emoji to signal what it is doing about it.",
-        read_first=[ARCH, ("Toolbelt", "docs/delivery/tasks/T-503-agent-toolbelt.md"), ("Conversation model", "docs/delivery/tasks/T-601-conversation-model.md")],
+        read_first=[
+            ARCH,
+            ("Toolbelt", "docs/delivery/tasks/T-503-agent-toolbelt.md"),
+            ("Conversation model", "docs/delivery/tasks/T-601-conversation-model.md"),
+            ("ADR-009: threads and reactions", "docs/delivery/adr/ADR-009-threads-and-reactions.md"),
+        ],
         files=["src/worker/toolbelt.ts", "tests/toolbelt.test.ts"],
         assets=[
             ("src/worker/toolbelt.ts", "Edited", "Adds `chat_react`."),
+            ("tests/toolbelt.test.ts", "Edited", "Reaction cases beside T-503's chat cases."),
             ("src/rooms/store.ts", "Read", "`react` and `unreact` exist after T-601."),
         ],
         steps=[
@@ -1564,22 +1975,147 @@ TASKS += [
     ),
 ]
 
+TASKS += [
+    # ── EP-07: release readiness ─────────────────────────────────────────────
+    Task(
+        id="T-701", slug="ci-workflow", title="CI: typecheck, test, and delivery-doc drift",
+        epic="EP-07", sprint="SP-08", status="In progress",
+        goal="A push proves the tree type-checks, the suite passes, and the delivery docs match their generator.",
+        read_first=[ARCH, ("Delivery generator", "scripts/gen-delivery-docs.py"), ("Delivery tree contract", "docs/delivery/README.md")],
+        files=[".github/workflows/ci.yml"],
+        assets=[
+            (".github/workflows/ci.yml", "New", "Install, typecheck, test, lint, docs-drift."),
+            ("package.json", "Read", "Supplies the `typecheck` and `test` scripts CI invokes."),
+            ("scripts/gen-delivery-docs.py", "Read", "Re-run in CI; its output must match what is committed."),
+        ],
+        steps=[
+            "Run on push and pull request, on a single `ubuntu-latest` runner with `oven-sh/setup-bun`; there is no per-OS behavior in the suite worth a matrix's cost.",
+            "`bun install --frozen-lockfile`, so a drifted lockfile fails here rather than surprising the next developer.",
+            "Run `tsc --noEmit`, then `bun test`. Keep them separate steps: a type error and a failing assertion are different problems and should not share a red X.",
+            "Run `bunx biome check .` so style failures fail the build beside behavioral ones.",
+            "Regenerate the delivery tree with `python3 scripts/gen-delivery-docs.py` and fail on any diff under `docs/delivery/`. A generated tree nobody re-generates is a hand-maintained tree with extra steps.",
+            "Do not cache aggressively: `bun install` on this dependency set is cheap, and a stale cache that hides a resolution failure costs more than it saves.",
+        ],
+        acceptance=[
+            "A push runs install, typecheck, and test, and a failure in any one fails the build.",
+            "Committing a hand-edit to `docs/delivery/` fails CI with the diff shown.",
+            "Regenerating and committing that same edit's source in the generator makes CI green again.",
+            "The workflow is verified by pushing it, not by reading it: a workflow that has never run is a guess.",
+        ],
+        evidence=[
+            ("Workflow file", ".github/workflows/ci.yml"),
+        ],
+        out_of_scope=[
+            "Publishing, tagging, and release automation.",
+        ],
+    ),
+    Task(
+        id="T-702", slug="biome-lint", title="Biome lint and format configuration",
+        epic="EP-07", sprint="SP-08", status="Done",
+        goal="The repository has one enforced style, checkable in one command.",
+        read_first=[ARCH, ("Package manifest", "package.json")],
+        files=["biome.json", "package.json"],
+        assets=[
+            ("biome.json", "New", "Lint and format rules."),
+            ("package.json", "Edited", "Adds `lint` and `format` scripts."),
+        ],
+        steps=[
+            "Configure Biome for the TypeScript sources and the test tree, excluding `node_modules` and any generated output.",
+            "Add `lint` (check, no writes) and `format` (write) scripts, so CI and a developer run the same tool with different intent rather than two tools.",
+            "Run the one-time normalization as its own separate change, before or after this one but never inside it: a formatting sweep mixed into a config commit makes both unreviewable.",
+            "Keep the rule set close to Biome's recommended defaults. A bespoke rule set is a standing argument, and the value here is uniformity, not opinion.",
+        ],
+        acceptance=[
+            "`bun run lint` exits non-zero on a deliberately misformatted file and zero on the normalized tree.",
+            "`bun run format` is idempotent: running it twice produces no second diff.",
+            "The config excludes generated and vendored paths, so a clean tree is genuinely clean.",
+        ],
+        evidence=[
+            ("Biome configuration", "./biome.json"),
+            ("Lint and format scripts", "./package.json"),
+        ],
+        out_of_scope=[
+            "Changing rule severities: the baseline keeps Biome's recommended preset, with one documented suppression (the NUL-matching sandbox regex).",
+        ],
+    ),
+    Task(
+        id="T-703", slug="root-readme-and-metadata", title="Root README and package metadata",
+        epic="EP-07", sprint="SP-08", status="Done",
+        goal="A stranger landing on the repository can tell what it is, install it, and find the delivery tree.",
+        read_first=[ARCH, ("Delivery tree", "docs/delivery/README.md"), ("License decision", "docs/delivery/adr/ADR-010-mit-license.md")],
+        files=["README.md", "package.json", "LICENSE"],
+        assets=[
+            ("README.md", "New", "Front door: what, install, run, where to read next."),
+            ("package.json", "Edited", "`repository`, `homepage`, `bugs`, `keywords`, `engines`, `license`."),
+            ("LICENSE", "New", "MIT text; lands in the same change as the `license` field (ADR-010)."),
+            ("ARCHITECTURE.md", "Read", "The design document the README points at, not duplicates."),
+        ],
+        steps=[
+            "State in the first paragraph what the plugin does and what state it is in. A README that oversells an unfinished operator surface costs more trust than it buys.",
+            "Give install and run instructions that were actually executed, not inferred from the manifest.",
+            "Link onward: `ARCHITECTURE.md` for the design, `docs/delivery/` for the work. Do not restate either, because a third copy of the same claims is a third thing to keep true.",
+            "Add `repository`, `homepage`, `bugs`, `keywords`, and `engines` with `bun >=1.3.14` to the manifest.",
+            "Add the MIT `LICENSE` file and `license: \"MIT\"` together, per ADR-010: a field with no text asserts a grant nobody made, and text with no field is invisible to tooling.",
+        ],
+        acceptance=[
+            "The README's install and run commands were run as written and worked.",
+            "`package.json` carries repository, homepage, bugs, keywords, and an `engines.bun` constraint.",
+            "`package.json` carries `license: \"MIT\"` and the MIT text exists at `LICENSE`, matching ADR-010.",
+            "Every link in the README resolves.",
+        ],
+        evidence=[
+            ("Root README", "./README.md"),
+            ("Package metadata", "./package.json"),
+            ("MIT license text", "./LICENSE"),
+        ],
+        out_of_scope=[
+            "Badges pointing at CI, which are worth adding only once T-701's workflow has run green at least once.",
+        ],
+    ),
+    Task(
+        id="T-704", slug="deflake-intermittent-test", title="Identify and fix the intermittent test failure",
+        epic="EP-07", sprint="SP-08", status="Ready",
+        goal="The suite is deterministic: the failure seen once in twelve local runs is named, reproduced, and fixed.",
+        read_first=[ARCH, ("Test harness", "tests/harness.test.ts")],
+        files=["tests/"],
+        assets=[
+            ("tests/", "Edited", "Whichever suite the flake lands in; unknown until caught with a full log."),
+        ],
+        steps=[
+            "Catch it with the log kept: `bun test 2>&1 | tee run.log` in a loop, or let CI capture it — the one observed failure (412 total, 1 fail) printed no test name before the shell moved on.",
+            "Bias toward the timing-sensitive suites under load: gateway long-polls, scheduler timers, supervisor wake delivery. The single red run happened while the machine was under heavy parallel load; ten unloaded runs were green.",
+            "Once named, fix the test's synchronization rather than widening a timeout — a longer timeout is a slower flake, not a smaller one.",
+        ],
+        acceptance=[
+            "The failing test is identified from a captured full log.",
+            "Its fix is proven non-vacuous per the working rules.",
+            "Ten consecutive full-suite runs pass with the machine under normal load.",
+        ],
+        out_of_scope=[
+            "Deleting or skipping the flaky test. A skipped test is an admission the behavior is unspecified.",
+        ],
+    ),
+]
+
 TASK_FILE = {t.id: f"{t.id}-{t.slug}.md" for t in TASKS}
+TASK_BY_ID = {t.id: t for t in TASKS}
+
+# `Unblocks` is not authored. It is the inverse of `depends_on`, computed once
+# here, because two hand-maintained halves of the same edge drift apart and the
+# drift is invisible until someone acts on the wrong half.
+DEPENDENTS = {t.id: [o.id for o in TASKS if t.id in o.depends_on] for t in TASKS}
+
+EPIC_TASKS = {e.id: [t for t in TASKS if t.epic == e.id] for e in EPICS}
+SPRINT_TASKS = {s.id: [t for t in TASKS if t.sprint == s.id] for s in SPRINTS}
 
 
 # ── Index documents ───────────────────────────────────────────────────────────
-
-STATUS_LEGEND = [
-    ("Done", "Shipped, tested, and committed. The evidence table names the suite and commit."),
-    ("In progress", "Substantially built, but at least one acceptance item is unmet. The gap is named in the epic."),
-    ("Ready", "Specified and unblocked. Everything it depends on is Done."),
-    ("Blocked", "Waiting on a listed dependency."),
-]
 
 
 def render_readme() -> str:
     total = len(TASKS)
     done = len([t for t in TASKS if t.status == "Done"])
+    nxt = lambda i: f"[{i}](tasks/{TASK_FILE[i]})"  # noqa: E731
     parts = [
         "# oh-my-agent delivery tree",
         "",
@@ -1598,7 +2134,9 @@ def render_readme() -> str:
         "",
         "## Current state",
         "",
-        f"**{done} of {total} tasks Done.** Test suite: 411 passing across 19 files, `tsc --noEmit` clean.",
+        f"**{done} of {total} tasks Done.** Suite state is not restated here, because a "
+        "pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` "
+        "on every push, and `bun test` locally gives you the same answer.",
         "",
         "Every runtime subsystem is built and under test: workers, isolation, credentials, "
         "rooms, scheduling, and quota handling. Two things keep that from meaning finished.",
@@ -1606,6 +2144,10 @@ def render_readme() -> str:
         "First, there is no operator surface. The extension entry point is an empty factory "
         "and there is no daemon binary, so nothing here can currently be launched or looked "
         "at by a human (EP-05).",
+        "",
+        "Second, the release surface is one push old: the CI workflow, lint "
+        "configuration, and root README now exist (EP-07), but the workflow has "
+        "never run on a runner — T-701 stays In progress until a push proves it.",
         "",
         "The credential gateway is now verified at its consumer as well as its wire: a "
         "stock `RemoteAuthCredentialStore` drives it in "
@@ -1617,6 +2159,12 @@ def render_readme() -> str:
         "Every task file carries the same eight sections in the same order: Goal, Read first, "
         "Files this task may change, Modules and assets in play, Steps, Acceptance, and then "
         "Out of scope, Depends on, Unblocks. Anything else is drift.",
+        "",
+        "`Unblocks` is derived by inverting `Depends on`, so the two halves of an edge "
+        "cannot disagree. Only `Depends on` is authored.",
+        "",
+        "Epic and sprint status is derived from the tasks inside it, not written down "
+        "separately, so a container can never claim to be further along than its children.",
         "",
         "Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`. "
         "The number tells you the parent without opening anything.",
@@ -1633,8 +2181,8 @@ def render_readme() -> str:
                 [
                     f"[{e.id}](epics/{EPIC_FILE[e.id]})",
                     e.title,
-                    e.status,
-                    str(len([t for t in TASKS if t.epic == e.id])),
+                    status_cell(*container_status(e, EPIC_TASKS[e.id])),
+                    str(len(EPIC_TASKS[e.id])),
                 ]
                 for e in EPICS
             ],
@@ -1644,10 +2192,20 @@ def render_readme() -> str:
         "",
         table(
             ["Sprint", "Title", "Status", "Theme"],
-            [[f"[{s.id}](sprints/{SPRINT_FILE[s.id]})", s.title, s.status, s.theme] for s in SPRINTS],
+            [
+                [
+                    f"[{s.id}](sprints/{SPRINT_FILE[s.id]})",
+                    s.title,
+                    status_cell(*container_status(s, SPRINT_TASKS[s.id])),
+                    s.theme,
+                ]
+                for s in SPRINTS
+            ],
         ),
         "",
         "## Decisions",
+        "",
+        table(["ADR status", "Meaning"], [[s, m] for s, m in ADR_STATUS_LEGEND]),
         "",
         table(
             ["ADR", "Title", "Status"],
@@ -1656,13 +2214,20 @@ def render_readme() -> str:
         "",
         "## What to do next",
         "",
-        "EP-05 in dependency order: "
-        + " then ".join(f"[{t}](tasks/{TASK_FILE[t]})" for t in ["T-501", "T-502"])
-        + ". After T-502 the remaining four are independent and can run in parallel.",
+        "EP-05 opens on two independent fronts: " + nxt("T-507") + " freezes the "
+        "control-socket protocol and " + nxt("T-501") + " loads peer definitions. "
+        + nxt("T-502") + " needs both, and " + nxt("T-508") + " needs T-502 because the "
+        "orphan sweep reads the registry T-502 persists. After that "
+        + ", ".join(nxt(i) for i in ["T-503", "T-504", "T-505", "T-506", "T-509"])
+        + " are independent of each other and can run in parallel.",
         "",
-        "EP-06 (the web console) starts at "
-        "[T-601](tasks/T-601-conversation-model.md), which is independent of EP-05 and can "
-        "run alongside it. Everything else in that epic needs the daemon API from T-502.",
+        nxt("T-601") + " (the conversation model) depends on nothing in EP-05 and can run "
+        "alongside any of it. Everything else in EP-06 needs the daemon API from T-502.",
+        "",
+        "EP-07 is unblocked today: "
+        + ", ".join(nxt(i) for i in ["T-701", "T-702", "T-703"])
+        + " have no dependencies and are worth landing early, because CI is what stops the "
+        "rest of this list from regressing silently.",
         "",
         "## Working rules",
         "",
@@ -1679,6 +2244,10 @@ def render_readme() -> str:
         "",
         "These files are generated. Edit [`gen-delivery-docs.py`](../../scripts/gen-delivery-docs.py) "
         "and re-run it; do not hand-edit the output, because hand edits are lost on the next run.",
+        "",
+        "The generator renders into a staging directory, runs every gate against what it "
+        "just rendered, and only then replaces this tree. A failed gate leaves the previous "
+        "tree exactly as it was.",
         "",
         "```sh",
         "python3 scripts/gen-delivery-docs.py",
@@ -1723,33 +2292,51 @@ def render_asset_map() -> str:
 # ── Emit ──────────────────────────────────────────────────────────────────────
 
 
-def main() -> None:
-    if os.path.isdir(DELIVERY):
-        shutil.rmtree(DELIVERY)
-    for sub in ("epics", "sprints", "tasks", "adr"):
-        os.makedirs(os.path.join(DELIVERY, sub), exist_ok=True)
-
-    written: list[str] = []
-
-    def emit(relpath: str, body: str) -> None:
-        full = os.path.join(DELIVERY, relpath)
-        with open(full, "w") as fh:
-            fh.write(body)
-        written.append(full)
-
-    emit("README.md", render_readme())
-    emit("asset-map.md", render_asset_map())
+def render_all() -> dict[str, str]:
+    pages: dict[str, str] = {
+        "README.md": render_readme(),
+        "asset-map.md": render_asset_map(),
+    }
     for a in ADRS:
-        emit(os.path.join("adr", ADR_FILE[a.id]), render_adr(a))
+        pages[os.path.join("adr", ADR_FILE[a.id])] = render_adr(a)
     for e in EPICS:
-        emit(os.path.join("epics", EPIC_FILE[e.id]), render_epic(e, [t for t in TASKS if t.epic == e.id]))
+        pages[os.path.join("epics", EPIC_FILE[e.id])] = render_epic(e, EPIC_TASKS[e.id])
     for s in SPRINTS:
-        emit(os.path.join("sprints", SPRINT_FILE[s.id]), render_sprint(s, [t for t in TASKS if t.sprint == s.id]))
+        pages[os.path.join("sprints", SPRINT_FILE[s.id])] = render_sprint(s, SPRINT_TASKS[s.id])
     for t in TASKS:
-        emit(os.path.join("tasks", TASK_FILE[t.id]), render_task(t))
+        pages[os.path.join("tasks", TASK_FILE[t.id])] = render_task(t)
+    return pages
 
-    print(f"wrote {len(written)} files")
-    verify(written)
+
+def main() -> None:
+    """Render, verify, then swap.
+
+    The old shape deleted `docs/delivery` first and verified last, so a failed
+    gate left the tree half-written and the previous good copy gone. Here the
+    render lands in a staging sibling — same depth, so relative links resolve
+    identically — and the live tree is replaced only after every gate passes.
+    """
+    staging = DELIVERY + ".staging"
+    shutil.rmtree(staging, ignore_errors=True)
+
+    pages = render_all()
+    for sub in ("epics", "sprints", "tasks", "adr"):
+        os.makedirs(os.path.join(staging, sub), exist_ok=True)
+    for relpath, body in pages.items():
+        with open(os.path.join(staging, relpath), "w") as fh:
+            fh.write(body)
+    print(f"rendered {len(pages)} files into {os.path.relpath(staging, ROOT)}")
+
+    try:
+        verify(pages, staging)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        print("gates failed; previous tree left untouched")
+        raise
+
+    shutil.rmtree(DELIVERY, ignore_errors=True)
+    os.rename(staging, DELIVERY)
+    print(f"wrote {len(pages)} files to {os.path.relpath(DELIVERY, ROOT)}")
 
 
 # ── Verification gates ────────────────────────────────────────────────────────
@@ -1763,62 +2350,73 @@ SECRET_MARKERS = [
     r"_TOKEN=\S+",
 ]
 
+SOURCE_ROOTS = ("src", "tests")
 
-def verify(written: list[str]) -> None:
-    import re
 
+def verify(pages: dict[str, str], base: str) -> None:
+    """Gate the rendered content, not the tree on disk.
+
+    `pages` is what was just rendered; `base` is where it was staged, needed
+    only to resolve relative links between the documents themselves.
+    """
     failures: list[str] = []
 
     # Gate 1: forbidden characters.
     hits = 0
-    for f in written:
-        text = open(f).read()
+    for relpath, text in pages.items():
         for ch, name in FORBIDDEN.items():
             if ch in text:
                 hits += text.count(ch)
-                failures.append(f"{os.path.relpath(f, ROOT)}: contains {name}")
+                failures.append(f"{relpath}: contains {name}")
     print(f"gate: forbidden characters -> {hits} (expect 0)")
 
     # Gate 2: secret markers.
     leaks = 0
-    for f in written:
-        text = open(f).read()
+    for relpath, text in pages.items():
         for m in SECRET_MARKERS:
             for hit in re.findall(m, text):
                 leaks += 1
-                failures.append(f"{os.path.relpath(f, ROOT)}: matches {m!r} -> {hit[:12]}")
+                failures.append(f"{relpath}: matches {m!r} -> {hit[:12]}")
     print(f"gate: credential markers -> {leaks} (expect 0)")
 
     # Gate 3: relative link resolution. A gate that checks 0 links passes silently,
     # so report the total checked alongside the broken count.
     checked = broken = 0
     link = re.compile(r"\]\(([^)]+)\)")
-    for f in written:
-        base = os.path.dirname(f)
-        for target in link.findall(open(f).read()):
+    for relpath, text in pages.items():
+        dirname = os.path.dirname(os.path.join(base, relpath))
+        for target in link.findall(text):
             if target.startswith(("http://", "https://", "#")):
                 continue
             checked += 1
-            resolved = os.path.normpath(os.path.join(base, target.split("#")[0]))
+            resolved = os.path.normpath(os.path.join(dirname, target.split("#")[0]))
+            # A link that points back into `docs/delivery` by repo-relative path
+            # must be checked against what was just rendered, not against the
+            # live tree: otherwise a new page validates only on the second run.
+            if resolved == DELIVERY or resolved.startswith(DELIVERY + os.sep):
+                resolved = os.path.join(base, os.path.relpath(resolved, DELIVERY))
             if not os.path.exists(resolved):
                 broken += 1
-                failures.append(f"{os.path.relpath(f, ROOT)}: broken link -> {target}")
-    print(f"gate: relative links -> {checked} checked, {broken} broken (expect 0 broken)")
+                failures.append(f"{relpath}: broken link -> {target}")
+    print(f"gate: relative links -> {checked} checked, {broken} broken (expect 0)")
 
     # Gate 4a: every evidence path must exist on disk. Rendering a missing path
     # as plain text (rather than a link) hides it from the link gate, so this
     # gate is what actually catches a wrong anchor. Four bad OMP paths reached
-    # the first draft this way.
+    # the first draft this way. Delivery-tree targets are excluded: they live in
+    # the staging tree and the link gate already checked them there.
     anchors = missing_anchor = 0
     for holder, pairs in (
         [(t.id, t.evidence) for t in TASKS] + [(a.id, a.evidence) for a in ADRS]
     ):
-        for claim, anchor in pairs:
-            path = anchor.split(":")[0]
+        for _claim, anchor in pairs:
+            path = anchor_path(anchor)
             # A bare commit sha (or list of them) is not a path. Anything that
             # looks like a file, including a repo-root file with no slash, must
-            # exist: requiring a slash left `ARCHITECTURE.md:141` unchecked.
+            # exist: requiring a slash left `ARCHITECTURE.md` unchecked.
             if re.fullmatch(r"[0-9a-f]{7}(, [0-9a-f]{7})*", anchor):
+                continue
+            if path.startswith("docs/delivery/"):
                 continue
             if "/" not in path and "." not in path:
                 continue
@@ -1830,7 +2428,6 @@ def verify(written: list[str]) -> None:
 
     # Gate 4b: an asset a task only READS must already exist. A "New" or
     # "Edited" asset may legitimately not exist yet.
-    owned = {p for t in TASKS for p, role, _ in t.assets if role in ("New", "Edited")}
     reads = missing_read = 0
     for t in TASKS:
         for path, role, _ in t.assets:
@@ -1853,21 +2450,34 @@ def verify(written: list[str]) -> None:
             )
     print(f"gate: read-only assets -> {reads} checked, {missing_read} missing (expect 0)")
 
-    # Gate 4c: every evidence row is anchored to a path or identifier.
+    # Gate 4c: every evidence row is anchored to a path, a section, or a sha.
     rows = unanchored = 0
-    for t in TASKS:
-        for claim, anchor in t.evidence:
+    for holder, pairs in (
+        [(t.id, t.evidence) for t in TASKS] + [(a.id, a.evidence) for a in ADRS]
+    ):
+        for claim, anchor in pairs:
             rows += 1
-            if not ("/" in anchor or re.fullmatch(r"[0-9a-f]{7}(, [0-9a-f]{7})*", anchor)):
+            sha = re.fullmatch(r"[0-9a-f]{7}(, [0-9a-f]{7})*", anchor)
+            if not ("/" in anchor or "§" in anchor or sha):
                 unanchored += 1
-                failures.append(f"{t.id}: unanchored evidence {claim!r} -> {anchor!r}")
-    for a in ADRS:
-        for claim, src in a.evidence:
-            rows += 1
-            if "/" not in src and ":" not in src:
-                unanchored += 1
-                failures.append(f"{a.id}: unanchored evidence {claim!r} -> {src!r}")
+                failures.append(f"{holder}: unanchored evidence {claim!r} -> {anchor!r}")
     print(f"gate: evidence rows -> {rows} checked, {unanchored} unanchored (expect 0)")
+
+    # Gate 4d: an ARCHITECTURE.md anchor must name a section, never a line
+    # range. Line numbers were silently wrong in four ADRs after one edit to
+    # that file; a section survives edits, and a wrong one is visible on sight.
+    arch = stale = 0
+    for holder, pairs in (
+        [(t.id, t.evidence) for t in TASKS] + [(a.id, a.evidence) for a in ADRS]
+    ):
+        for claim, anchor in pairs:
+            if anchor_path(anchor) != "ARCHITECTURE.md":
+                continue
+            arch += 1
+            if "§" not in anchor:
+                stale += 1
+                failures.append(f"{holder}: ARCHITECTURE.md anchor is not a section -> {anchor!r}")
+    print(f"gate: architecture anchors -> {arch} checked, {stale} line-numbered (expect 0)")
 
     # Gate 5a: every task file carries exactly the eight declared sections, in
     # order. A ninth heading is drift, which is the failure the contract exists
@@ -1884,54 +2494,146 @@ def verify(written: list[str]) -> None:
         "## Unblocks",
     ]
     drifted = 0
-    for f in written:
-        if "/tasks/" not in f:
+    for relpath, text in pages.items():
+        if not relpath.startswith("tasks" + os.sep):
             continue
-        headings = [ln.rstrip() for ln in open(f).read().splitlines() if ln.startswith("##")]
+        headings = [ln.rstrip() for ln in text.splitlines() if ln.startswith("##")]
         if headings != expected:
             drifted += 1
             extra = [h for h in headings if h not in expected]
             failures.append(
-                f"{os.path.relpath(f, ROOT)}: section drift"
+                f"{relpath}: section drift"
                 + (f", unexpected {extra}" if extra else f", got {headings}")
             )
     print(f"gate: task sections -> {len(TASKS)} files, {drifted} drifted (expect 0)")
 
-    # Gate 5b: a Done epic or sprint may not contain a task that is not Done.
-    # Every status drift caught in review was this shape: a container claiming
-    # completion while holding unfinished children.
+    # Gate 5b: a container's effective status may not outrun its children.
+    # Derivation makes this true by construction, so what this gate really
+    # guards is a manual override that lies.
     inconsistent = 0
-    for e in EPICS:
-        open_tasks = [t.id for t in TASKS if t.epic == e.id and t.status != "Done"]
-        if e.status == "Done" and open_tasks:
+    for unit, children in (
+        [(e, EPIC_TASKS[e.id]) for e in EPICS] + [(s, SPRINT_TASKS[s.id]) for s in SPRINTS]
+    ):
+        status, _ = container_status(unit, children)
+        open_tasks = [t.id for t in children if t.status != "Done"]
+        if status == "Done" and open_tasks:
             inconsistent += 1
-            failures.append(f"{e.id} is Done but holds open tasks {open_tasks}")
-    for s in SPRINTS:
-        open_tasks = [t.id for t in TASKS if t.sprint == s.id and t.status != "Done"]
-        if s.status == "Done" and open_tasks:
-            inconsistent += 1
-            failures.append(f"{s.id} is Done but holds open tasks {open_tasks}")
+            failures.append(f"{unit.id} is Done but holds open tasks {open_tasks}")
     print(
         f"gate: status consistency -> {len(EPICS) + len(SPRINTS)} containers, "
         f"{inconsistent} inconsistent (expect 0)"
     )
 
-    # Gate 5c: task contract shape.
+    # Gate 5c: a status override must carry its annotation, and vice versa. An
+    # unexplained override is a hand-written status wearing a different hat.
+    unexplained = 0
+    for unit in list(EPICS) + list(SPRINTS):
+        if unit.status_override and unit.status_override not in STATUSES:
+            unexplained += 1
+            failures.append(f"{unit.id}: unknown override status {unit.status_override!r}")
+        if unit.status_override and not unit.status_note:
+            unexplained += 1
+            failures.append(f"{unit.id}: status override carries no annotation")
+        if unit.status_note and not unit.status_override:
+            unexplained += 1
+            failures.append(f"{unit.id}: status annotation with nothing overridden")
+    print(
+        f"gate: status overrides -> {len(EPICS) + len(SPRINTS)} containers, "
+        f"{unexplained} unexplained (expect 0)"
+    )
+
+    # Gate 6a: task contract shape.
     missing = 0
     for t in TASKS:
         if not t.acceptance or not t.steps or not t.files or not t.assets:
             missing += 1
             failures.append(f"{t.id}: incomplete contract")
-        for dep in t.depends_on + t.unblocks:
-            if dep not in TASK_FILE and dep != "Nothing.":
-                missing += 1
-                failures.append(f"{t.id}: unknown dependency {dep}")
     print(f"gate: task contract -> {len(TASKS)} tasks, {missing} incomplete (expect 0)")
+
+    # Gate 6b: every file a task claims it may change must appear in its asset
+    # table with a role. "Files this task may change" is the permission list and
+    # the asset table is the explanation; a file in one and not the other means
+    # a task is authorised to edit something nobody described.
+    declared = unnamed = 0
+    for t in TASKS:
+        named = {p for p, _, _ in t.assets}
+        for f in t.files:
+            declared += 1
+            if f not in named:
+                unnamed += 1
+                failures.append(f"{t.id}: may change {f} but never names it in assets")
+    print(f"gate: files named as assets -> {declared} checked, {unnamed} unnamed (expect 0)")
+
+    # Gate 6b-reverse: an asset a task creates or edits must appear in its
+    # files list. "Files this task may change" is the permission list; a New or
+    # Edited asset missing from it is work the task must do but is not
+    # authorised to touch (T-501's shipped examples were exactly this).
+    created = unlisted = 0
+    for t in TASKS:
+        for p, role, _ in t.assets:
+            if role not in ("New", "Edited"):
+                continue
+            created += 1
+            if p not in t.files:
+                unlisted += 1
+                failures.append(f"{t.id}: {role} asset {p} is not in its files list")
+    print(f"gate: created assets listed -> {created} checked, {unlisted} unlisted (expect 0)")
+
+    # Gate 6c: disk coverage. A module that exists but belongs to no task is
+    # work nobody recorded, which is how `src/daemon/boot.ts` shipped with no
+    # unit describing it. This is the only gate that reads the repository rather
+    # than the tree.
+    on_disk: list[str] = []
+    for top in SOURCE_ROOTS:
+        for dirpath, _dirs, names in os.walk(os.path.join(ROOT, top)):
+            for n in names:
+                if n.endswith(".ts"):
+                    on_disk.append(os.path.relpath(os.path.join(dirpath, n), ROOT))
+    named_anywhere = {p for t in TASKS for p, _, _ in t.assets}
+    unowned = sorted(p for p in on_disk if p not in named_anywhere)
+    for p in unowned:
+        failures.append(f"on disk but named by no task: {p}")
+    print(f"gate: disk coverage -> {len(on_disk)} modules, {len(unowned)} unowned (expect 0)")
+
+    # Gate 7: the dependency graph resolves and is acyclic. A cycle is not a
+    # slow build here, it is a set of tasks none of which can ever start.
+    unknown = 0
+    for t in TASKS:
+        for dep in t.depends_on:
+            if dep not in TASK_BY_ID:
+                unknown += 1
+                failures.append(f"{t.id}: depends on unknown task {dep}")
+
+    state: dict[str, int] = {}
+    cycles: list[str] = []
+
+    def walk(node: str, trail: list[str]) -> None:
+        state[node] = 1
+        for dep in TASK_BY_ID[node].depends_on:
+            if dep not in TASK_BY_ID:
+                continue
+            if state.get(dep) == 1:
+                cycles.append(" -> ".join(trail + [node, dep]))
+            elif state.get(dep, 0) == 0:
+                walk(dep, trail + [node])
+        state[node] = 2
+
+    for t in TASKS:
+        if state.get(t.id, 0) == 0:
+            walk(t.id, [])
+    for c in cycles:
+        failures.append(f"dependency cycle: {c}")
+    print(
+        f"gate: dependency graph -> {len(TASKS)} tasks, {unknown} unknown, "
+        f"{len(cycles)} cycles (expect 0)"
+    )
 
     if failures:
         print("\nFAILURES:")
         for f in failures[:40]:
             print(f"  {f}")
+        if len(failures) > 40:
+            print(f"  ... and {len(failures) - 40} more")
         raise SystemExit(1)
     print("\nall gates pass")
 

@@ -17,6 +17,8 @@ A room post reaches the right peers, and an armed timer alone restarts a parked 
 ## Files this task may change
 
 - `src/daemon/supervisor.ts`
+- `tests/supervisor.test.ts`
+- `tests/end-to-end.test.ts`
 
 ## Modules and assets in play
 
@@ -63,4 +65,4 @@ Evidence:
 
 ## Unblocks
 
-- Nothing.
+- T-509

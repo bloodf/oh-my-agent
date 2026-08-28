@@ -2,6 +2,8 @@
 
 **Status:** Done
 
+*Derived from the tasks below.*
+
 ## Outcome
 
 Workers reach model credentials only through a loopback gateway that shows each one exactly the accounts it is bound to.

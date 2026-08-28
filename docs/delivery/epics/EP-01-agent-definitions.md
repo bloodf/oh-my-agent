@@ -2,6 +2,8 @@
 
 **Status:** Done
 
+*Derived from the tasks below.*
+
 ## Outcome
 
 A peer is described by one markdown file with YAML frontmatter, parsed into a typed definition with a stable fingerprint.

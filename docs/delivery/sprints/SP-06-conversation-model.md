@@ -1,6 +1,8 @@
 # SP-06 — Conversation model
 
-**Status:** Planned
+**Status:** Ready
+
+*Derived from the tasks below.*
 
 ## Theme
 

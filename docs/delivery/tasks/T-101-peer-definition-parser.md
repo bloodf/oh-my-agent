@@ -16,6 +16,7 @@ A markdown file with YAML frontmatter becomes a validated `PeerDefinition` with 
 ## Files this task may change
 
 - `src/shared/agent-definition.ts`
+- `tests/agent-definition.test.ts`
 
 ## Modules and assets in play
 
