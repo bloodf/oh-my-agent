@@ -65,6 +65,8 @@ interface CapturedIo extends ExtensionIO {
 	widgets: Record<string, string[]>;
 	confirms: { title: string; message: string }[];
 	confirmAnswer: boolean;
+	selectAnswer: string | undefined;
+	selects: { title: string; options: string[] }[];
 }
 
 function fakeIo(answer = true): CapturedIo {
@@ -73,6 +75,8 @@ function fakeIo(answer = true): CapturedIo {
 		widgets: {},
 		confirms: [],
 		confirmAnswer: answer,
+		selectAnswer: undefined,
+		selects: [],
 		notify(message) {
 			io.notices.push(message);
 		},
@@ -82,6 +86,10 @@ function fakeIo(answer = true): CapturedIo {
 		async confirm(title, message) {
 			io.confirms.push({ title, message });
 			return io.confirmAnswer;
+		},
+		async select(title, options) {
+			io.selects.push({ title, options });
+			return io.selectAnswer;
 		},
 	};
 	return io;
@@ -138,8 +146,16 @@ interface TestDaemon {
  * wire is production and only the RPC child is replaced.
  */
 async function startDaemon(
-	peers: { name: string; rooms?: string[]; sandboxed?: boolean }[],
-	options: { schedules?: Map<string, ScheduleInfo> } = {},
+	peers: {
+		name: string;
+		rooms?: string[];
+		sandboxed?: boolean;
+		parent?: string;
+	}[],
+	options: {
+		schedules?: Map<string, ScheduleInfo>;
+		orphans?: Map<string, string>;
+	} = {},
 ): Promise<TestDaemon> {
 	const dir = await mkdtemp(join(tmpdir(), "oma-ext-"));
 	cleanups.push(() => rm(dir, { recursive: true, force: true }));
@@ -172,6 +188,7 @@ async function startDaemon(
 			accountId: "anthropic",
 			rooms: peer.rooms ?? [],
 		};
+		if (peer.parent !== undefined) record.parent = peer.parent;
 		// A daemon built against an extension-aware protocol sets this; the
 		// production context leaves it absent, and the client must not invent it.
 		if (peer.sandboxed !== undefined) {
@@ -205,6 +222,7 @@ async function startDaemon(
 		supervisor,
 		peers: peerMap,
 		knownRooms,
+		...(options.orphans === undefined ? {} : { orphans: options.orphans }),
 		schedules,
 		startedAt: Date.now(),
 		now: Date.now,
@@ -255,6 +273,42 @@ async function startDaemon(
 		rooms,
 	};
 }
+
+describe("/agents hierarchy", () => {
+	test("renders roots and descendants in alphabetical tree order", async () => {
+		const daemon = await startDaemon([
+			{ name: "zeta" },
+			{ name: "charlie", parent: "bravo" },
+			{ name: "bravo", parent: "alpha" },
+			{ name: "alpha" },
+		]);
+		const io = fakeIo();
+
+		await agentsCommand(daemon.client, io, "");
+
+		expect(io.notices).toEqual([
+			[
+				"alpha — running (anthropic)",
+				"  bravo — running (anthropic)",
+				"    charlie — running (anthropic)",
+				"zeta — running (anthropic)",
+			].join("\n"),
+		]);
+	});
+
+	test("renders an orphan as a root naming its absent parent", async () => {
+		const daemon = await startDaemon([], {
+			orphans: new Map([["stranded", "missing-parent"]]),
+		});
+		const io = fakeIo();
+
+		await agentsCommand(daemon.client, io, "");
+
+		expect(io.notices).toEqual([
+			"stranded — stopped (unknown) (orphan: missing-parent)",
+		]);
+	});
+});
 
 // ── /agents ──────────────────────────────────────────────────────────────────
 
@@ -404,14 +458,53 @@ describe("/spawn", () => {
 
 	test("reports daemon refusal instead of throwing", async () => {
 		const daemon = await startDaemon([]);
-		// Force agent_status to fail by closing the socket first? No — refusal
-		// path: kill an unknown peer through the command and assert a clean
-		// notice. For spawn, an unknown peer name rejects in production; here
-		// the stub context accepts any name, so exercise the error path through
-		// /kill instead.
+		// The stub context accepts any name, so exercise the error path through
+		// /kill: an unknown peer rejects and the command surfaces a clean notice.
 		const io = fakeIo();
 		await killCommand(daemon.client, io, "ghost");
 		expect(io.notices.join("\n")).toContain("Unknown agent: ghost");
+	});
+
+	test("a chosen parent is sent with the spawn", async () => {
+		const daemon = await startDaemon([{ name: "ceo" }]);
+
+		// Record the wire calls: the client must send the picked parent with
+		// agent_spawn (ADR-011's cooperative metadata), and only after asking.
+		const calls: { method: string; params: unknown }[] = [];
+		const spy = {
+			call: <T>(method: never, params?: unknown): Promise<T> => {
+				calls.push({ method, params });
+				return daemon.client.call(method, params);
+			},
+		};
+
+		const io = fakeIo();
+		io.selectAnswer = "ceo";
+		await spawnCommand(spy as never, io, "cto");
+
+		expect(io.selects).toHaveLength(1);
+		expect(io.selects[0]?.options).toContain("ceo");
+		const spawn = calls.find((call) => call.method === "agent_spawn");
+		expect(spawn?.params).toMatchObject({ name: "cto", parent: "ceo" });
+		expect(io.notices.join("\n")).toContain("under ceo");
+	});
+
+	test("declining the parent picker spawns at the root", async () => {
+		const daemon = await startDaemon([{ name: "ceo" }]);
+		const calls: { method: string; params: unknown }[] = [];
+		const spy = {
+			call: <T>(method: never, params?: unknown): Promise<T> => {
+				calls.push({ method, params });
+				return daemon.client.call(method, params);
+			},
+		};
+
+		const io = fakeIo();
+		io.selectAnswer = undefined; // Esc
+		await spawnCommand(spy as never, io, "cto");
+
+		const spawn = calls.find((call) => call.method === "agent_spawn");
+		expect(spawn?.params).toEqual({ name: "cto" });
 	});
 });
 

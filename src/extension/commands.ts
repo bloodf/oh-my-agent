@@ -25,6 +25,7 @@
 import type {
 	AgentSpawnResult,
 	AgentStatus,
+	AgentStatusResult,
 	ChatReadResult,
 	InjectResult,
 	JsonRpcFailure,
@@ -52,6 +53,8 @@ export interface ExtensionIO {
 	setWidget(key: string, lines: string[]): void;
 	/** Ask-dialog confirmation; resolves false on decline or dismiss. */
 	confirm(title: string, message: string): Promise<boolean>;
+	/** Single-choice selection; resolves undefined on cancel/Esc. */
+	select(title: string, options: string[]): Promise<string | undefined>;
 }
 
 /** Raised by the client when the socket is absent; handled as data. */
@@ -72,9 +75,64 @@ function shield(agent: AgentStatus & { sandboxed?: boolean }): string {
 	return agent.sandboxed === true ? "🛡 " : "";
 }
 
-function formatAgent(agent: AgentStatus & { sandboxed?: boolean }): string {
+function formatAgent(
+	agent: AgentStatus & { orphaned?: boolean; sandboxed?: boolean },
+	depth = 0,
+	orphan = false,
+): string {
 	const model = agent.model === undefined ? "" : ` ${agent.model}`;
-	return `${shield(agent)}${agent.name} — ${agent.state} (${agent.account})${model}`;
+	const suffix =
+		orphan || agent.orphaned === true
+			? ` (orphan: ${agent.parent ?? "missing-parent"})`
+			: "";
+	return `${"  ".repeat(depth)}${shield(agent)}${agent.name} — ${agent.state} (${agent.account})${model}${suffix}`;
+}
+
+function formatAgentTree(agents: AgentStatus[]): string {
+	const byName = new Map(agents.map((agent) => [agent.name, agent]));
+	const children = new Map<string, Set<string>>();
+	for (const agent of agents) {
+		if (agent.parent !== undefined && byName.has(agent.parent)) {
+			(
+				children.get(agent.parent) ??
+				children.set(agent.parent, new Set()).get(agent.parent)
+			)?.add(agent.name);
+		}
+		for (const child of agent.children ?? []) {
+			if (byName.has(child)) {
+				(
+					children.get(agent.name) ??
+					children.set(agent.name, new Set()).get(agent.name)
+				)?.add(child);
+			}
+		}
+	}
+
+	const rendered = new Set<string>();
+	const lines: string[] = [];
+	const render = (name: string, depth: number): void => {
+		if (rendered.has(name)) return;
+		rendered.add(name);
+		const agent = byName.get(name);
+		if (agent === undefined) return;
+		lines.push(
+			formatAgent(
+				agent,
+				depth,
+				agent.parent !== undefined && !byName.has(agent.parent),
+			),
+		);
+		for (const child of [...(children.get(name) ?? [])].sort())
+			render(child, depth + 1);
+	};
+	const roots = agents
+		.filter((agent) => agent.parent === undefined || !byName.has(agent.parent))
+		.map((agent) => agent.name)
+		.sort();
+	for (const root of roots) render(root, 0);
+	for (const agent of [...agents].sort((a, b) => a.name.localeCompare(b.name)))
+		render(agent.name, 0);
+	return lines.join("\n");
 }
 
 /**
@@ -109,9 +167,7 @@ export async function agentsCommand(
 			{},
 		);
 		io.notify(
-			agents.length === 0
-				? "No agents registered."
-				: agents.map(formatAgent).join("\n"),
+			agents.length === 0 ? "No agents registered." : formatAgentTree(agents),
 		);
 	});
 }
@@ -128,10 +184,27 @@ export async function spawnCommand(
 		return;
 	}
 	await guard(io, async () => {
+		// Hierarchy (ADR-011): an optional parent picker over live peers; the
+		// choice is cooperative metadata, and cancel means a root spawn.
+		let parent: string | undefined;
+		const status = await client.call<AgentStatusResult>("agent_status", {});
+		const live = status.agents
+			.filter((agent) => agent.state !== "stopped")
+			.map((agent) => agent.name);
+		if (live.length > 0 && io.select) {
+			const chosen = await io.select(
+				"Parent for the new peer (Esc = root)",
+				live,
+			);
+			parent = chosen;
+		}
 		const result = await client.call<AgentSpawnResult>("agent_spawn", {
 			name: trimmed,
+			...(parent === undefined ? {} : { parent }),
 		});
-		io.notify(`spawned ${result.name} — ${result.state}`);
+		io.notify(
+			`spawned ${result.name} — ${result.state}${parent ? ` under ${parent}` : ""}`,
+		);
 	});
 }
 

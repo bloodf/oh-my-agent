@@ -46,6 +46,11 @@ function ioFrom(ui: ExtensionUIContext): ExtensionIO {
 		notify: (message) => ui.notify(message),
 		setWidget: (key, lines) => ui.setWidget(key, lines),
 		confirm: async (title, message) => await ui.confirm(title, message),
+		select: async (title, options) =>
+			await ui.select(
+				title,
+				options.map((label) => ({ label })),
+			),
 	};
 }
 
