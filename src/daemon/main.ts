@@ -43,6 +43,7 @@ import type {
 	RoomInfo,
 	ScheduleInfo,
 } from "../shared/protocol";
+import type { WorkerHandle } from "../worker/lifecycle";
 import { startWorker } from "../worker/lifecycle";
 import { resolveBrokerHosting } from "./boot";
 import { startCredentialGateway } from "./credential-gateway";
@@ -291,12 +292,20 @@ export async function bootDaemon(
 		 * turn is the one an operator most needs to find, and the alternative to
 		 * recording it is a history that only ever shows successes.
 		 */
-		const recordRuns = (worker: SupervisedWorker): SupervisedWorker => ({
+		const recordRuns = (
+			worker: SupervisedWorker,
+		): SupervisedWorker & Partial<Pick<WorkerHandle, "sandboxed">> => ({
 			get name() {
 				return worker.name;
 			},
 			get state() {
 				return worker.state;
+			},
+			// Pass the sandbox flag through: the status mapping reads it for the
+			// operator's shield (ADR-005), and a wrapper that silently drops it
+			// downgrades every wire answer to "unsandboxed".
+			get sandboxed() {
+				return (worker as Partial<Pick<WorkerHandle, "sandboxed">>).sandboxed;
 			},
 			prompt: async (message) => {
 				if (!recording) return await worker.prompt(message);

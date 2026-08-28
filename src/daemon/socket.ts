@@ -8,7 +8,8 @@
  * `DaemonContext` a composed daemon supplies, and `InvalidParamsError`.
  *
  * Upstream deps: `../shared/protocol` (frames, error builders, version),
- * `../shared/protocol-schemas` (`METHODS`), `../rooms/store`, `./supervisor`.
+ * `../shared/protocol-schemas` (`METHODS`), `../rooms/store`,
+ * `../worker/lifecycle` (sandbox state), and `./supervisor`.
  *
  * Downstream consumers: `./main`, which owns composition and lifetime; every
  * operator client speaks to this socket rather than to those objects.
@@ -65,6 +66,7 @@ import {
 	PROTOCOL_VERSION,
 } from "../shared/protocol";
 import { METHODS } from "../shared/protocol-schemas";
+import type { WorkerHandle } from "../worker/lifecycle";
 import type { SupervisedWorker, Supervisor } from "./supervisor";
 
 /** Default ceiling for a parked `chat_wait`, per T-507's payload contract. */
@@ -78,7 +80,7 @@ export const HUMAN_AUTHOR = "@you";
 
 /** A peer the daemon has registered with the supervisor. */
 export interface PeerRecord {
-	worker: SupervisedWorker;
+	worker: SupervisedWorker & Partial<Pick<WorkerHandle, "sandboxed">>;
 	accountId: string;
 	model?: string;
 	rooms: string[];
@@ -183,6 +185,7 @@ function toAgentStatus(name: string, record: PeerRecord): AgentStatus {
 		state: record.worker.state,
 		account: record.accountId,
 		...(record.model === undefined ? {} : { model: record.model }),
+		sandboxed: record.worker.sandboxed,
 	};
 }
 

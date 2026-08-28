@@ -101,6 +101,8 @@ function explainAgentStatus(value: unknown): string | null {
 	if (!isNonEmptyString(value.account)) return "account";
 	if (value.model !== undefined && typeof value.model !== "string")
 		return "model";
+	if (value.sandboxed !== undefined && typeof value.sandboxed !== "boolean")
+		return "sandboxed";
 	return null;
 }
 

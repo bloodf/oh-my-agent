@@ -32,7 +32,7 @@ import { join } from "node:path";
 
 import type { DaemonHandle, WorkerFactory } from "../src/daemon/main";
 import { bootDaemon } from "../src/daemon/main";
-import { startControlSocket } from "../src/daemon/socket";
+import { type PeerRecord, startControlSocket } from "../src/daemon/socket";
 import type { SupervisedWorker, Supervisor } from "../src/daemon/supervisor";
 import { RoomStore } from "../src/rooms/store";
 import type {
@@ -268,6 +268,97 @@ describe("bootDaemon — composition and the control socket", () => {
 			"agent_status",
 		);
 		expect(status.agents).toEqual([]);
+	});
+
+	test("reports actual sandbox state through status and agent_status", async () => {
+		const dir = await tempAgentDir();
+		const rooms = await RoomStore.open(join(dir, "status.db"));
+		cleanups.push(() => rooms.close());
+		const worker = (
+			name: string,
+			sandboxed: boolean,
+		): PeerRecord["worker"] => ({
+			name,
+			state: "running",
+			sandboxed,
+			prompt: async () => {},
+			park: async () => {},
+			resume: async () => {},
+			stop: async () => {},
+		});
+		const peers = new Map<string, PeerRecord>([
+			[
+				"plain",
+				{
+					worker: worker("plain", false),
+					accountId: "acct-1",
+					rooms: [],
+				},
+			],
+			[
+				"sandboxed",
+				{
+					worker: worker("sandboxed", true),
+					accountId: "acct-1",
+					rooms: [],
+				},
+			],
+		]);
+		const socket = await startControlSocket({
+			socketPath: join(dir, "status.sock"),
+			context: {
+				rooms,
+				supervisor: undefined as unknown as Supervisor,
+				peers,
+				knownRooms: new Map(),
+				schedules: new Map(),
+				startedAt: Date.now(),
+				now: Date.now,
+				ensureRoom: async () => {},
+				spawnPeer: async () => ({ name: "none", state: "stopped" }),
+				armSchedule: () => undefined,
+				bumpAccount: async () => [],
+			},
+		});
+		cleanups.push(() => socket.close());
+		const expected = [
+			{ name: "plain", sandboxed: false },
+			{ name: "sandboxed", sandboxed: true },
+		];
+		const sandboxState = (agents: AgentStatusResult["agents"]) =>
+			agents
+				.map(({ name, sandboxed }) => ({ name, sandboxed }))
+				.sort((left, right) => left.name.localeCompare(right.name));
+
+		const status = await call<StatusResult>(socket.socketPath, "status");
+		expect(sandboxState(status.agents)).toEqual(expected);
+
+		const agentStatus = await call<AgentStatusResult>(
+			socket.socketPath,
+			"agent_status",
+		);
+		expect(sandboxState(agentStatus.agents)).toEqual(expected);
+	});
+
+	test("sandboxed result validation is additive and type-safe", () => {
+		const agent = { name: "reviewer", state: "running", account: "acct-1" };
+		expect(METHODS.agent_status.validateResult({ agents: [agent] }).ok).toBe(
+			true,
+		);
+		expect(
+			METHODS.agent_status.validateResult({
+				agents: [
+					{ ...agent, sandboxed: true },
+					{ ...agent, sandboxed: false },
+				],
+			}).ok,
+		).toBe(true);
+
+		const invalid = METHODS.agent_status.validateResult({
+			agents: [{ ...agent, sandboxed: "yes" }],
+		});
+		expect(invalid.ok).toBe(false);
+		if (!invalid.ok) expect(invalid.field).toBe("agents[0].sandboxed");
 	});
 
 	test("the real worker factory receives a peer's spawns closure", async () => {

@@ -52,6 +52,7 @@ export interface AgentStatus {
 	state: AgentState;
 	account: string;
 	model?: string;
+	sandboxed?: boolean;
 }
 
 export interface RoomMessage {
