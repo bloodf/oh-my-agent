@@ -21,7 +21,7 @@ describe("oh-my-agent scaffold", () => {
 		expect(typeof mod.default).toBe("function");
 	});
 
-	test("extension invoked with registration-probe causes zero registration calls", async () => {
+	test("extension load registers commands and events but performs no runtime actions", async () => {
 		const mod = await import(`${ROOT}/../src/extension/index.ts`);
 		const calls: string[] = [];
 
@@ -47,6 +47,15 @@ describe("oh-my-agent scaffold", () => {
 		};
 
 		mod.default(probe as unknown as ExtensionAPI);
-		expect(calls).toHaveLength(0);
+		// Registration is the load-time activity: the operator commands and the
+		// widget events must be registered here.
+		expect(calls.filter((c) => c === "registerCommand")).toHaveLength(5);
+		expect(calls.filter((c) => c === "on").length).toBeGreaterThanOrEqual(1);
+		// Runtime actions during load throw ExtensionRuntimeNotInitializedError
+		// in a real session; the factory must not attempt any.
+		expect(calls).not.toContain("sendMessage");
+		expect(calls).not.toContain("sendUserMessage");
+		expect(calls).not.toContain("appendEntry");
+		expect(calls).not.toContain("registerTool");
 	});
 });
