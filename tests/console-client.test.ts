@@ -61,7 +61,12 @@ function resolveChrome(): string {
 	const fromEnv = process.env.PUPPETEER_EXECUTABLE_PATH;
 	if (fromEnv && existsSync(fromEnv)) return fromEnv;
 
-	const cacheRoot = join(homedir(), ".cache", "puppeteer", "chrome-headless-shell");
+	const cacheRoot = join(
+		homedir(),
+		".cache",
+		"puppeteer",
+		"chrome-headless-shell",
+	);
 	try {
 		for (const version of readdirSync(cacheRoot).sort().reverse()) {
 			const versionDir = join(cacheRoot, version);
