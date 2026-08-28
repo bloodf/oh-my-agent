@@ -17,7 +17,9 @@
  *
  * Failure modes: protocol errors are data, not exceptions — `methodNotFound`
  * and `invalidParams` build JSON-RPC failure frames that always carry
- * `data.protocolVersion`, so a mismatched client learns why.
+ * `data.protocolVersion`, so a mismatched client learns why. New methods are
+ * additive and do not bump `PROTOCOL_VERSION`: old daemons already answer an
+ * unknown method with their version, which is the designed mismatch path.
  *
  * Performance: type declarations only; zero runtime cost beyond the small
  * error builders.
@@ -34,6 +36,8 @@ export const METHOD_NAMES = [
 	"chat_unreact",
 	"agent_spawn",
 	"agent_status",
+	"logs_tail",
+	"inject",
 	"task_handoff",
 	"rooms_list",
 	"rooms_post",
@@ -147,6 +151,24 @@ export interface AgentStatusParams {
 }
 export interface AgentStatusResult {
 	agents: AgentStatus[];
+}
+
+export interface LogsTailParams {
+	name: string;
+	lines?: number;
+}
+export interface LogsTailResult {
+	name: string;
+	lines: string[];
+}
+
+export interface InjectParams {
+	name: string;
+	message: string;
+}
+export interface InjectResult {
+	name: string;
+	queued: boolean;
 }
 
 export interface TaskHandoffParams {

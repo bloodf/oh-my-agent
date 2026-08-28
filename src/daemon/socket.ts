@@ -42,10 +42,14 @@ import type {
 	ChatUnreactResult,
 	ChatWaitParams,
 	ChatWaitResult,
+	InjectParams,
+	InjectResult,
 	JsonRpcFailure,
 	JsonRpcId,
 	KillParams,
 	KillResult,
+	LogsTailParams,
+	LogsTailResult,
 	MethodName,
 	RoomInfo,
 	RoomMessage,
@@ -73,6 +77,9 @@ import { METHODS } from "../shared/protocol-schemas";
 import type { WorkerHandle } from "../worker/lifecycle";
 import type { SupervisedWorker, Supervisor } from "./supervisor";
 
+/** Default line count for one log-tail response. */
+const DEFAULT_LOG_LINES = 50;
+
 /** Default ceiling for a parked `chat_wait`, per T-507's payload contract. */
 const DEFAULT_WAIT_MS = 30_000;
 
@@ -84,7 +91,8 @@ export const HUMAN_AUTHOR = "@you";
 
 /** A peer the daemon has registered with the supervisor. */
 export interface PeerRecord {
-	worker: SupervisedWorker & Partial<Pick<WorkerHandle, "sandboxed">>;
+	worker: SupervisedWorker &
+		Partial<Pick<WorkerHandle, "sandboxed" | "stderr">>;
 	accountId: string;
 	model?: string;
 	rooms: string[];
@@ -161,6 +169,8 @@ interface ParamsByMethod {
 	chat_unreact: ChatReactionParams;
 	agent_spawn: AgentSpawnParams;
 	agent_status: AgentStatusParams;
+	logs_tail: LogsTailParams;
+	inject: InjectParams;
 	task_handoff: TaskHandoffParams;
 	rooms_list: RoomsListParams;
 	rooms_post: RoomsPostParams;
@@ -375,6 +385,53 @@ export async function startControlSocket(
 				throw new InvalidParamsError("name", `Unknown agent: ${params.name}`);
 			}
 			return { agents: [toAgentStatus(params.name, record)] };
+		},
+
+		logs_tail: async (params): Promise<LogsTailResult> => {
+			const record = context.peers.get(params.name);
+			if (!record) {
+				throw new InvalidParamsError("name", `Unknown agent: ${params.name}`);
+			}
+			const lines = (record.worker.stderr?.() ?? "")
+				.replace(/\r\n/g, "\n")
+				.replace(/\n$/, "")
+				.split("\n")
+				.slice(-(params.lines ?? DEFAULT_LOG_LINES));
+			return {
+				name: params.name,
+				lines: lines.length === 1 && lines[0] === "" ? [] : lines,
+			};
+		},
+
+		inject: async (params): Promise<InjectResult> => {
+			const record = context.peers.get(params.name);
+			if (!record) {
+				throw new InvalidParamsError("name", `Unknown agent: ${params.name}`);
+			}
+			if (record.worker.state === "running") {
+				await record.worker.prompt(params.message);
+				return { name: params.name, queued: false };
+			}
+			if (record.worker.state !== "parked") {
+				throw new InvalidParamsError(
+					"name",
+					`Agent ${params.name} is ${record.worker.state}`,
+				);
+			}
+			const room = record.rooms[0];
+			if (room === undefined) {
+				throw new InvalidParamsError(
+					"name",
+					`Agent ${params.name} subscribes to no room for queued injection`,
+				);
+			}
+			await context.rooms.post({
+				room,
+				author: HUMAN_AUTHOR,
+				body: params.message,
+			});
+			await context.supervisor.deliver(params.name);
+			return { name: params.name, queued: true };
 		},
 
 		agent_spawn: async (params): Promise<AgentSpawnResult> =>

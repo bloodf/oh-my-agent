@@ -45,9 +45,11 @@ import type {
 	ChatSendResult,
 	ChatUnreactResult,
 	ChatWaitResult,
+	InjectResult,
 	JsonRpcFailure,
 	JsonRpcSuccess,
 	KillResult,
+	LogsTailResult,
 	MethodName,
 	RoomsListResult,
 	SchedulesArmResult,
@@ -114,6 +116,7 @@ async function writePeer(
 interface StubWorker {
 	prompts: string[];
 	state: () => SupervisedWorker["state"];
+	setStderr(value: string): void;
 }
 
 /** Records what the daemon asked each worker to do. */
@@ -125,14 +128,22 @@ function stubWorkerFactory(): {
 
 	const factory: WorkerFactory = async ({ peer }) => {
 		const prompts: string[] = [];
+		let stderr = "";
 		let state: SupervisedWorker["state"] = "running";
-		workers.set(peer.name, { prompts, state: () => state });
+		workers.set(peer.name, {
+			prompts,
+			state: () => state,
+			setStderr: (value) => {
+				stderr = value;
+			},
+		});
 
 		return {
 			name: peer.name,
 			get state() {
 				return state;
 			},
+			stderr: () => stderr,
 			prompt: async (message) => {
 				prompts.push(message);
 			},
@@ -800,6 +811,136 @@ describe("bootDaemon — composition and the control socket", () => {
 		expect(workers.get("reviewer")?.state()).toBe("running");
 	});
 
+	test("logs_tail returns the worker stderr tail over the real socket", async () => {
+		const dir = await tempAgentDir();
+		const rooms = await RoomStore.open(join(dir, "logs.db"));
+		cleanups.push(() => rooms.close());
+		const output = Array.from(
+			{ length: 60 },
+			(_, index) => `line ${index + 1}`,
+		).join("\n");
+		const worker: PeerRecord["worker"] = {
+			name: "reviewer",
+			state: "running",
+			stderr: () => output,
+			prompt: async () => {},
+			park: async () => {},
+			resume: async () => {},
+			stop: async () => {},
+		};
+		const socket = await startControlSocket({
+			socketPath: join(dir, "logs.sock"),
+			context: {
+				rooms,
+				supervisor: undefined as unknown as Supervisor,
+				peers: new Map([
+					["reviewer", { worker, accountId: "acct-1", rooms: [] }],
+				]),
+				knownRooms: new Map(),
+				schedules: new Map(),
+				startedAt: Date.now(),
+				now: Date.now,
+				ensureRoom: async () => {},
+				spawnPeer: async () => ({ name: "none", state: "stopped" }),
+				armSchedule: () => undefined,
+				bumpAccount: async () => [],
+			},
+		});
+		cleanups.push(() => socket.close());
+
+		const defaultTail = await call<LogsTailResult>(
+			socket.socketPath,
+			"logs_tail",
+			{ name: "reviewer" },
+		);
+		expect(defaultTail).toEqual({
+			name: "reviewer",
+			lines: Array.from({ length: 50 }, (_, index) => `line ${index + 11}`),
+		});
+		const lastTwo = await call<LogsTailResult>(socket.socketPath, "logs_tail", {
+			name: "reviewer",
+			lines: 2,
+		});
+		expect(lastTwo.lines).toEqual(["line 59", "line 60"]);
+	});
+
+	test("inject delivers to running workers and queues through the supervisor", async () => {
+		const dir = await tempAgentDir();
+		const rooms = await RoomStore.open(join(dir, "inject.db"));
+		cleanups.push(() => rooms.close());
+		await rooms.createRoom({ id: "#reviews", kind: "channel" });
+		const prompts: string[] = [];
+		let state: SupervisedWorker["state"] = "running";
+		const worker: PeerRecord["worker"] = {
+			name: "reviewer",
+			get state() {
+				return state;
+			},
+			prompt: async (message) => {
+				prompts.push(message);
+			},
+			park: async () => {},
+			resume: async () => {},
+			stop: async () => {},
+		};
+		const delivered: string[] = [];
+		const socket = await startControlSocket({
+			socketPath: join(dir, "inject.sock"),
+			context: {
+				rooms,
+				supervisor: {
+					deliver: async (name: string) => {
+						delivered.push(name);
+						return false;
+					},
+				} as Supervisor,
+				peers: new Map([
+					["reviewer", { worker, accountId: "acct-1", rooms: ["#reviews"] }],
+				]),
+				knownRooms: new Map(),
+				schedules: new Map(),
+				startedAt: Date.now(),
+				now: Date.now,
+				ensureRoom: async () => {},
+				spawnPeer: async () => ({ name: "none", state: "stopped" }),
+				armSchedule: () => undefined,
+				bumpAccount: async () => [],
+			},
+		});
+		cleanups.push(() => socket.close());
+
+		const immediate = await call<InjectResult>(socket.socketPath, "inject", {
+			name: "reviewer",
+			message: "review the failing test first",
+		});
+		expect(immediate).toEqual({ name: "reviewer", queued: false });
+		expect(prompts).toEqual(["review the failing test first"]);
+		expect(delivered).toEqual([]);
+
+		state = "parked";
+		const queued = await call<InjectResult>(socket.socketPath, "inject", {
+			name: "reviewer",
+			message: "handle this next",
+		});
+		expect(queued).toEqual({ name: "reviewer", queued: true });
+		expect(delivered).toEqual(["reviewer"]);
+		expect(prompts).toHaveLength(1);
+	});
+
+	test("steering methods reject unknown peers", async () => {
+		const { handle } = await boot();
+		for (const [method, params] of [
+			["logs_tail", { name: "ghost" }],
+			["inject", { name: "ghost", message: "wake up" }],
+		] as const) {
+			const failure = expectFailure(
+				await rpc(handle.socketPath, method, params),
+			);
+			expect(failure.error.code).toBe(ERROR_CODE.INVALID_PARAMS);
+			expect(failure.error.data.field).toBe("name");
+		}
+	});
+
 	test("agent_spawn builds a worker through the injected factory", async () => {
 		const agentDir = await tempAgentDir();
 		await writePeer(agentDir, "researcher", { rooms: ["#research"] });
@@ -926,6 +1067,8 @@ describe("bootDaemon — protocol errors", () => {
 			rooms_list: {},
 			rooms_post: { room: "#reviews", body: "hello again" },
 			schedules_list: {},
+			logs_tail: { name: "reviewer" },
+			inject: { name: "reviewer", message: "focus" },
 			schedules_arm: { scheduleId: "missing", enabled: false },
 			kill: { name: "reviewer" },
 			bump: { account: "anthropic", budgetUsd: 5 },

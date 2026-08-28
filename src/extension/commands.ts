@@ -1,8 +1,9 @@
 /**
- * Purpose: Slash-command logic for the T-504 operator surface — `/agents`,
- * `/spawn`, `/kill`, `/rooms`, `/schedule`. Each command is a plain exported
- * function over two thin seams (`DaemonClient`, `ExtensionIO`), so the test
- * suite drives them against the real protocol server without OMP running.
+ * Purpose: Slash-command logic for the T-504/T-511 operator surface — peer,
+ * room, schedule, log-tail, and instruction-injection commands. Each command
+ * is a plain exported function over two thin seams (`DaemonClient`,
+ * `ExtensionIO`), so the test suite drives them against the real protocol
+ * server without OMP running.
  *
  * Public API: `DaemonClient`, `DaemonUnavailableError`, `ExtensionIO`, and
  * one exported function per command.
@@ -25,9 +26,11 @@ import type {
 	AgentSpawnResult,
 	AgentStatus,
 	ChatReadResult,
+	InjectResult,
 	JsonRpcFailure,
 	JsonRpcSuccess,
 	KillResult,
+	LogsTailResult,
 	MethodName,
 	RoomsPostResult,
 	SchedulesArmResult,
@@ -157,6 +160,52 @@ export async function killCommand(
 	});
 }
 
+/** `/logs <name> [n]` — print the worker's buffered output tail. */
+export async function logsCommand(
+	client: DaemonClient,
+	io: ExtensionIO,
+	args: string,
+): Promise<void> {
+	const [name, count, ...extra] = args.trim().split(/\s+/);
+	const lines = count === undefined ? 50 : Number(count);
+	if (!name || extra.length > 0 || !Number.isSafeInteger(lines) || lines <= 0) {
+		io.notify("usage: /logs <peer-name> [line-count]");
+		return;
+	}
+	await guard(io, async () => {
+		const result = await client.call<LogsTailResult>("logs_tail", {
+			name,
+			lines,
+		});
+		io.notify(
+			result.lines.length === 0
+				? `${result.name}: no buffered output.`
+				: result.lines.join("\n"),
+		);
+	});
+}
+
+/** `/inject <name> <message>` — deliver now or queue for the next turn. */
+export async function injectCommand(
+	client: DaemonClient,
+	io: ExtensionIO,
+	args: string,
+): Promise<void> {
+	const [name, ...words] = args.trim().split(/\s+/);
+	const message = words.join(" ");
+	if (!name || message.length === 0) {
+		io.notify("usage: /inject <peer-name> <message>");
+		return;
+	}
+	await guard(io, async () => {
+		const result = await client.call<InjectResult>("inject", { name, message });
+		io.notify(
+			result.queued
+				? `queued instruction for ${result.name}`
+				: `delivered instruction to ${result.name}`,
+		);
+	});
+}
 /** `/rooms read <room>` — render the transcript. */
 export async function roomsReadCommand(
 	client: DaemonClient,

@@ -39,8 +39,12 @@ import type {
 	ChatUnreactResult,
 	ChatWaitParams,
 	ChatWaitResult,
+	InjectParams,
+	InjectResult,
 	KillParams,
 	KillResult,
+	LogsTailParams,
+	LogsTailResult,
 	MethodName,
 	RoomMessage,
 	RoomsListParams,
@@ -430,6 +434,46 @@ export const METHODS: Record<MethodName, MethodContract> = {
 			fromFields(v, checkFields(v, [(r) => optionalString(r, "name")])),
 		validateResult: (v): Validation<AgentStatusResult> =>
 			validateAgentsResult(v),
+	},
+	logs_tail: {
+		validateParams: (v): Validation<LogsTailParams> =>
+			fromFields(
+				v,
+				checkFields(v, [
+					(r) => requireString(r, "name"),
+					(r) =>
+						r.lines === undefined
+							? null
+							: requirePositiveSafeInteger(r, "lines"),
+				]),
+			),
+		validateResult: (v): Validation<LogsTailResult> => {
+			if (!isRecord(v)) return fail("result", "expected an object");
+			const name = requireString(v, "name");
+			if (name) return fail(name.field, name.message);
+			if (!isStringArray(v.lines)) {
+				return fail("lines", "lines must be a string array");
+			}
+			return ok(v as unknown as LogsTailResult);
+		},
+	},
+	inject: {
+		validateParams: (v): Validation<InjectParams> =>
+			fromFields(
+				v,
+				checkFields(v, [
+					(r) => requireString(r, "name"),
+					(r) => requireString(r, "message"),
+				]),
+			),
+		validateResult: (v): Validation<InjectResult> =>
+			fromFields(
+				v,
+				checkFields(v, [
+					(r) => requireString(r, "name"),
+					(r) => requireBoolean(r, "queued"),
+				]),
+			),
 	},
 	task_handoff: {
 		validateParams: (v): Validation<TaskHandoffParams> =>

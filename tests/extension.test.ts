@@ -33,7 +33,9 @@ import { Supervisor } from "../src/daemon/supervisor";
 import type { ExtensionIO } from "../src/extension/commands";
 import {
 	agentsCommand,
+	injectCommand,
 	killCommand,
+	logsCommand,
 	roomsPostCommand,
 	roomsReadCommand,
 	scheduleArmCommand,
@@ -88,9 +90,12 @@ function fakeIo(answer = true): CapturedIo {
 function stubWorker(name: string): SupervisedWorker & {
 	prompts: string[];
 	setState(state: SupervisedWorker["state"]): void;
+	setStderr(value: string): void;
+	stderr(): string;
 } {
 	let state: SupervisedWorker["state"] = "running";
 	const prompts: string[] = [];
+	let stderr = "";
 	return {
 		name,
 		prompts,
@@ -100,6 +105,10 @@ function stubWorker(name: string): SupervisedWorker & {
 		setState(next) {
 			state = next;
 		},
+		setStderr(value) {
+			stderr = value;
+		},
+		stderr: () => stderr,
 		prompt: async (message) => {
 			prompts.push(message);
 		},
@@ -431,6 +440,66 @@ describe("/kill", () => {
 	});
 });
 
+// ── /logs and /inject ───────────────────────────────────────────────────────
+
+describe("operator steering", () => {
+	test("/logs prints the default last 50 lines and honors an explicit count", async () => {
+		const daemon = await startDaemon([{ name: "reviewer" }]);
+		daemon.workers
+			.get("reviewer")
+			?.setStderr(
+				Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join(
+					"\n",
+				),
+			);
+
+		const defaultIo = fakeIo();
+		await logsCommand(daemon.client, defaultIo, "reviewer");
+		const defaultLines = defaultIo.notices[0]?.split("\n") ?? [];
+		expect(defaultLines).toHaveLength(50);
+		expect(defaultLines[0]).toBe("line 11");
+		expect(defaultLines.at(-1)).toBe("line 60");
+
+		const limitedIo = fakeIo();
+		await logsCommand(daemon.client, limitedIo, "reviewer 2");
+		expect(limitedIo.notices).toEqual(["line 59\nline 60"]);
+	});
+
+	test("/inject confirms immediate delivery and queued delivery", async () => {
+		const daemon = await startDaemon([{ name: "reviewer" }]);
+		const deliveredIo = fakeIo();
+		await injectCommand(
+			daemon.client,
+			deliveredIo,
+			"reviewer prioritize this failure",
+		);
+		expect(daemon.workers.get("reviewer")?.prompts.at(-1)).toBe(
+			"prioritize this failure",
+		);
+		expect(deliveredIo.notices.join("\n")).toContain("delivered");
+
+		const queuedIo = fakeIo();
+		await injectCommand(
+			{
+				call: async <T>() => ({ name: "reviewer", queued: true }) as T,
+			},
+			queuedIo,
+			"reviewer handle this next",
+		);
+		expect(queuedIo.notices.join("\n")).toContain("queued");
+	});
+
+	test("both steering verbs surface unknown-peer errors", async () => {
+		const daemon = await startDaemon([]);
+		const io = fakeIo();
+		await logsCommand(daemon.client, io, "ghost");
+		await injectCommand(daemon.client, io, "ghost wake up");
+		expect(io.notices).toHaveLength(2);
+		for (const notice of io.notices)
+			expect(notice).toContain("Unknown agent: ghost");
+	});
+});
+
 // ── /schedule ────────────────────────────────────────────────────────────────
 
 describe("/schedule", () => {
@@ -524,11 +593,13 @@ describe("daemon unavailable", () => {
 		await killCommand(missing, io, "x");
 		await roomsReadCommand(missing, io, "#x");
 		await roomsPostCommand(missing, io, "#x", "hi");
+		await logsCommand(missing, io, "x");
+		await injectCommand(missing, io, "x hi");
 		await scheduleListCommand(missing, io, "");
 		await scheduleArmCommand(missing, io, "x on");
 		await refreshWidget(missing, io);
 
-		expect(io.notices.length).toBeGreaterThanOrEqual(7);
+		expect(io.notices.length).toBeGreaterThanOrEqual(9);
 		for (const notice of io.notices) {
 			expect(notice).toContain(DAEMON_UNAVAILABLE);
 		}
@@ -557,6 +628,8 @@ describe("extension factory", () => {
 		expect(registered).toContain("kill");
 		expect(registered).toContain("rooms");
 		expect(registered).toContain("schedule");
+		expect(registered).toContain("logs");
+		expect(registered).toContain("inject");
 	});
 });
 

@@ -33,6 +33,8 @@ const VALID_PARAMS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 	chat_unreact: { messageId: 42, actor: "reviewer", emoji: "👀" },
 	agent_spawn: { name: "researcher", rooms: ["#research"], cwd: "/tmp/proj" },
 	agent_status: { name: "researcher" },
+	logs_tail: { name: "researcher", lines: 50 },
+	inject: { name: "researcher", message: "prioritize the failing test" },
 	task_handoff: {
 		fromAgent: "researcher",
 		toAgent: "reviewer",
@@ -77,6 +79,8 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 	agent_status: {
 		agents: [{ name: "researcher", state: "parked", account: "acct-1" }],
 	},
+	logs_tail: { name: "researcher", lines: ["first", "second"] },
+	inject: { name: "researcher", queued: false },
 	task_handoff: { handoffId: "handoff-1" },
 	rooms_list: {
 		rooms: [{ id: "#reviews", kind: "channel", name: "#reviews" }],
@@ -111,7 +115,7 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 // ---------------------------------------------------------------------------
 
 describe("declared method set", () => {
-	test("is exactly the fifteen contracted methods", () => {
+	test("is exactly the seventeen contracted methods", () => {
 		expect(([...METHOD_NAMES] as string[]).sort()).toEqual(
 			[
 				"agent_spawn",
@@ -123,7 +127,9 @@ describe("declared method set", () => {
 				"chat_unreact",
 				"chat_wait",
 				"kill",
+				"inject",
 				"rooms_list",
+				"logs_tail",
 				"rooms_post",
 				"schedules_arm",
 				"schedules_list",
@@ -186,6 +192,30 @@ describe("params validation", () => {
 		});
 		expect(result.ok).toBe(false);
 		if (!result.ok) expect(result.field).toBe("limit");
+	});
+
+	test("steering params validate line limits and non-empty messages", () => {
+		for (const lines of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+			const result = METHODS.logs_tail.validateParams({
+				name: "researcher",
+				lines,
+			});
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.field).toBe("lines");
+		}
+
+		const missingMessage = METHODS.inject.validateParams({
+			name: "researcher",
+		});
+		expect(missingMessage.ok).toBe(false);
+		if (!missingMessage.ok) expect(missingMessage.field).toBe("message");
+
+		const emptyMessage = METHODS.inject.validateParams({
+			name: "researcher",
+			message: "",
+		});
+		expect(emptyMessage.ok).toBe(false);
+		if (!emptyMessage.ok) expect(emptyMessage.field).toBe("message");
 	});
 
 	test("reaction params require messageId, actor, and emoji", () => {
@@ -287,6 +317,22 @@ describe("result validation", () => {
 		});
 		expect(wrongRemoved.ok).toBe(false);
 		if (!wrongRemoved.ok) expect(wrongRemoved.field).toBe("removed");
+	});
+
+	test("steering results validate string lines and queued state", () => {
+		const badLine = METHODS.logs_tail.validateResult({
+			name: "researcher",
+			lines: ["ok", 7],
+		});
+		expect(badLine.ok).toBe(false);
+		if (!badLine.ok) expect(badLine.field).toBe("lines");
+
+		const badQueued = METHODS.inject.validateResult({
+			name: "researcher",
+			queued: "yes",
+		});
+		expect(badQueued.ok).toBe(false);
+		if (!badQueued.ok) expect(badQueued.field).toBe("queued");
 	});
 
 	test("optional RoomMessage metadata is additive and validated when present", () => {

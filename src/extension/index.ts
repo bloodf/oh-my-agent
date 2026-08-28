@@ -29,7 +29,9 @@ import { getAgentDir } from "@oh-my-pi/pi-utils";
 import type { ExtensionIO } from "./commands";
 import {
 	agentsCommand,
+	injectCommand,
 	killCommand,
+	logsCommand,
 	roomsPostCommand,
 	roomsReadCommand,
 	scheduleArmCommand,
@@ -101,6 +103,21 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 			} else {
 				await scheduleArmCommand(client, io, args);
 			}
+		},
+	});
+
+	pi.registerCommand("logs", {
+		description: "Show a worker's buffered output: /logs <name> [line-count].",
+		handler: async (args, ctx) => {
+			await logsCommand(client, ioFrom(ctx.ui), args);
+		},
+	});
+
+	pi.registerCommand("inject", {
+		description:
+			"Push an instruction into a peer's next turn: /inject <name> <message>.",
+		handler: async (args, ctx) => {
+			await injectCommand(client, ioFrom(ctx.ui), args);
 		},
 	});
 
