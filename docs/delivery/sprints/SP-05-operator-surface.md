@@ -23,4 +23,4 @@ The parts a human touches: protocol, daemon entry point, persistence, toolbelt, 
 | [T-512](../tasks/T-512-sandboxed-on-the-wire.md) | [EP-05](../epics/EP-05-operator-surface.md) | Surface sandboxed state in agent_status | Ready |
 | [T-505](../tasks/T-505-definition-staleness.md) | [EP-05](../epics/EP-05-operator-surface.md) | Rebuild a worker when its definition changes | Ready |
 | [T-506](../tasks/T-506-metered-budget-wiring.md) | [EP-05](../epics/EP-05-operator-surface.md) | Wire metered budget warnings into rooms | Ready |
-| [T-509](../tasks/T-509-wake-filters.md) | [EP-05](../epics/EP-05-operator-surface.md) | Wake filters and mention parsing | Ready |
+| [T-509](../tasks/T-509-wake-filters.md) | [EP-05](../epics/EP-05-operator-surface.md) | Wake filters and mention parsing | Done |

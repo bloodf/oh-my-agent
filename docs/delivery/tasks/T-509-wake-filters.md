@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -39,11 +39,18 @@ The parsed `wake:` configuration actually governs who a message wakes.
 
 ## Acceptance
 
-- [ ] `@name` in a body wakes that peer when `wake.mention` is true, and does not when it is false.
-- [ ] A room post wakes only that room's subscribers.
-- [ ] A peer's own post never wakes it, proven by the existing regression continuing to pass.
-- [ ] A mention of an unknown name wakes nobody and is not an error.
-- [ ] Mentions are parsed once per post, not once per subscriber, asserted by the parse being observable exactly once.
+- [x] `@name` in a body wakes that peer when `wake.mention` is true, and does not when it is false.
+- [x] A room post wakes only that room's subscribers.
+- [x] A peer's own post never wakes it, proven by the existing regression continuing to pass.
+- [x] A mention of an unknown name wakes nobody and is not an error.
+- [x] Mentions are parsed once per post, not once per subscriber, asserted by the parse being observable exactly once.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Wake-filtered delivery in the supervisor | [`src/daemon/supervisor.ts`](../../../src/daemon/supervisor.ts) |
+| Supervisor suite: mention, opt-out, own-post, and parse-once cases | [`tests/supervisor.test.ts`](../../../tests/supervisor.test.ts) |
 
 ## Out of scope
 

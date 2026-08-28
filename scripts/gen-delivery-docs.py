@@ -1885,7 +1885,7 @@ TASKS += [
     ),
     Task(
         id="T-509", slug="wake-filters", title="Wake filters and mention parsing",
-        epic="EP-05", sprint="SP-05", status="Ready",
+        epic="EP-05", sprint="SP-05", status="Done",
         goal="The parsed `wake:` configuration actually governs who a message wakes.",
         read_first=[ARCH, ("Supervisor", "src/daemon/supervisor.ts"), ("Parser", "src/shared/agent-definition.ts")],
         files=["src/daemon/supervisor.ts", "src/rooms/store.ts", "tests/supervisor.test.ts"],
@@ -1910,6 +1910,10 @@ TASKS += [
             "Mentions are parsed once per post, not once per subscriber, asserted by the parse being observable exactly once.",
         ],
         depends_on=["T-405"],
+        evidence=[
+            ("Wake-filtered delivery in the supervisor", "src/daemon/supervisor.ts"),
+            ("Supervisor suite: mention, opt-out, own-post, and parse-once cases", "tests/supervisor.test.ts"),
+        ],
         out_of_scope=[
             "Reaction-based wakes; ADR-009 keeps a reaction from marking anything read.",
             "The toolbelt's `chat_wait`, which consumes these semantics but is T-503.",

@@ -56,4 +56,4 @@ Every runtime subsystem is built and tested, but nothing a user can launch or lo
 | [T-512](../tasks/T-512-sandboxed-on-the-wire.md) | Surface sandboxed state in agent_status | Ready |
 | [T-505](../tasks/T-505-definition-staleness.md) | Rebuild a worker when its definition changes | Ready |
 | [T-506](../tasks/T-506-metered-budget-wiring.md) | Wire metered budget warnings into rooms | Ready |
-| [T-509](../tasks/T-509-wake-filters.md) | Wake filters and mention parsing | Ready |
+| [T-509](../tasks/T-509-wake-filters.md) | Wake filters and mention parsing | Done |
