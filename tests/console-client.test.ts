@@ -29,18 +29,24 @@ import {
 	expect,
 	test,
 } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 
 import { type ConsoleApi, startConsoleApi } from "../src/daemon/console-api";
+import type { PeerStoreRoots } from "../src/daemon/peer-store";
+import { createPeerStore } from "../src/daemon/peer-store";
 import { Scheduler } from "../src/daemon/scheduler";
 import type { PeerRecord } from "../src/daemon/socket";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
 import { Supervisor } from "../src/daemon/supervisor";
 import type { RoomMessage, RoomStore } from "../src/rooms/store";
 import { RoomStore as Store } from "../src/rooms/store";
+import {
+	fingerprintPeerDefinition,
+	parsePeerDefinition,
+} from "../src/shared/agent-definition";
 import type { RoomInfo } from "../src/shared/protocol";
 
 // ── Browser ──────────────────────────────────────────────────────────────────
@@ -144,12 +150,13 @@ const transcriptText = (page: Page): Promise<string> =>
 
 const TOKEN = "operator-token";
 
-function stubWorker(name = "reviewer") {
+function stubWorker(name = "reviewer", fingerprint?: string) {
 	const prompts: string[] = [];
 	let state: "running" | "parked" | "stopped" = "running";
 
 	const worker: SupervisedWorker = {
 		name,
+		fingerprint,
 		get state() {
 			return state;
 		},
@@ -178,9 +185,9 @@ const MIME: Record<string, string> = {
 };
 
 /**
- * The daemon's composition (store + supervisor + console API), plus a static
- * server for the client files and a proxy for the reaction-toggle write the
- * HTTP surface does not expose yet. Everything the browser talks to is here.
+ * The daemon's composition (store + supervisor + peer store + console API),
+ * plus a static server for the client files and a transparent API proxy.
+ * Everything the browser talks to is here.
  */
 async function harness(options: { pollIntervalMs?: number } = {}) {
 	const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-console-client-"));
@@ -200,10 +207,23 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 	});
 	scheduler.start();
 
+	// Same private store the console writes definitions into and the daemon
+	// re-reads on boot.
+	const roots: PeerStoreRoots = {
+		user: join(dir, "user", "agents"),
+		project: join(dir, "project", "agents"),
+	};
+	await mkdir(roots.user, { recursive: true });
+	await mkdir(roots.project, { recursive: true });
+	const peerStore = createPeerStore(roots);
+
 	const supervisor = new Supervisor({
 		rooms,
 		scheduler,
 		now: () => Date.now(),
+		peers: peerStore,
+		respawn: async ({ peerName, definition }) =>
+			stubWorker(peerName, fingerprintPeerDefinition(definition)).worker,
 	});
 
 	const peers = new Map<string, PeerRecord>();
@@ -219,6 +239,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		rooms,
 		supervisor,
 		peers,
+		peerStore,
 		knownRooms,
 		ensureRoom,
 		token: TOKEN,
@@ -229,7 +250,20 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		name: string,
 		roomIds: string[],
 	): Promise<{ prompts: string[] }> => {
-		const stub = stubWorker(name);
+		const path = join(roots.project, `${name}.md`);
+		const document = [
+			"---",
+			`name: ${name}`,
+			`description: ${name} peer for console client tests.`,
+			`spawns: ${JSON.stringify(["scout"])}`,
+			...(roomIds.length === 0 ? [] : [`rooms: ${JSON.stringify(roomIds)}`]),
+			"---",
+			`You are ${name}.`,
+			"",
+		].join("\n");
+		await writeFile(path, document, "utf8");
+		const definition = parsePeerDefinition(path, document);
+		const stub = stubWorker(name, fingerprintPeerDefinition(definition));
 		for (const room of roomIds) await ensureRoom(room);
 		await supervisor.register({
 			worker: stub.worker,
@@ -245,6 +279,9 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		return stub;
 	};
 
+	/** Definitions as a cold daemon boot would read them. */
+	const reload = () => createPeerStore(roots).list();
+
 	/** Wait until the stub worker has been prompted with a body. */
 	const promptsContaining = (
 		prompts: string[],
@@ -257,9 +294,11 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		);
 
 	/**
-	 * Static client files + API proxy + the reaction-toggle route the console
-	 * API lacks. The browser sends its token in a custom header, rewritten to
-	 * Authorization here so no token lands in a URL anywhere.
+	 * Static client files and a transparent API proxy. The browser sends its
+	 * token in a custom header, rewritten to Authorization here so no token
+	 * lands in a URL anywhere. Every write, including the reaction toggle,
+	 * goes to the real console API — T-605 landed the last missing route, so
+	 * nothing is simulated here any more.
 	 */
 	const staticRoot = join(import.meta.dir, "../src/console");
 	/** Browser-side socket by its upstream connection, and frames that
@@ -309,32 +348,6 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 				if (presented !== null) {
 					headers.set("Authorization", `Bearer ${presented}`);
 					headers.delete("X-Operator-Token");
-				}
-
-				const toggle = /^\/api\/messages\/(\d+)\/reactions\/toggle$/.exec(
-					url.pathname,
-				);
-				if (toggle?.[1] !== undefined && request.method === "POST") {
-					const payload = (await request.json()) as {
-						actor?: string;
-						emoji?: string;
-					};
-					const messageId = Number(toggle[1]);
-					const actor = payload.actor ?? "@you";
-					const emoji = payload.emoji ?? "";
-					const target = await findMessage(rooms, messageId);
-					if (target === undefined) {
-						return Response.json(
-							{ error: { code: "not_found", message: "No such message" } },
-							{ status: 404 },
-						);
-					}
-					const mine = target.reactions.some(
-						(r) => r.actor === actor && r.emoji === emoji,
-					);
-					if (mine) await rooms.unreact(messageId, actor, emoji);
-					else await rooms.react(messageId, actor, emoji);
-					return Response.json({ ok: true });
 				}
 
 				const upstream = new URL(api.url + url.pathname + url.search);
@@ -398,6 +411,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		supervisor,
 		registerPeer,
 		ensureRoom,
+		reload,
 		promptsContaining,
 		consoleUrl,
 	};
@@ -701,6 +715,224 @@ describe("detachment", () => {
 				"No console is watching.",
 			);
 			expect(prompts.join("\n")).toContain("No console is watching.");
+		},
+	);
+});
+
+// ── Creation forms ───────────────────────────────────────────────────────────
+
+describe("creation forms", () => {
+	browserTest("creating a channel from the form lists it", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector("#new-channel-input");
+
+		await page.type("#new-channel-input", "#ops");
+		await page.click("#new-channel-create");
+
+		const channels = await waitFor(
+			"channel list including #ops",
+			() =>
+				page.$$eval("#channels .channel", (nodes) =>
+					nodes.map((n) => (n.textContent ?? "").trim()),
+				),
+			(list) => list.includes("#ops"),
+		);
+		expect(channels).toContain("#ops");
+		expect(errors).toEqual([]);
+	});
+
+	browserTest(
+		"creating an agent from the form writes a definition the daemon can load",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#new-agent-name");
+
+			await page.type("#new-agent-name", "researcher");
+			await page.type("#new-agent-description", "Researches things.");
+			await page.type("#new-agent-spawns", "scout");
+			await page.type("#new-agent-rooms", "#reviews");
+			await page.type("#new-agent-body", "You are the researcher.");
+			await page.click("#new-agent-create");
+
+			// The browser's own success signal first, then the durable proof: a
+			// cold peer store sees the definition the form wrote.
+			await waitFor(
+				"agent list including researcher",
+				() =>
+					page.$$eval("#agents .agent", (nodes) =>
+						nodes.map((n) => (n.textContent ?? "").trim()),
+					),
+				(list) => list.some((entry) => entry.includes("researcher")),
+			);
+			const listing = await h.reload();
+			expect(listing.errors).toEqual([]);
+			expect(
+				listing.definitions.find((d) => d.name === "researcher")?.rooms,
+			).toEqual(["#reviews"]);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"an invalid agent shows the parser's error and writes nothing",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#new-agent-name");
+
+			await page.type("#new-agent-name", "broken");
+			await page.type("#new-agent-description", "Rooms without a prefix.");
+			await page.type("#new-agent-spawns", "scout");
+			await page.type("#new-agent-rooms", "reviews");
+			await page.type("#new-agent-body", "You are broken.");
+			await page.click("#new-agent-create");
+
+			const shown = await waitFor(
+				"parser error in the form",
+				() => page.$eval("#new-agent-error", (node) => node.textContent ?? ""),
+				(text) => text.includes("rooms entries must start with"),
+			);
+			expect(shown).toContain('rooms entries must start with "#"');
+			expect((await h.reload()).definitions.map((d) => d.name)).not.toContain(
+				"broken",
+			);
+			// A refused write is a rendered message, not an uncaught rejection.
+			// Chrome logs "Failed to load resource" for every non-2xx response
+			// whether or not the page handled it, and the 400 here is the
+			// contract; what must not appear is an error the client raised.
+			expect(
+				errors.filter((entry) => !entry.startsWith("Failed to load resource")),
+			).toEqual([]);
+		},
+	);
+});
+
+// ── Membership controls ──────────────────────────────────────────────────────
+
+describe("membership controls", () => {
+	browserTest(
+		"subscribing a running agent from the UI wakes it on the next post",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+			const peer = await h.registerPeer("reviewer", ["#reviews"]);
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#ops"), {
+				waitUntil: "domcontentloaded",
+			});
+			await page.waitForSelector(
+				'#agents .agent[data-name="reviewer"] .membership-toggle',
+			);
+
+			await page.click(
+				'#agents .agent[data-name="reviewer"] .membership-toggle',
+			);
+			await waitFor(
+				"reviewer shown as a member of #ops",
+				() =>
+					page.$eval(
+						'#agents .agent[data-name="reviewer"] .membership-toggle',
+						(node) => node.getAttribute("data-member") ?? "",
+					),
+				(value) => value === "true",
+			);
+
+			await h.supervisor.post({
+				room: "#ops",
+				author: "@you",
+				body: "Ops needs you.",
+			});
+			const prompts = await h.promptsContaining(peer.prompts, "Ops needs you.");
+			expect(prompts.join("\n")).toContain("Ops needs you.");
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"unsubscribing a running agent from the UI stops delivery",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const leaving = await h.registerPeer("reviewer", ["#reviews"]);
+			const staying = await h.registerPeer("researcher", ["#reviews"]);
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector(
+				'#agents .agent[data-name="reviewer"] .membership-toggle',
+			);
+
+			await page.click(
+				'#agents .agent[data-name="reviewer"] .membership-toggle',
+			);
+			await waitFor(
+				"reviewer shown as not a member of #reviews",
+				() =>
+					page.$eval(
+						'#agents .agent[data-name="reviewer"] .membership-toggle',
+						(node) => node.getAttribute("data-member") ?? "",
+					),
+				(value) => value === "false",
+			);
+
+			await h.supervisor.post({
+				room: "#reviews",
+				author: "@you",
+				body: "Still listening?",
+			});
+			const prompts = await h.promptsContaining(
+				staying.prompts,
+				"Still listening?",
+			);
+			expect(prompts.join("\n")).toContain("Still listening?");
+			expect(leaving.prompts.join("\n")).not.toContain("Still listening?");
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"the UI says a membership change took effect immediately",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+			await h.registerPeer("reviewer", ["#reviews"]);
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#ops"), {
+				waitUntil: "domcontentloaded",
+			});
+			await page.waitForSelector(
+				'#agents .agent[data-name="reviewer"] .membership-toggle',
+			);
+
+			await page.click(
+				'#agents .agent[data-name="reviewer"] .membership-toggle',
+			);
+
+			// Step 7 of the contract: an operator must be told which changes are
+			// live and which wait for a rebuild.
+			const notice = await waitFor(
+				"membership notice",
+				() => page.$eval("#notice", (node) => node.textContent ?? ""),
+				(text) => text.length > 0,
+			);
+			expect(notice.toLowerCase()).toContain("immediately");
+			expect(notice.toLowerCase()).not.toContain("rebuild");
+			expect(errors).toEqual([]);
 		},
 	);
 });

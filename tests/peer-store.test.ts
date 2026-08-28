@@ -14,7 +14,14 @@
  * @Environment bun
  */
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -183,5 +190,58 @@ describe("shipped peer examples", () => {
 
 		expect(definition.spawns).toEqual(["scout", "implementor"]);
 		expect(definition.rooms).toEqual(["#reviews", "#engineering"]);
+	});
+});
+
+describe("peer store writes", () => {
+	test("an unsafe name is refused and nothing reaches disk", async () => {
+		await withTempStore(async (_base, roots) => {
+			const store = createPeerStore(roots);
+			for (const name of ["../evil", "a/b", "a\\b", ".hidden", ".."]) {
+				await expect(
+					store.write({ name, description: "x", body: "body" }),
+				).rejects.toThrow(/INVALID_NAME/);
+			}
+			// Nothing landed: no file outside the root, none inside it either.
+			expect(await readdir(roots.project).catch(() => [])).toHaveLength(0);
+		});
+	});
+
+	test("write without overwrite refuses an occupied path, whatever the frontmatter says", async () => {
+		await withTempStore(async (_base, roots) => {
+			// A file named for one peer but declaring another: the conflict check
+			// must key on the path, or a create silently destroys the occupant.
+			await writePeer(roots.project, "alpha.md", peerDocument("beta", "b"));
+			const store = createPeerStore(roots);
+			await expect(
+				store.write(
+					{ name: "alpha", description: "x", body: "body" },
+					{ overwrite: false },
+				),
+			).rejects.toThrow(/PEER_EXISTS/);
+			// The occupant is untouched.
+			const content = await readFile(join(roots.project, "alpha.md"), "utf8");
+			expect(content).toContain('"beta"');
+		});
+	});
+
+	test("overwrite is the explicit edit path", async () => {
+		await withTempStore(async (_base, roots) => {
+			const store = createPeerStore(roots);
+			const fields = {
+				name: "alpha",
+				description: "one",
+				model: ["@research"],
+				spawns: ["scout"],
+				body: "v1",
+			};
+			await store.write(fields);
+			await store.write(
+				{ ...fields, description: "two", body: "v2" },
+				{ overwrite: true },
+			);
+			const definition = await store.get("alpha");
+			expect(definition?.description).toBe("two");
+		});
 	});
 });

@@ -21,17 +21,23 @@
  * @Environment bun
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ConsoleApi } from "../src/daemon/console-api";
 import { startConsoleApi } from "../src/daemon/console-api";
+import type { PeerStoreRoots } from "../src/daemon/peer-store";
+import { createPeerStore } from "../src/daemon/peer-store";
 import { Scheduler } from "../src/daemon/scheduler";
 import type { PeerRecord } from "../src/daemon/socket";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
 import { Supervisor } from "../src/daemon/supervisor";
 import { RoomStore } from "../src/rooms/store";
+import {
+	fingerprintPeerDefinition,
+	parsePeerDefinition,
+} from "../src/shared/agent-definition";
 import type { RoomInfo } from "../src/shared/protocol";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -45,12 +51,13 @@ afterEach(async () => {
 const TOKEN = "operator-token";
 
 /** Records what the supervisor asked the worker to do. */
-function stubWorker(name = "reviewer") {
+function stubWorker(name = "reviewer", fingerprint?: string) {
 	const prompts: string[] = [];
 	let state: "running" | "parked" | "stopped" = "running";
 
 	const worker: SupervisedWorker = {
 		name,
+		fingerprint,
 		get state() {
 			return state;
 		},
@@ -69,6 +76,17 @@ function stubWorker(name = "reviewer") {
 	};
 
 	return { worker, prompts };
+}
+
+/** A definition file the production parser accepts, as the console writes it. */
+function peerDocument(name: string, rooms: string[]): string {
+	const frontmatter = [
+		`name: ${name}`,
+		`description: ${name} peer for console management tests.`,
+		`spawns: ${JSON.stringify(["scout"])}`,
+		...(rooms.length === 0 ? [] : [`rooms: ${JSON.stringify(rooms)}`]),
+	].join("\n");
+	return `---\n${frontmatter}\n---\nYou are ${name}.\n`;
 }
 
 /**
@@ -91,10 +109,32 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 	});
 	scheduler.start();
 
+	// The private store the console writes definitions into, and the same
+	// store the supervisor re-reads for T-505 staleness — one source of truth,
+	// exactly as `src/daemon/main.ts` composes it.
+	const roots: PeerStoreRoots = {
+		user: join(dir, "user", "agents"),
+		project: join(dir, "project", "agents"),
+	};
+	await mkdir(roots.user, { recursive: true });
+	await mkdir(roots.project, { recursive: true });
+	const peerStore = createPeerStore(roots);
+
+	/** Rebuilds the supervisor asked for; empty is "no restart happened". */
+	const respawns: string[] = [];
+
 	const supervisor = new Supervisor({
 		rooms,
 		scheduler,
 		now: () => Date.now(),
+		// Staleness wired on, as the daemon wires it: a membership edit that
+		// looked like a policy edit would rebuild here, and the acceptance is
+		// that it does not.
+		peers: peerStore,
+		respawn: async ({ peerName, definition }) => {
+			respawns.push(peerName);
+			return stubWorker(peerName, fingerprintPeerDefinition(definition)).worker;
+		},
 	});
 
 	const peers = new Map<string, PeerRecord>();
@@ -110,6 +150,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		rooms,
 		supervisor,
 		peers,
+		peerStore,
 		knownRooms,
 		ensureRoom,
 		token: TOKEN,
@@ -119,12 +160,19 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 	});
 	cleanups.push(() => api.close());
 
-	/** Register a peer with the supervisor and index it as the daemon does. */
+	/**
+	 * Register a peer with the supervisor and index it as the daemon does,
+	 * backed by a real definition file so the staleness check has something to
+	 * compare against.
+	 */
 	const registerPeer = async (
 		name: string,
 		roomIds: string[],
-	): Promise<{ prompts: string[] }> => {
-		const stub = stubWorker(name);
+	): Promise<{ prompts: string[]; state: () => string }> => {
+		const path = join(roots.project, `${name}.md`);
+		await writeFile(path, peerDocument(name, roomIds), "utf8");
+		const definition = parsePeerDefinition(path, await readFile(path, "utf8"));
+		const stub = stubWorker(name, fingerprintPeerDefinition(definition));
 		for (const room of roomIds) await ensureRoom(room);
 		await supervisor.register({
 			worker: stub.worker,
@@ -137,7 +185,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 			accountId: "acct-1",
 			rooms: roomIds,
 		});
-		return stub;
+		return { prompts: stub.prompts, state: () => stub.worker.state };
 	};
 
 	const call = (
@@ -152,14 +200,21 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		return fetch(`${api.url}${path}`, { ...rest, headers });
 	};
 
+	/** Definitions as a cold daemon boot would read them. */
+	const reload = () => createPeerStore(roots).list();
+
 	return {
 		api,
 		rooms,
+		roots,
 		supervisor,
 		peers,
+		peerStore,
+		respawns,
 		knownRooms,
 		ensureRoom,
 		registerPeer,
+		reload,
 		call,
 	};
 }
@@ -252,11 +307,72 @@ describe("operator token", () => {
 
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as {
-			agents: { name: string; state: string; account: string }[];
+			agents: {
+				name: string;
+				state: string;
+				account: string;
+				rooms: string[];
+			}[];
 		};
+		// Membership rides along with status: the console's per-channel toggle
+		// has to render the current state, and a second round trip per agent
+		// to learn it would be a list the UI could show inconsistently.
 		expect(body.agents).toEqual([
-			{ name: "reviewer", state: "running", account: "acct-1" },
+			{
+				name: "reviewer",
+				state: "running",
+				account: "acct-1",
+				rooms: ["#reviews"],
+			},
 		]);
+	});
+
+	test("an agent's listed rooms follow a membership change", async () => {
+		const h = await harness();
+		await h.registerPeer("reviewer", ["#reviews"]);
+		await h.ensureRoom("#ops");
+
+		await h.call("/api/agents/reviewer/rooms", {
+			method: "POST",
+			body: JSON.stringify({ room: "#ops" }),
+		});
+
+		const res = await h.call("/api/agents");
+		const body = (await res.json()) as { agents: { rooms: string[] }[] };
+		expect(body.agents[0]?.rooms).toEqual(["#ops", "#reviews"]);
+	});
+
+	test("a defined but not-yet-running agent is listed as stopped", async () => {
+		const h = await harness();
+
+		await h.call("/api/agents", {
+			method: "POST",
+			body: JSON.stringify({
+				name: "researcher",
+				description: "Researches things.",
+				spawns: ["scout"],
+				rooms: ["#research"],
+				body: "You are the researcher.",
+			}),
+		});
+
+		// It has no worker until the next daemon start, and an operator who
+		// just created it must still see that it exists.
+		const res = await h.call("/api/agents");
+		const body = (await res.json()) as {
+			agents: {
+				name: string;
+				state: string;
+				account: string;
+				rooms: string[];
+			}[];
+		};
+		expect(body.agents).toContainEqual({
+			name: "researcher",
+			state: "stopped",
+			account: "",
+			rooms: ["#research"],
+		});
 	});
 
 	test("refuses a websocket with no operator token", async () => {
@@ -602,5 +718,445 @@ describe("websocket", () => {
 			type: "message",
 			message: { body: "Anyone?" },
 		});
+	});
+});
+
+// ── Reactions ────────────────────────────────────────────────────────────────
+
+describe("reactions", () => {
+	test("toggling a reaction on adds it, and toggling again removes it", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const posted = await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "React to me.",
+		});
+
+		const on = await h.call(`/api/messages/${posted.id}/reactions/toggle`, {
+			method: "POST",
+			body: JSON.stringify({ emoji: "👀" }),
+		});
+		expect(on.status).toBe(200);
+		expect(await on.json()).toMatchObject({ reacted: true });
+		expect((await h.rooms.listMessages("#reviews", {}))[0]?.reactions).toEqual([
+			{ actor: "@you", emoji: "👀" },
+		]);
+
+		const off = await h.call(`/api/messages/${posted.id}/reactions/toggle`, {
+			method: "POST",
+			body: JSON.stringify({ emoji: "👀" }),
+		});
+		expect(off.status).toBe(200);
+		expect(await off.json()).toMatchObject({ reacted: false });
+		expect((await h.rooms.listMessages("#reviews", {}))[0]?.reactions).toEqual(
+			[],
+		);
+	});
+
+	test("a toggle leaves another actor's identical reaction alone", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const posted = await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "Two reactors.",
+		});
+		await h.rooms.react(posted.id, "reviewer", "👀");
+
+		await h.call(`/api/messages/${posted.id}/reactions/toggle`, {
+			method: "POST",
+			body: JSON.stringify({ emoji: "👀" }),
+		});
+		await h.call(`/api/messages/${posted.id}/reactions/toggle`, {
+			method: "POST",
+			body: JSON.stringify({ emoji: "👀" }),
+		});
+
+		// Unreact is keyed by (message, actor, emoji): deleting by emoji alone
+		// would take the agent's status reaction with it.
+		expect((await h.rooms.listMessages("#reviews", {}))[0]?.reactions).toEqual([
+			{ actor: "reviewer", emoji: "👀" },
+		]);
+	});
+
+	test("a toggle naming a registered peer as actor is refused", async () => {
+		const h = await harness();
+		await h.registerPeer("reviewer", ["#reviews"]);
+		const posted = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Whose status is this?",
+		});
+
+		const res = await h.call(`/api/messages/${posted.id}/reactions/toggle`, {
+			method: "POST",
+			body: JSON.stringify({ actor: "reviewer", emoji: "👀" }),
+		});
+
+		// Reactions carry agent status (ADR-009); a forgeable actor lets the
+		// console claim an agent picked work up.
+		expect(res.status).toBe(403);
+		expect((await res.json()) as { error: { code: string } }).toMatchObject({
+			error: { code: "forbidden_author" },
+		});
+		expect((await h.rooms.listMessages("#reviews", {}))[0]?.reactions).toEqual(
+			[],
+		);
+	});
+
+	test("a toggle on an unknown message is a 404", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+
+		const res = await h.call("/api/messages/9999/reactions/toggle", {
+			method: "POST",
+			body: JSON.stringify({ emoji: "👀" }),
+		});
+
+		expect(res.status).toBe(404);
+	});
+
+	test("an empty emoji is rejected", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const posted = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "No emoji.",
+		});
+
+		const res = await h.call(`/api/messages/${posted.id}/reactions/toggle`, {
+			method: "POST",
+			body: JSON.stringify({ emoji: "  " }),
+		});
+
+		expect(res.status).toBe(400);
+	});
+});
+
+// ── Creating agents ──────────────────────────────────────────────────────────
+
+describe("agent creation", () => {
+	test("a created agent lands as a definition file the next boot loads", async () => {
+		const h = await harness();
+
+		const res = await h.call("/api/agents", {
+			method: "POST",
+			body: JSON.stringify({
+				name: "researcher",
+				description: "Researches things.",
+				spawns: ["scout"],
+				rooms: ["#reviews"],
+				body: "You are the researcher.",
+			}),
+		});
+
+		expect(res.status).toBe(201);
+		const created = (await res.json()) as {
+			agent: { name: string; path: string; rooms: string[] };
+		};
+		expect(created.agent.name).toBe("researcher");
+		expect(created.agent.path).toBe(join(h.roots.project, "researcher.md"));
+
+		// A cold peer store — what the daemon builds on the next start — must
+		// see it, or the UI has become a second source of truth.
+		const listing = await h.reload();
+		expect(listing.errors).toEqual([]);
+		const definition = listing.definitions.find((d) => d.name === "researcher");
+		expect(definition).toBeDefined();
+		expect(definition?.rooms).toEqual(["#reviews"]);
+		expect(definition?.body.trim()).toBe("You are the researcher.");
+	});
+
+	test("an invalid definition is refused with the parser's own error and writes nothing", async () => {
+		const h = await harness();
+
+		const res = await h.call("/api/agents", {
+			method: "POST",
+			body: JSON.stringify({
+				name: "broken",
+				description: "Rooms without a prefix.",
+				spawns: ["scout"],
+				rooms: ["reviews"],
+				body: "You are broken.",
+			}),
+		});
+
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as {
+			error: { code: string; message: string };
+		};
+		expect(body.error.code).toBe("invalid_definition");
+		// The parser's own words, not a paraphrase: the operator has to be able
+		// to act on the same message the daemon would later print.
+		expect(body.error.message).toContain('rooms entries must start with "#"');
+
+		await expect(
+			readFile(join(h.roots.project, "broken.md"), "utf8"),
+		).rejects.toThrow();
+		expect((await h.reload()).definitions.map((d) => d.name)).not.toContain(
+			"broken",
+		);
+	});
+
+	test("a created agent's rooms exist and are listed as channels", async () => {
+		const h = await harness();
+
+		await h.call("/api/agents", {
+			method: "POST",
+			body: JSON.stringify({
+				name: "researcher",
+				description: "Researches things.",
+				spawns: ["scout"],
+				rooms: ["#research"],
+				body: "You are the researcher.",
+			}),
+		});
+
+		const listed = await h.call("/api/channels");
+		const body = (await listed.json()) as { channels: RoomInfo[] };
+		expect(body.channels.map((c) => c.id)).toContain("#research");
+	});
+
+	test("creating an agent that already exists is refused", async () => {
+		const h = await harness();
+		await h.registerPeer("reviewer", ["#reviews"]);
+
+		const res = await h.call("/api/agents", {
+			method: "POST",
+			body: JSON.stringify({
+				name: "reviewer",
+				description: "A second reviewer.",
+				spawns: ["scout"],
+				body: "You are a different reviewer.",
+			}),
+		});
+
+		expect(res.status).toBe(409);
+		const body = (await res.json()) as { error: { code: string } };
+		expect(body.error.code).toBe("conflict");
+		// The original definition is untouched.
+		const listing = await h.reload();
+		expect(
+			listing.definitions.find((d) => d.name === "reviewer")?.description,
+		).toContain("console management tests");
+	});
+});
+
+// ── Membership ───────────────────────────────────────────────────────────────
+
+describe("membership", () => {
+	test("adding a running agent to a channel wakes it on the very next post", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+		await h.ensureRoom("#ops");
+
+		const res = await h.call("/api/agents/reviewer/rooms", {
+			method: "POST",
+			body: JSON.stringify({ room: "#ops" }),
+		});
+		expect(res.status).toBe(200);
+		expect((await res.json()) as { rooms: string[] }).toMatchObject({
+			rooms: ["#ops", "#reviews"],
+		});
+
+		// Through the supervisor, which is the only path that proves the live
+		// peer's cached room set was updated; RoomStore.post() would pass even
+		// with a SQLite-only write.
+		await h.supervisor.post({
+			room: "#ops",
+			author: "@you",
+			body: "Ops needs you.",
+		});
+
+		expect(peer.prompts.join("\n")).toContain("Ops needs you.");
+	});
+
+	test("removing a running agent stops delivery without disturbing other members", async () => {
+		const h = await harness();
+		const leaving = await h.registerPeer("reviewer", ["#reviews"]);
+		const staying = await h.registerPeer("researcher", ["#reviews"]);
+
+		const res = await h.call("/api/agents/reviewer/rooms/%23reviews", {
+			method: "DELETE",
+		});
+		expect(res.status).toBe(200);
+		expect((await res.json()) as { rooms: string[] }).toMatchObject({
+			rooms: [],
+		});
+
+		await h.supervisor.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Still listening?",
+		});
+
+		expect(leaving.prompts.join("\n")).not.toContain("Still listening?");
+		expect(staying.prompts.join("\n")).toContain("Still listening?");
+	});
+
+	test("a removed room's backlog is not delivered when the peer wakes for another reason", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("reviewer", ["#reviews", "#ops"]);
+
+		await h.call("/api/agents/reviewer/rooms/%23reviews", {
+			method: "DELETE",
+		});
+
+		await h.supervisor.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Left channel traffic.",
+		});
+		// Woken legitimately by a room it is still in. The durable subscription
+		// row survives removal (RoomStore has no unsubscribe; T-402 owns it),
+		// so a delivery that trusted the database would smuggle the left
+		// channel's backlog into this turn.
+		await h.supervisor.post({
+			room: "#ops",
+			author: "@you",
+			body: "Ops traffic.",
+		});
+
+		expect(peer.prompts.join("\n")).toContain("Ops traffic.");
+		expect(peer.prompts.join("\n")).not.toContain("Left channel traffic.");
+	});
+
+	test("a membership change is written to the definition as well as the subscription", async () => {
+		const h = await harness();
+		await h.registerPeer("reviewer", ["#reviews"]);
+		await h.ensureRoom("#ops");
+
+		await h.call("/api/agents/reviewer/rooms", {
+			method: "POST",
+			body: JSON.stringify({ room: "#ops" }),
+		});
+
+		// Durable on both sides: the next daemon start reads the file, and a
+		// change that lived only in SQLite would be lost by it.
+		const listing = await h.reload();
+		expect(listing.errors).toEqual([]);
+		expect(
+			listing.definitions.find((d) => d.name === "reviewer")?.rooms,
+		).toEqual(["#ops", "#reviews"]);
+	});
+
+	test("membership alone takes effect live and needs no rebuild", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+		await h.ensureRoom("#ops");
+
+		const res = await h.call("/api/agents/reviewer/rooms", {
+			method: "POST",
+			body: JSON.stringify({ room: "#ops" }),
+		});
+		expect((await res.json()) as { rebuildRequired: boolean }).toMatchObject({
+			rebuildRequired: false,
+		});
+
+		await h.supervisor.post({
+			room: "#ops",
+			author: "@you",
+			body: "No restart needed.",
+		});
+
+		// The staleness check re-read the file the console just rewrote and
+		// found the same policy, so the live session survived.
+		expect(h.respawns).toEqual([]);
+		expect(peer.state()).toBe("running");
+		expect(peer.prompts.join("\n")).toContain("No restart needed.");
+	});
+
+	test("adding an agent to an unknown channel creates it", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+
+		const res = await h.call("/api/agents/reviewer/rooms", {
+			method: "POST",
+			body: JSON.stringify({ room: "#brand-new" }),
+		});
+		expect(res.status).toBe(200);
+
+		await h.supervisor.post({
+			room: "#brand-new",
+			author: "@you",
+			body: "Fresh channel.",
+		});
+		expect(peer.prompts.join("\n")).toContain("Fresh channel.");
+	});
+
+	test("membership on an unregistered agent is a 404", async () => {
+		const h = await harness();
+		await h.ensureRoom("#ops");
+
+		const res = await h.call("/api/agents/ghost/rooms", {
+			method: "POST",
+			body: JSON.stringify({ room: "#ops" }),
+		});
+
+		expect(res.status).toBe(404);
+	});
+
+	test("an invalid room id is refused and changes nothing", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+
+		const res = await h.call("/api/agents/reviewer/rooms", {
+			method: "POST",
+			body: JSON.stringify({ room: "ops" }),
+		});
+
+		expect(res.status).toBe(400);
+		expect(
+			(await h.reload()).definitions.find((d) => d.name === "reviewer")?.rooms,
+		).toEqual(["#reviews"]);
+		expect(peer.state()).toBe("running");
+	});
+});
+
+// ── Definition edits ─────────────────────────────────────────────────────────
+
+describe("definition edits", () => {
+	test("a policy edit is reported as needing a rebuild and is not applied live", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+
+		const res = await h.call("/api/agents/reviewer", {
+			method: "PATCH",
+			body: JSON.stringify({ body: "You are a much stricter reviewer." }),
+		});
+
+		expect(res.status).toBe(200);
+		expect((await res.json()) as { rebuildRequired: boolean }).toMatchObject({
+			rebuildRequired: true,
+		});
+		// §10.3: no file mutates under a live worker and no hot reload happens
+		// here; the rebuild is the supervisor's, on the next delivered turn.
+		expect(h.respawns).toEqual([]);
+		expect(peer.state()).toBe("running");
+
+		const listing = await h.reload();
+		expect(
+			listing.definitions.find((d) => d.name === "reviewer")?.body.trim(),
+		).toBe("You are a much stricter reviewer.");
+	});
+
+	test("an edit the parser refuses leaves the definition on disk untouched", async () => {
+		const h = await harness();
+		await h.registerPeer("reviewer", ["#reviews"]);
+		const before = await readFile(join(h.roots.project, "reviewer.md"), "utf8");
+
+		const res = await h.call("/api/agents/reviewer", {
+			method: "PATCH",
+			body: JSON.stringify({ body: "   " }),
+		});
+
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: { code: string } };
+		expect(body.error.code).toBe("invalid_definition");
+		expect(await readFile(join(h.roots.project, "reviewer.md"), "utf8")).toBe(
+			before,
+		);
 	});
 });

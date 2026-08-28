@@ -78,6 +78,92 @@
 	const threadComposerEl = el("thread-composer");
 	const threadComposerInput = el("thread-composer-input");
 
+	// ── Management surface (T-605) ───────────────────────────────────────────
+
+	/**
+	 * Build the agent, creation, and notice panels here rather than in
+	 * index.html: T-603 owns that file, and a client that constructs its own
+	 * surface cannot fall out of step with the markup it was shipped beside.
+	 *
+	 * @param {string} tag
+	 * @param {Record<string, string>} attributes
+	 * @param {string} [text]
+	 */
+	const make = (tag, attributes, text) => {
+		const node = document.createElement(tag);
+		for (const [key, value] of Object.entries(attributes)) {
+			node.setAttribute(key, value);
+		}
+		if (text !== undefined) node.textContent = text;
+		return node;
+	};
+
+	const sidebar = el("sidebar");
+
+	const newChannelForm = make("form", { id: "new-channel" });
+	newChannelForm.append(
+		make("input", {
+			id: "new-channel-input",
+			type: "text",
+			placeholder: "#new-channel",
+			autocomplete: "off",
+		}),
+		make("button", { id: "new-channel-create", type: "submit" }, "Create"),
+	);
+	const newChannelError = make("p", { id: "new-channel-error" });
+	sidebar.append(newChannelForm, newChannelError);
+
+	sidebar.append(make("h1", {}, "Agents"));
+	const agentsEl = make("ul", { id: "agents" });
+	sidebar.append(agentsEl);
+
+	const newAgentForm = make("form", { id: "new-agent" });
+	newAgentForm.append(
+		make("input", {
+			id: "new-agent-name",
+			type: "text",
+			placeholder: "name",
+			autocomplete: "off",
+		}),
+		make("input", {
+			id: "new-agent-description",
+			type: "text",
+			placeholder: "description",
+			autocomplete: "off",
+		}),
+		make("input", {
+			id: "new-agent-spawns",
+			type: "text",
+			placeholder: "spawns (comma separated)",
+			autocomplete: "off",
+		}),
+		make("input", {
+			id: "new-agent-rooms",
+			type: "text",
+			placeholder: "rooms (comma separated)",
+			autocomplete: "off",
+		}),
+		make("textarea", {
+			id: "new-agent-body",
+			placeholder: "system prompt",
+		}),
+		make("button", { id: "new-agent-create", type: "submit" }, "Create agent"),
+	);
+	const newAgentError = make("p", { id: "new-agent-error" });
+	sidebar.append(make("h1", {}, "New agent"), newAgentForm, newAgentError);
+
+	// Step 7: say plainly which changes took effect now and which wait for a
+	// rebuild. The daemon decides that, so the text is the server's, not ours.
+	const noticeEl = make("p", { id: "notice", role: "status" });
+	el("main").prepend(noticeEl);
+
+	const newChannelInput = el("new-channel-input");
+	const newAgentName = el("new-agent-name");
+	const newAgentDescription = el("new-agent-description");
+	const newAgentSpawns = el("new-agent-spawns");
+	const newAgentRooms = el("new-agent-rooms");
+	const newAgentBody = el("new-agent-body");
+
 	// ── HTTP ─────────────────────────────────────────────────────────────────
 
 	/**
@@ -98,11 +184,18 @@
 		});
 		const payload = await response.json();
 		if (!response.ok) {
-			const message =
+			// The daemon's own message, verbatim — for a refused definition it
+			// is the parser's, and an operator has to read the same words the
+			// daemon would print at boot, not a JSON-escaped envelope.
+			const detail =
 				payload && typeof payload === "object" && "error" in payload
-					? JSON.stringify(payload.error)
-					: `HTTP ${response.status}`;
-			throw new Error(message);
+					? payload.error
+					: undefined;
+			throw new Error(
+				typeof detail?.message === "string"
+					? detail.message
+					: `HTTP ${response.status}`,
+			);
 		}
 		return payload;
 	};
@@ -210,6 +303,44 @@
 		}
 	};
 
+	/**
+	 * Agent rows with a membership toggle for the open channel.
+	 *
+	 * `data-member` carries the state a click will invert, so the rendered
+	 * membership is readable without inferring it from the label.
+	 * @param {{ name: string, state: string, rooms?: string[] }[]} agents
+	 */
+	const renderAgents = (agents) => {
+		agentsEl.replaceChildren();
+		for (const agent of agents) {
+			const item = document.createElement("li");
+			item.className = "agent";
+			item.dataset.name = agent.name;
+
+			const label = document.createElement("span");
+			label.className = "agent-name";
+			label.textContent = `${agent.name} (${agent.state})`;
+			item.append(label);
+
+			if (currentRoom !== null) {
+				const member = (agent.rooms ?? []).includes(currentRoom);
+				const toggle = document.createElement("button");
+				toggle.type = "button";
+				toggle.className = member
+					? "membership-toggle member"
+					: "membership-toggle";
+				toggle.dataset.member = member ? "true" : "false";
+				toggle.textContent = member ? "Leave" : "Join";
+				const room = currentRoom;
+				toggle.addEventListener("click", () => {
+					void setMembership(agent.name, room, !member);
+				});
+				item.append(toggle);
+			}
+			agentsEl.append(item);
+		}
+	};
+
 	// ── State ────────────────────────────────────────────────────────────────
 
 	/** Refetch the open room and repaint transcript + thread pane. */
@@ -222,6 +353,22 @@
 		renderThread(/** @type {RoomMessage[]} */ (messages));
 	};
 
+	/** Refetch the agent list, so membership renders for the open channel. */
+	const refreshAgents = async () => {
+		const { agents } = await api("/api/agents");
+		renderAgents(
+			/** @type {{ name: string, state: string, rooms?: string[] }[]} */ (
+				agents
+			),
+		);
+	};
+
+	/** Refetch the channel list. */
+	const refreshChannels = async () => {
+		const { channels } = await api("/api/channels");
+		renderChannels(/** @type {RoomInfo[]} */ (channels));
+	};
+
 	/** @param {string} room */
 	const selectRoom = async (room) => {
 		currentRoom = room;
@@ -229,6 +376,28 @@
 		threadEl.hidden = true;
 		currentChannelEl.textContent = room;
 		await refresh();
+		await refreshChannels();
+		await refreshAgents();
+	};
+
+	/**
+	 * Add or remove one agent from one channel.
+	 *
+	 * The daemon owns both halves — the definition on disk and the running
+	 * peer's cached room set — and reports which of them took effect now, so
+	 * the notice is the server's words rather than a guess made here.
+	 * @param {string} name
+	 * @param {string} room
+	 * @param {boolean} join
+	 */
+	const setMembership = async (name, room, join) => {
+		const path = `/api/agents/${encodeURIComponent(name)}/rooms`;
+		const result = join
+			? await api(path, { method: "POST", body: { room } })
+			: await api(`${path}/${encodeURIComponent(room)}`, { method: "DELETE" });
+		noticeEl.textContent =
+			typeof result.notice === "string" ? result.notice : "";
+		await refreshAgents();
 	};
 
 	/** @param {number} rootId */
@@ -240,9 +409,9 @@
 	};
 
 	/**
-	 * Toggle the operator's own reaction. The HTTP surface has no reaction
-	 * route yet; this goes through the serving layer's toggle endpoint, which
-	 * executes against the room store. Refetch renders canonical state.
+	 * Toggle the operator's own reaction through the daemon's reaction route,
+	 * then refetch: the server is the transcript's source of truth and the
+	 * poll feed races any local edit.
 	 * @param {number} messageId
 	 * @param {string} emoji
 	 */
@@ -267,6 +436,75 @@
 		await refresh();
 	};
 
+	/**
+	 * Create a channel, then repaint the list from the server.
+	 * @param {string} id
+	 */
+	const createChannel = async (id) => {
+		newChannelError.textContent = "";
+		try {
+			await api("/api/channels", { method: "POST", body: { id } });
+		} catch (error) {
+			newChannelError.textContent =
+				error instanceof Error ? error.message : String(error);
+			return;
+		}
+		await refreshChannels();
+		await refreshAgents();
+	};
+
+	/** Split a comma-separated field into trimmed, non-empty entries.
+	 * @param {string} value
+	 */
+	const listField = (value) =>
+		value
+			.split(",")
+			.map((entry) => entry.trim())
+			.filter((entry) => entry.length > 0);
+
+	/**
+	 * Create an agent from the form.
+	 *
+	 * A refused definition renders the daemon's message — which is the
+	 * parser's own — beside the form rather than being swallowed: the operator
+	 * has to see the same words the daemon would print at boot.
+	 */
+	const createAgent = async () => {
+		newAgentError.textContent = "";
+		const rooms = listField(newAgentRooms.value);
+		/** @type {Record<string, unknown>} */
+		const payload = {
+			name: newAgentName.value.trim(),
+			description: newAgentDescription.value.trim(),
+			spawns: listField(newAgentSpawns.value),
+			body: newAgentBody.value,
+		};
+		// An empty list is omitted, not sent: the parser refuses `rooms: []`,
+		// and an agent in no rooms simply has no `rooms:` key.
+		if (rooms.length > 0) payload.rooms = rooms;
+
+		/** @type {any} */
+		let created;
+		try {
+			created = await api("/api/agents", { method: "POST", body: payload });
+		} catch (error) {
+			newAgentError.textContent =
+				error instanceof Error ? error.message : String(error);
+			return;
+		}
+		noticeEl.textContent =
+			typeof created.notice === "string"
+				? created.notice
+				: "Agent created. It starts on the next daemon start.";
+		newAgentName.value = "";
+		newAgentDescription.value = "";
+		newAgentSpawns.value = "";
+		newAgentRooms.value = "";
+		newAgentBody.value = "";
+		await refreshChannels();
+		await refreshAgents();
+	};
+
 	// ── Events ───────────────────────────────────────────────────────────────
 
 	composerEl.addEventListener("submit", (event) => {
@@ -288,6 +526,19 @@
 	el("thread-close").addEventListener("click", () => {
 		openThreadRoot = null;
 		threadEl.hidden = true;
+	});
+
+	newChannelForm.addEventListener("submit", (event) => {
+		event.preventDefault();
+		const id = newChannelInput.value.trim();
+		if (id.length === 0) return;
+		newChannelInput.value = "";
+		void createChannel(id);
+	});
+
+	newAgentForm.addEventListener("submit", (event) => {
+		event.preventDefault();
+		void createAgent();
 	});
 
 	// ── Live feed with reconnect ─────────────────────────────────────────────
@@ -353,6 +604,10 @@
 			currentChannelEl.textContent = currentRoom;
 			await refresh();
 		}
+		// After the room is known: the membership toggle renders against the
+		// open channel, so painting agents first would show every one of them
+		// as a non-member.
+		await refreshAgents();
 		connect();
 	};
 

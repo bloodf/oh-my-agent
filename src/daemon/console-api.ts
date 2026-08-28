@@ -1,27 +1,33 @@
 /**
  * Purpose: The browser-facing half of the operator surface (§4.6). Serves the
- * console's reads (agents, channels, messages) and writes (create a channel,
- * post a message) over loopback HTTP, and pushes new messages and reactions
- * over a WebSocket so an open console does not poll.
+ * console's reads (agents, channels, messages) and writes (create an agent or
+ * channel, edit a definition, change membership, post a message, toggle a
+ * reaction) over loopback HTTP, and pushes new messages and reactions over a
+ * WebSocket so an open console does not poll.
  *
  * Public API: `startConsoleApi`, `ConsoleApi`, `StartConsoleApiOptions`,
  * `ConsoleEvent`.
  *
  * Upstream deps: `../rooms/store` (durable rooms, threads, reactions),
- * `./supervisor` (the seam that wakes peers), `./socket` (`HUMAN_AUTHOR`,
- * `PeerRecord`), `../shared/protocol` (`RoomInfo`, `AgentStatus`).
+ * `./supervisor` (the seam that wakes peers, and the sole writer of a live
+ * peer's cached room set), `./peer-store` (definitions on disk), `./socket`
+ * (`HUMAN_AUTHOR`, `PeerRecord`), `../shared/protocol` (`RoomInfo`,
+ * `AgentStatus`), `../shared/agent-definition` (`fingerprintPeerDefinition`).
  *
  * Downstream consumers: the daemon entry point, which owns the operator token
- * and this server's lifetime, and the browser client (T-603).
+ * and this server's lifetime, and the browser client (T-603, T-605).
  *
  * Failure modes: a request without the operator token is refused 401 before
  * anything else runs, including the WebSocket handshake. A write naming a
- * registered peer as its author is refused 403 and lands nothing — the console
- * posts as the human, and a forgeable author makes a transcript worthless.
- * Errors are `{error: {code, message}}` throughout.
+ * registered peer as its author — or as a reaction's actor, since reactions
+ * carry agent status — is refused 403 and lands nothing: the console acts as
+ * the human, and a forgeable identity makes a transcript worthless. A
+ * definition the parser refuses is answered 400 with the parser's own message
+ * and no file is written. Errors are `{error: {code, message}}` throughout.
  *
- * Performance: reads are one store query each. The live feed polls only while
- * at least one WebSocket is connected, one query per known room per tick, and
+ * Performance: reads are one store query each. A definition write is one
+ * render, one parse, and one atomic rename. The live feed polls only while at
+ * least one WebSocket is connected, one query per known room per tick, and
  * reaction diffing is bounded to the most recent `REACTION_WINDOW` messages
  * per room.
  */
@@ -29,7 +35,12 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
 import type { RoomMessage, RoomStore } from "../rooms/store";
+import {
+	fingerprintPeerDefinition,
+	type PeerDefinition,
+} from "../shared/agent-definition";
 import type { AgentStatus, RoomInfo } from "../shared/protocol";
+import type { PeerDefinitionFields, PeerStore } from "./peer-store";
 import { HUMAN_AUTHOR, type PeerRecord } from "./socket";
 import type { Supervisor } from "./supervisor";
 
@@ -65,6 +76,12 @@ export interface StartConsoleApiOptions {
 	peers: Map<string, PeerRecord>;
 	/** Rooms the daemon knows about; the store does not enumerate them. */
 	knownRooms: Map<string, RoomInfo>;
+	/**
+	 * Definitions on disk. A peer created or edited here becomes a file in the
+	 * private store, so the UI and a hand-written definition produce the same
+	 * thing and neither becomes a second source of truth.
+	 */
+	peerStore: PeerStore;
 	/** Create the room if it does not exist yet, and index it. */
 	ensureRoom(id: string): Promise<void>;
 	/** Operator token. Generation and storage are the daemon's concern. */
@@ -109,7 +126,8 @@ function tokenMatches(presented: string, expected: string): boolean {
 export async function startConsoleApi(
 	options: StartConsoleApiOptions,
 ): Promise<ConsoleApi> {
-	const { rooms, supervisor, peers, knownRooms, ensureRoom, token } = options;
+	const { rooms, supervisor, peers, peerStore, knownRooms, ensureRoom, token } =
+		options;
 	const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 	const hostname = options.hostname ?? DEFAULT_HOSTNAME;
 
@@ -310,22 +328,368 @@ export async function startConsoleApi(
 		return landed;
 	};
 
+	/**
+	 * Locate a message by id across known rooms.
+	 *
+	 * The store has no point lookup and reactions are addressed by message id
+	 * alone, so the room has to be recovered before anything can be checked
+	 * against it.
+	 */
+	const findMessage = async (
+		messageId: number,
+	): Promise<RoomMessage | undefined> => {
+		for (const roomId of knownRooms.keys()) {
+			const found = (await rooms.listMessages(roomId, {})).find(
+				(message) => message.id === messageId,
+			);
+			if (found) return found;
+		}
+		return undefined;
+	};
+
+	/** JSON body, or `undefined` when it is not an object. */
+	const readBody = async (
+		request: Request,
+	): Promise<Record<string, unknown> | undefined> => {
+		try {
+			const payload: unknown = await request.json();
+			if (typeof payload !== "object" || payload === null) return undefined;
+			return payload as Record<string, unknown>;
+		} catch {
+			return undefined;
+		}
+	};
+
+	/**
+	 * A room id is `#channel` or `@dm`; the parser enforces the same rule on a
+	 * definition, so accepting a bare name here would write a file the daemon
+	 * refuses on its next boot.
+	 */
+	const roomIdFrom = (value: unknown): string | undefined => {
+		if (typeof value !== "string") return undefined;
+		const room = value.trim();
+		if (room.length < 2) return undefined;
+		if (!room.startsWith("#") && !room.startsWith("@")) return undefined;
+		return room;
+	};
+
+	/** The definition's fields, ready to be rewritten with an override. */
+	const fieldsOf = (definition: PeerDefinition): PeerDefinitionFields => {
+		const { sha256: _sha, filePath: _path, ...fields } = definition;
+		return fields;
+	};
+
+	/**
+	 * Write a definition and report whether the change needs a rebuild.
+	 *
+	 * Membership is excluded from the comparison deliberately: `resubscribe`
+	 * applies rooms to the live peer, so a rooms-only edit is live at once,
+	 * while any other field is policy the running worker was materialized
+	 * from. The supervisor performs the rebuild itself on the next delivered
+	 * turn (§10.3); nothing here touches a live worker.
+	 */
+	const writeDefinition = async (
+		fields: PeerDefinitionFields,
+		previous?: PeerDefinition,
+	): Promise<{ definition: PeerDefinition; rebuildRequired: boolean }> => {
+		// The membership/edit path always targets an existing file; only the
+		// creation route asks for overwrite protection.
+		const definition = await peerStore.write(fields, { overwrite: true });
+		if (!previous) return { definition, rebuildRequired: false };
+		const policyOnly = fingerprintPeerDefinition({
+			...definition,
+			rooms: previous.rooms,
+		});
+		return {
+			definition,
+			rebuildRequired: policyOnly !== fingerprintPeerDefinition(previous),
+		};
+	};
+
+	/**
+	 * Apply a definition's rooms to the running peer.
+	 *
+	 * Through the supervisor's single operation rather than by touching its
+	 * cached set: two writers to that set is exactly the defect this task
+	 * exists to avoid (ADR-009).
+	 */
+	const applyMembership = async (peerName: string): Promise<string[]> => {
+		const definition = await peerStore.get(peerName);
+		for (const room of definition?.rooms ?? []) await ensureRoom(room);
+		const applied = await supervisor.resubscribe(peerName);
+		// The daemon's own peer index backs status reads; leaving it stale
+		// would make the console disagree with itself about membership.
+		const record = peers.get(peerName);
+		if (record) peers.set(peerName, { ...record, rooms: applied });
+		return applied;
+	};
+
 	// ── Routes ────────────────────────────────────────────────────────────────
 
 	const handle = async (request: Request, url: URL): Promise<Response> => {
 		const path = url.pathname;
 
 		if (path === "/api/agents") {
-			if (request.method !== "GET") {
+			if (request.method === "GET") {
+				const agents: (AgentStatus & { rooms: string[] })[] = [...peers].map(
+					([name, record]) => ({
+						name,
+						state: record.worker.state,
+						account: record.accountId,
+						...(record.model === undefined ? {} : { model: record.model }),
+						// Membership rides along with status so the console's
+						// per-channel toggle renders from one read.
+						rooms: [...record.rooms],
+					}),
+				);
+				// A definition with no worker is an agent that starts on the next
+				// daemon start. Omitting it would make an agent the operator just
+				// created vanish from the UI that created it.
+				const { definitions } = await peerStore.list();
+				for (const definition of definitions) {
+					if (peers.has(definition.name)) continue;
+					agents.push({
+						name: definition.name,
+						state: "stopped",
+						account: "",
+						rooms: definition.rooms ?? [],
+					});
+				}
+				return json(200, { agents });
+			}
+
+			if (request.method === "POST") {
+				const payload = await readBody(request);
+				if (!payload) {
+					return fail(400, "invalid_request", "Body is not valid JSON");
+				}
+				const name =
+					typeof payload.name === "string" ? payload.name.trim() : "";
+				if (name.length === 0) {
+					return fail(400, "invalid_request", "Agent name is required");
+				}
+				if (await peerStore.get(name)) {
+					return fail(409, "conflict", `Agent ${name} already exists`);
+				}
+
+				const { name: _name, ...rest } = payload;
+				let created: PeerDefinition;
+				try {
+					// The parser is the gate: `write` renders, parses, and only
+					// then lands the file, so an invalid definition is refused
+					// in the operator's own words and nothing reaches disk.
+					created = await peerStore.write(
+						{
+							...(rest as Omit<PeerDefinitionFields, "name" | "body">),
+							name,
+							body: typeof payload.body === "string" ? payload.body : "",
+						},
+						{ overwrite: false },
+					);
+				} catch (error) {
+					const message =
+						error instanceof Error ? error.message : String(error);
+					if (message.startsWith("PEER_EXISTS")) {
+						return fail(409, "conflict", `Agent ${name} already exists`);
+					}
+					if (message.startsWith("INVALID_NAME")) {
+						return fail(400, "invalid_request", message);
+					}
+					return fail(400, "invalid_definition", message);
+				}
+
+				// A peer's declared rooms exist from the moment it does, exactly
+				// as `Supervisor.register` guarantees for a peer loaded at boot.
+				for (const room of created.rooms ?? []) await ensureRoom(room);
+
+				return json(201, {
+					agent: {
+						name: created.name,
+						path: created.filePath ?? "",
+						rooms: created.rooms ?? [],
+					},
+					// A new agent is not a running one: it starts on the next
+					// daemon start, and saying so is step 7 of the contract.
+					rebuildRequired: true,
+				});
+			}
+
+			return fail(405, "method_not_allowed", `${request.method} not allowed`);
+		}
+
+		const membershipRoute =
+			/^\/api\/agents\/([^/]+)\/rooms(?:\/([^/]+))?$/.exec(path);
+		if (membershipRoute?.[1] !== undefined) {
+			const peerName = decodeURIComponent(membershipRoute[1]);
+			const definition = await peerStore.get(peerName);
+			if (!definition || !peers.has(peerName)) {
+				return fail(404, "not_found", `Unknown agent: ${peerName}`);
+			}
+
+			let room: string | undefined;
+			let next: string[];
+			if (request.method === "POST") {
+				const payload = await readBody(request);
+				if (!payload) {
+					return fail(400, "invalid_request", "Body is not valid JSON");
+				}
+				room = roomIdFrom(payload.room);
+				if (room === undefined) {
+					return fail(
+						400,
+						"invalid_request",
+						'A room id starting with "#" or "@" is required',
+					);
+				}
+				next = [...new Set([...(definition.rooms ?? []), room])].sort();
+			} else if (request.method === "DELETE") {
+				room = membershipRoute[2] && decodeURIComponent(membershipRoute[2]);
+				if (!room) {
+					return fail(400, "invalid_request", "A room id is required");
+				}
+				next = (definition.rooms ?? []).filter((entry) => entry !== room);
+			} else {
 				return fail(405, "method_not_allowed", `${request.method} not allowed`);
 			}
-			const agents: AgentStatus[] = [...peers].map(([name, record]) => ({
-				name,
-				state: record.worker.state,
-				account: record.accountId,
-				...(record.model === undefined ? {} : { model: record.model }),
-			}));
-			return json(200, { agents });
+
+			if (request.method === "POST" && room !== undefined) {
+				await ensureRoom(room);
+			}
+
+			try {
+				await writeDefinition(
+					{
+						...fieldsOf(definition),
+						// An empty list is dropped rather than written: the parser
+						// refuses `rooms: []`, and a peer in no rooms is a peer
+						// with no `rooms:` key.
+						...(next.length === 0 ? { rooms: undefined } : { rooms: next }),
+					},
+					definition,
+				);
+			} catch (error) {
+				return fail(
+					400,
+					"invalid_definition",
+					error instanceof Error ? error.message : String(error),
+				);
+			}
+
+			// Disk is not enough: the live peer's cached room set decides who
+			// `Supervisor.post()` wakes, and only the supervisor may write it.
+			const applied = await applyMembership(peerName);
+			return json(200, {
+				rooms: applied,
+				rebuildRequired: false,
+				notice: "Membership took effect immediately.",
+			});
+		}
+
+		const agentRoute = /^\/api\/agents\/([^/]+)$/.exec(path);
+		if (agentRoute?.[1] !== undefined) {
+			const peerName = decodeURIComponent(agentRoute[1]);
+			const definition = await peerStore.get(peerName);
+			if (!definition) {
+				return fail(404, "not_found", `Unknown agent: ${peerName}`);
+			}
+			if (request.method !== "PATCH") {
+				return fail(405, "method_not_allowed", `${request.method} not allowed`);
+			}
+
+			const payload = await readBody(request);
+			if (!payload) {
+				return fail(400, "invalid_request", "Body is not valid JSON");
+			}
+			// The name identifies the file; renaming through an edit would
+			// orphan the old definition and the running peer with it.
+			const { name: _ignored, ...patch } = payload;
+
+			let result: { definition: PeerDefinition; rebuildRequired: boolean };
+			try {
+				result = await writeDefinition(
+					{
+						...fieldsOf(definition),
+						...(patch as Partial<PeerDefinitionFields>),
+						name: definition.name,
+					},
+					definition,
+				);
+			} catch (error) {
+				return fail(
+					400,
+					"invalid_definition",
+					error instanceof Error ? error.message : String(error),
+				);
+			}
+
+			// Membership is applied live; anything else is policy, and §10.3
+			// forbids applying it to a running worker. The supervisor rebuilds
+			// on the next delivered turn — nothing here touches the worker.
+			if (peers.has(peerName)) await applyMembership(peerName);
+
+			return json(200, {
+				agent: {
+					name: result.definition.name,
+					path: result.definition.filePath ?? "",
+					rooms: result.definition.rooms ?? [],
+				},
+				rebuildRequired: result.rebuildRequired,
+				notice: result.rebuildRequired
+					? "Saved. The agent rebuilds on its next turn; the running session keeps the previous policy until then."
+					: "Membership took effect immediately.",
+			});
+		}
+
+		const reactionRoute = /^\/api\/messages\/(\d+)\/reactions\/toggle$/.exec(
+			path,
+		);
+		if (reactionRoute?.[1] !== undefined) {
+			if (request.method !== "POST") {
+				return fail(405, "method_not_allowed", `${request.method} not allowed`);
+			}
+			const payload = await readBody(request);
+			if (!payload) {
+				return fail(400, "invalid_request", "Body is not valid JSON");
+			}
+			const emoji =
+				typeof payload.emoji === "string" ? payload.emoji.trim() : "";
+			if (emoji.length === 0) {
+				return fail(400, "invalid_request", "An emoji is required");
+			}
+			const actor =
+				typeof payload.actor === "string" && payload.actor.trim().length > 0
+					? payload.actor.trim()
+					: HUMAN_AUTHOR;
+			if (namesAgent(actor)) {
+				// Reactions carry agent status (ADR-009), so a forgeable actor
+				// lets the console claim an agent picked work up.
+				return fail(
+					403,
+					"forbidden_author",
+					`The console reacts as the human; ${actor} is an agent`,
+				);
+			}
+
+			const messageId = Number(reactionRoute[1]);
+			const message = await findMessage(messageId);
+			if (!message) {
+				return fail(404, "not_found", `Unknown message: ${messageId}`);
+			}
+
+			// Keyed by (message, actor, emoji): toggling off by emoji alone
+			// would take another actor's identical status reaction with it.
+			const mine = message.reactions.some(
+				(reaction) => reaction.actor === actor && reaction.emoji === emoji,
+			);
+			if (mine) await rooms.unreact(messageId, actor, emoji);
+			else await rooms.react(messageId, actor, emoji);
+
+			return json(200, {
+				messageId,
+				actor,
+				emoji,
+				reacted: !mine,
+			});
 		}
 
 		if (path === "/api/channels") {

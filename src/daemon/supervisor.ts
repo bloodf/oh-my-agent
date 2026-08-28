@@ -4,6 +4,9 @@
  * messages as one batched turn, parks the worker when its account runs out of
  * quota, and resumes it when the armed timer fires so nothing outside this
  * module has to choreograph `pendingForAgent` → wake → prompt → `markRead`.
+ * It also owns each peer's live membership: `resubscribe` re-reads the
+ * definition and replaces the cached room set, so the console never reaches
+ * into that set and it keeps exactly one writer.
  *
  * It also enforces §10.3: before any turn is handed to a worker, the peer's
  * definition is re-read from disk and its fingerprint compared with the one the
@@ -13,7 +16,7 @@
  * under one. There is no hot-reload path.
  *
  * Public API: `Supervisor`, `SupervisedWorker`, `SupervisorDeps`,
- * `RespawnRequest`.
+ * `RespawnRequest`. Membership changes go through `Supervisor.resubscribe`.
  *
  * Upstream deps: `./account-registry` (quota state + wake gating),
  * `./scheduler` (one-shot resume timers), `../rooms/store` (durable rooms),
@@ -110,6 +113,17 @@ interface Peer {
 	accountId: string;
 	/** Rooms this peer subscribes to; a post elsewhere must not wake it. */
 	rooms: Set<string>;
+	/**
+	 * Rooms the live worker's fingerprint was computed over.
+	 *
+	 * Membership is inside `fingerprintPeerDefinition`, but rooms never reach
+	 * a worker — the materializer keeps every oh-my-agent extra in the daemon
+	 * (materializer.ts:151-153). Holding the value the fingerprint was taken
+	 * with lets the staleness check subtract membership back out and compare
+	 * policy alone, so subscribing a peer to a channel does not restart it.
+	 * It moves only when the worker is rebuilt, never when membership changes.
+	 */
+	fingerprintRooms: string[] | undefined;
 	wake: NonNullable<RegisterPeerOptions["wake"]>;
 }
 
@@ -240,6 +254,9 @@ export class Supervisor {
 			worker,
 			accountId,
 			rooms: new Set(rooms),
+			// The worker was materialized from the definition as it reads now,
+			// so its fingerprint was taken over exactly these rooms.
+			fingerprintRooms: rooms.length === 0 ? undefined : [...rooms],
 			wake,
 		});
 		try {
@@ -247,6 +264,49 @@ export class Supervisor {
 		} catch (error) {
 			this.deps.onError?.(error, accountId);
 		}
+	}
+
+	/**
+	 * Re-read a peer's subscribed rooms from its definition and apply them to
+	 * the *running* peer.
+	 *
+	 * This is the whole reason membership is not a database write. `register`
+	 * copies rooms into a private `Set` that `post()` filters against, so an
+	 * edit that stopped at SQLite would leave a live agent deaf to its new
+	 * channel and still woken by its old one. It is exposed as one operation,
+	 * rather than a setter the console could call, so that cached set has
+	 * exactly one writer: two writers to it is the defect this exists to
+	 * avoid.
+	 *
+	 * Membership is read back from the definition on disk rather than taken as
+	 * an argument, so the file and the live peer cannot disagree about what
+	 * the operator asked for.
+	 */
+	async resubscribe(peerName: string): Promise<string[]> {
+		const peer = this.#require(peerName);
+		const store = this.deps.peers;
+		if (!store) {
+			throw new Error(
+				`Cannot re-read membership for ${peerName}: no peer store is wired into the supervisor`,
+			);
+		}
+		const definition = await store.get(peerName);
+		if (!definition) {
+			throw new Error(`Peer ${peerName} has no definition on disk`);
+		}
+
+		const rooms = definition.rooms ?? [];
+		for (const room of rooms) {
+			await this.deps.rooms.createRoom({
+				id: room,
+				kind: room.startsWith("@") ? "dm" : "channel",
+			});
+			await this.deps.rooms.subscribe(peerName, room);
+		}
+		// Replace rather than merge: a removal is a membership change too, and
+		// merging would make leaving a channel impossible.
+		peer.rooms = new Set(rooms);
+		return [...rooms];
 	}
 
 	#validateAccountConfig(
@@ -390,6 +450,12 @@ export class Supervisor {
 		// A peer's own posts must not wake it, or an agent that summarizes into
 		// a room would re-wake itself forever.
 		const rooms = pending
+			// Membership is the cached set, not the subscription table: leaving
+			// a room leaves its durable row behind (`RoomStore` has no
+			// unsubscribe), so trusting `pendingForAgent` alone would smuggle a
+			// left channel's backlog into the next turn the peer takes for any
+			// other reason.
+			.filter((entry) => peer.rooms.has(entry.room))
 			.map((entry) => ({
 				room: entry.room,
 				messages: entry.messages.filter((message) => {
@@ -490,7 +556,17 @@ export class Supervisor {
 			return false;
 		}
 
-		const fingerprint = fingerprintPeerDefinition(definition);
+		// Compare policy, not membership. Rooms are inside the fingerprint but
+		// never reach a worker — the materializer keeps every oh-my-agent extra
+		// in the daemon (materializer.ts:151-153) — and membership is applied
+		// live by `resubscribe`. Hashing the current definition with the rooms
+		// the live worker's fingerprint was taken over subtracts membership
+		// back out, so subscribing a peer to a channel does not restart it
+		// while any other edit still does.
+		const fingerprint = fingerprintPeerDefinition({
+			...definition,
+			rooms: peer.fingerprintRooms,
+		});
 		if (fingerprint === current) return true;
 
 		try {
@@ -503,6 +579,9 @@ export class Supervisor {
 				previousFingerprint: current,
 			});
 			peer.worker = replacement;
+			// The replacement was built from the definition as it now reads, so
+			// its fingerprint's membership baseline moves with it.
+			peer.fingerprintRooms = definition.rooms;
 			return true;
 		} catch (error) {
 			this.deps.onError?.(error, peerName);
