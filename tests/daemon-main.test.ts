@@ -392,6 +392,22 @@ describe("bootDaemon — composition and the control socket", () => {
 		expect(read.messages[0]?.author).toBe("@you");
 	});
 
+	test("a peer's wake filter reaches the supervisor through registration", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "silent", { wake: { rooms: false } });
+		const { handle, workers } = await boot({ agentDir });
+
+		await call<ChatSendResult>(handle.socketPath, "chat_send", {
+			room: "#reviews",
+			body: "nothing should wake the silent peer",
+		});
+
+		// wake.rooms === false opts out of room-post wakes. If bootDaemon did
+		// not pass the definition's wake config into Supervisor.register, this
+		// peer would have been prompted.
+		expect(workers.get("silent")?.prompts ?? []).toHaveLength(0);
+	});
+
 	test("chat_wait returns when a message lands after the call started", async () => {
 		const { handle } = await boot();
 		await call<ChatSendResult>(handle.socketPath, "rooms_post", {

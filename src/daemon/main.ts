@@ -407,6 +407,9 @@ export async function bootDaemon(
 						? "subscription"
 						: "metered",
 				rooms: peerRooms,
+				// Parsed wake filters govern delivery; absent means
+				// subscription-scoped only (T-509).
+				wake: definition.wake,
 			});
 
 			peers.set(name, {

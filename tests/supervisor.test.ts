@@ -358,3 +358,251 @@ describe("registry wiring", () => {
 		await expect(h.supervisor.deliver("nobody")).rejects.toThrow(/nobody/);
 	});
 });
+
+// ── Wake filters (T-509) ─────────────────────────────────────────────────────
+
+describe("wake filters", () => {
+	test("wake.mention true wakes a named peer on @mention", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#general", kind: "channel" });
+
+		const mentionee = stubWorker("mentionee");
+		await h.supervisor.register({
+			worker: mentionee.worker,
+			accountId: "acct-mention",
+			mode: "subscription",
+			rooms: [],
+			wake: { mention: true },
+		});
+
+		const woken = await h.supervisor.post({
+			room: "#general",
+			author: "@you",
+			body: "Hey @mentionee, please look at this.",
+		});
+
+		expect(woken).toContain("mentionee");
+		expect(mentionee.prompts[0]).toContain("@mentionee");
+	});
+
+	test("wake.mention false does not wake peer on mention", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#general", kind: "channel" });
+
+		const quiet = stubWorker("quiet");
+		await h.supervisor.register({
+			worker: quiet.worker,
+			accountId: "acct-quiet",
+			mode: "subscription",
+			rooms: [],
+			wake: { mention: false },
+		});
+
+		const woken = await h.supervisor.post({
+			room: "#general",
+			author: "@you",
+			body: "Hey @quiet, you there?",
+		});
+
+		expect(woken).not.toContain("quiet");
+		expect(quiet.prompts).toEqual([]);
+	});
+
+	test("unknown @name in body wakes nobody and does not throw", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#general", kind: "channel" });
+
+		await expect(
+			h.supervisor.post({
+				room: "#general",
+				author: "@you",
+				body: "Hello @ghost, are you there?",
+			}),
+		).resolves.toEqual([]);
+	});
+
+	test("mentions parsed exactly once per post regardless of peer count", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#general", kind: "channel" });
+
+		let parseCount = 0;
+		const original = h.rooms.parseMentions.bind(h.rooms);
+		h.rooms.parseMentions = (body: string) => {
+			parseCount++;
+			return original(body);
+		};
+
+		const a = stubWorker("alpha");
+		const b = stubWorker("beta");
+		await h.supervisor.register({
+			worker: a.worker,
+			accountId: "acct-a",
+			mode: "subscription",
+			rooms: ["#general"],
+			wake: { mention: true },
+		});
+		await h.supervisor.register({
+			worker: b.worker,
+			accountId: "acct-b",
+			mode: "subscription",
+			rooms: ["#general"],
+			wake: { mention: true },
+		});
+
+		await h.supervisor.post({
+			room: "#general",
+			author: "@you",
+			body: "Hi @alpha and @beta.",
+		});
+
+		expect(parseCount).toBe(1);
+	});
+
+	test("own post does not wake the author via mention path", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#general", kind: "channel" });
+
+		const self = stubWorker("self");
+		await h.supervisor.register({
+			worker: self.worker,
+			accountId: "acct-self",
+			mode: "subscription",
+			rooms: ["#general"],
+			wake: { mention: true },
+		});
+
+		const woken = await h.supervisor.post({
+			room: "#general",
+			author: "self",
+			body: "I @self mention myself.",
+		});
+
+		expect(woken).not.toContain("self");
+		expect(self.prompts).toEqual([]);
+	});
+
+	test("wake.rooms false suppresses subscription wake", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#updates", kind: "channel" });
+
+		const norooms = stubWorker("norooms");
+		await h.supervisor.register({
+			worker: norooms.worker,
+			accountId: "acct-norooms",
+			mode: "subscription",
+			rooms: ["#updates"],
+			wake: { rooms: false },
+		});
+
+		const woken = await h.supervisor.post({
+			room: "#updates",
+			author: "@you",
+			body: "New update posted.",
+		});
+
+		expect(woken).not.toContain("norooms");
+		expect(norooms.prompts).toEqual([]);
+	});
+
+	test("wake.rooms false with mention true still wakes on mention", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#updates", kind: "channel" });
+
+		const mentiononly = stubWorker("mentiononly");
+		await h.supervisor.register({
+			worker: mentiononly.worker,
+			accountId: "acct-mo",
+			mode: "subscription",
+			rooms: ["#updates"],
+			wake: { mention: true, rooms: false },
+		});
+
+		const woken = await h.supervisor.post({
+			room: "#updates",
+			author: "@you",
+			body: "Hey @mentiononly, check this.",
+		});
+
+		expect(woken).toContain("mentiononly");
+		expect(mentiononly.prompts[0]).toContain("@mentiononly");
+	});
+
+	test("mention wake reaches a peer not subscribed to the posted room", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#other", kind: "channel" });
+
+		const outsider = stubWorker("outsider");
+		await h.supervisor.register({
+			worker: outsider.worker,
+			accountId: "acct-out",
+			mode: "subscription",
+			rooms: [],
+			wake: { mention: true },
+		});
+
+		const woken = await h.supervisor.post({
+			room: "#other",
+			author: "@you",
+			body: "Paging @outsider.",
+		});
+
+		expect(woken).toContain("outsider");
+		expect(outsider.prompts[0]).toContain("Paging @outsider");
+	});
+
+	test("wake.mention true on unsubscribed peer: mention while parked is deferred and delivered on timer resume", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#general", kind: "channel" });
+
+		const parkedpeer = stubWorker("parkedpeer");
+		await h.supervisor.register({
+			worker: parkedpeer.worker,
+			accountId: "acct-pp",
+			mode: "subscription",
+			rooms: [],
+			wake: { mention: true },
+		});
+
+		const b = block();
+		await h.supervisor.applyBlock("acct-pp", b);
+
+		// Post @mention while peer is parked — no immediate prompt
+		await h.supervisor.post({
+			room: "#general",
+			author: "@you",
+			body: "Hey @parkedpeer, review this.",
+		});
+		expect(parkedpeer.prompts).toEqual([]);
+
+		// Advance past block and fire the armed resume timer
+		h.advanceTo(b.blockedUntilMs);
+		h.timers[0].callback();
+		await h.supervisor.settled();
+
+		expect(parkedpeer.prompts).toHaveLength(1);
+		expect(parkedpeer.prompts[0]).toContain("@parkedpeer");
+	});
+
+	test("email address mail@reviewer.com is not parsed as an @name mention", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#general", kind: "channel" });
+
+		const rev = stubWorker("reviewer");
+		await h.supervisor.register({
+			worker: rev.worker,
+			accountId: "acct-rev",
+			mode: "subscription",
+			rooms: [],
+			wake: { mention: true },
+		});
+
+		const woken = await h.supervisor.post({
+			room: "#general",
+			author: "@you",
+			body: "mail@reviewer.com",
+		});
+
+		expect(woken).toEqual([]);
+		expect(rev.prompts).toEqual([]);
+	});
+});

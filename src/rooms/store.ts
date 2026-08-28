@@ -2,15 +2,15 @@
  * @oh-my-agent/rooms - bun:sqlite RoomStore
  *
  * Purpose:        Persistent room, threaded-message, reaction, and subscription store for multi-agent collaboration.
- * Public API:      RoomStore.open(), createRoom(), post(), listMessages(), react(), unreact(), subscribe(), markRead(), unreadCount(), pendingForAgent(), close();
+ * Public API:      RoomStore.open(), createRoom(), post(), parseMentions(), listMessages(), react(), unreact(), subscribe(), markRead(), unreadCount(), pendingForAgent(), enqueueMention(), pendingMentionsForAgent(), acknowledgeMentions(), close();
  *                  Room { id, kind }, RoomKind; MessageReaction { actor, emoji };
- *                  RoomMessage { id, room, author, body, createdAt, parentId, threadRootId, replyCount, reactions };
+ *                  RoomMessage { id, room, author, body, mentions, createdAt, parentId, threadRootId, replyCount, reactions };
  *                  CreateRoomInput { id, kind }; PostMessageInput { room, author, body, createdAt?, parentId? };
  *                  PendingRoom { room, messages }.
  * Upstream deps:   bun:sqlite (Database), node:fs/promises (mkdir)
  * Downstream consumers: extension/index.ts, any agent code importing this module
  * Failure modes:   INVALID_ROOM, INVALID_MESSAGE, INVALID_REACTION, ROOM_NOT_FOUND, MESSAGE_NOT_FOUND, MESSAGE_NOT_IN_ROOM, NOT_SUBSCRIBED, INVALID_PAGE; react/unreact and close are idempotent.
- * Performance:     Synchronous SQLite with WAL; listMessages() and pendingForAgent() aggregate thread metadata and reactions in one query each; message parent and reaction keys are indexed.
+ * Performance:     Synchronous SQLite with WAL; message listing and pending delivery queries aggregate thread metadata and reactions; message parent, reaction, and durable mention-delivery keys are indexed.
  */
 
 import { Database } from "bun:sqlite";
@@ -33,6 +33,7 @@ export interface RoomMessage {
 	room: string;
 	author: string;
 	body: string;
+	mentions: string[];
 	createdAt: number;
 	parentId: number | null;
 	threadRootId: number | null;
@@ -62,6 +63,7 @@ interface MessageRow {
 	room: string;
 	author: string;
 	body: string;
+	mentions: string;
 	created_at: number;
 	parent_id: number | null;
 	thread_root_id: number | null;
@@ -74,6 +76,7 @@ interface NullableMessageRow {
 	room: string;
 	author: string | null;
 	body: string | null;
+	mentions: string | null;
 	created_at: number | null;
 	parent_id: number | null;
 	thread_root_id: number | null;
@@ -105,6 +108,7 @@ export class RoomStore {
         room       TEXT NOT NULL,
         author     TEXT NOT NULL,
         body       TEXT NOT NULL,
+        mentions   TEXT NOT NULL DEFAULT '[]',
         created_at INTEGER NOT NULL,
         parent_id  INTEGER,
         UNIQUE (id, room),
@@ -126,7 +130,21 @@ export class RoomStore {
         PRIMARY KEY (agent, room),
         FOREIGN KEY (room) REFERENCES rooms(id)
       );
+      CREATE TABLE IF NOT EXISTS mention_deliveries (
+        agent      TEXT NOT NULL,
+        message_id INTEGER NOT NULL,
+        PRIMARY KEY (agent, message_id),
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+      );
     `);
+		const columns = db.prepare("PRAGMA table_info(messages)").all() as {
+			name: string;
+		}[];
+		if (!columns.some((column) => column.name === "mentions")) {
+			db.exec(
+				"ALTER TABLE messages ADD COLUMN mentions TEXT NOT NULL DEFAULT '[]'",
+			);
+		}
 		return new RoomStore(path, db);
 	}
 
@@ -140,6 +158,7 @@ export class RoomStore {
 			room: row.room,
 			author: row.author,
 			body: row.body,
+			mentions: JSON.parse(row.mentions) as string[],
 			createdAt: row.created_at,
 			parentId: row.parent_id,
 			threadRootId: row.thread_root_id,
@@ -153,6 +172,7 @@ export class RoomStore {
 			row.id === null ||
 			row.author === null ||
 			row.body === null ||
+			row.mentions === null ||
 			row.created_at === null
 		) {
 			return null;
@@ -162,6 +182,7 @@ export class RoomStore {
 			id: row.id,
 			author: row.author,
 			body: row.body,
+			mentions: row.mentions,
 			created_at: row.created_at,
 		});
 	}
@@ -212,23 +233,42 @@ export class RoomStore {
 			threadRootId = root.id;
 		}
 
+		const mentions = this.parseMentions(body);
 		const createdAt = input.createdAt ?? Date.now();
 		const result = this.db
 			.prepare(
-				"INSERT INTO messages (room, author, body, created_at, parent_id) VALUES (?, ?, ?, ?, ?)",
+				"INSERT INTO messages (room, author, body, mentions, created_at, parent_id) VALUES (?, ?, ?, ?, ?, ?)",
 			)
-			.run(input.room, input.author, body, createdAt, parentId);
+			.run(
+				input.room,
+				input.author,
+				body,
+				JSON.stringify(mentions),
+				createdAt,
+				parentId,
+			);
 		return {
 			id: Number(result.lastInsertRowid),
 			room: input.room,
 			author: input.author,
 			body,
+			mentions,
 			createdAt,
 			parentId,
 			threadRootId,
 			replyCount: 0,
 			reactions: [],
 		};
+	}
+
+	parseMentions(body: string): string[] {
+		return [
+			...new Set(
+				[
+					...body.matchAll(/(?:^|[^A-Za-z0-9_-])@([A-Za-z0-9][A-Za-z0-9_-]*)/g),
+				].map((match) => match[1]),
+			),
+		];
 	}
 
 	async listMessages(
@@ -269,7 +309,7 @@ export class RoomStore {
 					SELECT message_id, MAX(CASE WHEN parent_id IS NULL AND ancestor_id != message_id THEN ancestor_id END) AS thread_root_id
 					FROM ancestry GROUP BY message_id
 				)
-				SELECT m.id, r.id AS room, m.author, m.body, m.created_at, m.parent_id,
+				SELECT m.id, r.id AS room, m.author, m.body, m.mentions, m.created_at, m.parent_id,
 					tr.thread_root_id,
 					(SELECT COUNT(*) FROM messages child WHERE child.parent_id = m.id) AS reply_count,
 					COALESCE((
@@ -399,7 +439,7 @@ export class RoomStore {
 					SELECT message_id, MAX(CASE WHEN parent_id IS NULL AND ancestor_id != message_id THEN ancestor_id END) AS thread_root_id
 					FROM ancestry GROUP BY message_id
 				)
-				SELECT p.subscribed_room AS room, p.id, p.author, p.body, p.created_at, p.parent_id,
+				SELECT p.subscribed_room AS room, p.id, p.author, p.body, p.mentions, p.created_at, p.parent_id,
 					tr.thread_root_id,
 					CASE WHEN p.id IS NULL THEN 0 ELSE (SELECT COUNT(*) FROM messages child WHERE child.parent_id = p.id) END AS reply_count,
 					CASE WHEN p.id IS NULL THEN '[]' ELSE COALESCE((
@@ -423,6 +463,59 @@ export class RoomStore {
 			if (message) pending.messages.push(message);
 		}
 		return Array.from(map.values());
+	}
+
+	async enqueueMention(agent: string, messageId: number): Promise<void> {
+		this.db
+			.prepare(
+				"INSERT OR IGNORE INTO mention_deliveries (agent, message_id) VALUES (?, ?)",
+			)
+			.run(agent, messageId);
+	}
+
+	async pendingMentionsForAgent(agent: string): Promise<RoomMessage[]> {
+		const rows = this.db
+			.prepare(
+				`WITH RECURSIVE
+				pending AS (
+					SELECT m.*
+					FROM mention_deliveries d
+					JOIN messages m ON m.id = d.message_id
+					WHERE d.agent = ?
+				),
+				ancestry(message_id, ancestor_id, parent_id) AS (
+					SELECT id, id, parent_id FROM pending
+					UNION ALL
+					SELECT a.message_id, p.id, p.parent_id
+					FROM ancestry a JOIN messages p ON p.id = a.parent_id
+				),
+				thread_roots AS (
+					SELECT message_id, MAX(CASE WHEN parent_id IS NULL AND ancestor_id != message_id THEN ancestor_id END) AS thread_root_id
+					FROM ancestry GROUP BY message_id
+				)
+				SELECT p.id, p.room, p.author, p.body, p.mentions, p.created_at, p.parent_id,
+					tr.thread_root_id,
+					(SELECT COUNT(*) FROM messages child WHERE child.parent_id = p.id) AS reply_count,
+					COALESCE((
+						SELECT json_group_array(json_object('actor', actor, 'emoji', emoji))
+						FROM (SELECT actor, emoji FROM reactions WHERE message_id = p.id ORDER BY actor, emoji)
+					), '[]') AS reactions
+				FROM pending p
+				LEFT JOIN thread_roots tr ON tr.message_id = p.id
+				ORDER BY p.id ASC`,
+			)
+			.all(agent) as MessageRow[];
+		return rows.map((row) => this.mapMessage(row));
+	}
+
+	async acknowledgeMentions(
+		agent: string,
+		messageIds: readonly number[],
+	): Promise<void> {
+		const statement = this.db.prepare(
+			"DELETE FROM mention_deliveries WHERE agent = ? AND message_id = ?",
+		);
+		for (const messageId of messageIds) statement.run(agent, messageId);
 	}
 
 	async close(): Promise<void> {

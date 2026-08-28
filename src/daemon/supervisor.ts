@@ -1,9 +1,9 @@
 /**
  * Purpose: The seam that makes peers autonomous (§4.3, §9.4). It subscribes a
- * peer to its rooms, delivers pending messages as one batched turn, parks the
- * worker when its account runs out of quota, and resumes it when the armed
- * timer fires — so nothing outside this module has to choreograph
- * `pendingForAgent` → wake → prompt → `markRead` by hand.
+ * peer to its rooms, applies room and mention wake filters, delivers pending
+ * messages as one batched turn, parks the worker when its account runs out of
+ * quota, and resumes it when the armed timer fires so nothing outside this
+ * module has to choreograph `pendingForAgent` → wake → prompt → `markRead`.
  *
  * Public API: `Supervisor`.
  *
@@ -17,7 +17,7 @@
  * a message would look like an idle agent. A parked peer is never prompted;
  * its backlog waits in the room until the resume lands.
  *
- * Performance: one room query per delivery; no polling loop of its own.
+ * Performance: per-peer delivery is serialized; it reads subscribed and mentioned pending messages, then writes acknowledgements after prompting.
  */
 
 import type { RoomStore } from "../rooms/store";
@@ -51,6 +51,10 @@ export interface RegisterPeerOptions {
 	mode: AccountMode;
 	/** Rooms the peer subscribes to, from its `rooms:` frontmatter. */
 	rooms: string[];
+	wake?: {
+		mention?: boolean;
+		rooms?: boolean;
+	};
 }
 
 interface Peer {
@@ -58,6 +62,7 @@ interface Peer {
 	accountId: string;
 	/** Rooms this peer subscribes to; a post elsewhere must not wake it. */
 	rooms: Set<string>;
+	wake: NonNullable<RegisterPeerOptions["wake"]>;
 }
 
 export class Supervisor {
@@ -65,6 +70,8 @@ export class Supervisor {
 	#peers = new Map<string, Peer>();
 	/** In-flight resume work, so callers can await the autonomous path. */
 	#inFlight = new Set<Promise<void>>();
+	/** Serialize each peer's prompt and acknowledgement cycle. */
+	#deliveries = new Map<string, Promise<boolean>>();
 
 	constructor(private deps: SupervisorDeps) {
 		this.registry = new AccountRegistry({
@@ -121,10 +128,15 @@ export class Supervisor {
 	}
 
 	async register(options: RegisterPeerOptions): Promise<void> {
-		const { worker, accountId, mode, rooms } = options;
+		const { worker, accountId, mode, rooms, wake = {} } = options;
 		this.registry.register(accountId, mode);
 		this.registry.addRun(accountId, worker.name);
-		this.#peers.set(worker.name, { worker, accountId, rooms: new Set(rooms) });
+		this.#peers.set(worker.name, {
+			worker,
+			accountId,
+			rooms: new Set(rooms),
+			wake,
+		});
 
 		for (const room of rooms) {
 			// The daemon owns room existence: a peer declaring a room in its
@@ -138,25 +150,29 @@ export class Supervisor {
 	}
 
 	/**
-	 * Post into a room and deliver to every subscribed peer it wakes.
+	 * Post into a room and deliver to every peer selected by its wake filters.
 	 *
 	 * This is the production trigger: nothing outside the supervisor has to
-	 * notice a message and decide who should see it. Parked peers are skipped
-	 * and pick the backlog up on resume.
+	 * notice a message and decide who should see it. Parked peers are skipped.
 	 */
 	async post(input: {
 		room: string;
 		author: string;
 		body: string;
 	}): Promise<string[]> {
-		await this.deps.rooms.post(input);
+		const message = await this.deps.rooms.post(input);
 
 		const woken: string[] = [];
 		for (const [name, peer] of this.#peers) {
-			// A peer's own post must not wake it, and neither should a room it
-			// never subscribed to — `deliver` drains its whole backlog.
 			if (name === input.author) continue;
-			if (!peer.rooms.has(input.room)) continue;
+			const roomTrigger =
+				peer.wake.rooms !== false && peer.rooms.has(input.room);
+			const mentionTrigger =
+				peer.wake.mention === true && message.mentions.includes(name);
+			if (!roomTrigger && !mentionTrigger) continue;
+			if (mentionTrigger && !peer.rooms.has(input.room)) {
+				await this.deps.rooms.enqueueMention(name, message.id);
+			}
 			if (this.registry.isParked(peer.accountId)) continue;
 			if (await this.deliver(name)) woken.push(name);
 		}
@@ -170,20 +186,47 @@ export class Supervisor {
 	 * waiting — burning a turn that will fail, or an empty one, helps nobody.
 	 */
 	async deliver(peerName: string): Promise<boolean> {
+		const previous = this.#deliveries.get(peerName) ?? Promise.resolve(false);
+		const delivery = previous
+			.catch(() => false)
+			.then(() => this.#deliver(peerName));
+		this.#deliveries.set(peerName, delivery);
+		try {
+			return await delivery;
+		} finally {
+			if (this.#deliveries.get(peerName) === delivery) {
+				this.#deliveries.delete(peerName);
+			}
+		}
+	}
+
+	async #deliver(peerName: string): Promise<boolean> {
 		const peer = this.#require(peerName);
 		if (!this.registry.wake(peer.accountId, peerName)) return false;
 
 		const pending = await this.deps.rooms.pendingForAgent(peerName);
+		const mentionPending =
+			await this.deps.rooms.pendingMentionsForAgent(peerName);
+		const seen = new Set<number>();
 		// A peer's own posts must not wake it, or an agent that summarizes into
 		// a room would re-wake itself forever.
 		const rooms = pending
 			.map((entry) => ({
 				room: entry.room,
-				messages: entry.messages.filter(
-					(message) => message.author !== peerName,
-				),
+				messages: entry.messages.filter((message) => {
+					if (message.author === peerName || seen.has(message.id)) return false;
+					seen.add(message.id);
+					return true;
+				}),
 			}))
 			.filter((entry) => entry.messages.length > 0);
+		for (const message of mentionPending) {
+			if (message.author === peerName || seen.has(message.id)) continue;
+			seen.add(message.id);
+			const room = rooms.find((entry) => entry.room === message.room);
+			if (room) room.messages.push(message);
+			else rooms.push({ room: message.room, messages: [message] });
+		}
 		if (rooms.length === 0) {
 			await this.#advanceCursors(peerName, pending);
 			return false;
@@ -201,6 +244,10 @@ export class Supervisor {
 
 		await peer.worker.prompt(batch);
 		await this.#advanceCursors(peerName, pending);
+		await this.deps.rooms.acknowledgeMentions(
+			peerName,
+			mentionPending.map((message) => message.id),
+		);
 		return true;
 	}
 
