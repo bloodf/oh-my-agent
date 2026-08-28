@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -47,12 +47,21 @@
 
 ## Acceptance
 
-- [ ] The daemon starts, serves its socket, and answers a status request.
-- [ ] It serves every method T-507 declares, or answers method-not-found carrying the protocol version.
-- [ ] It keeps running after its launching terminal exits.
-- [ ] A second instance for the same profile refuses to start rather than corrupting shared state.
-- [ ] Shutdown closes the gateway, stops workers, and removes the pidfile.
-- [ ] Boot honors `PI_CODING_AGENT_DIR` for socket and pidfile placement.
+- [x] The daemon starts, serves its socket, and answers a status request.
+- [x] It serves every method T-507 declares, or answers method-not-found carrying the protocol version.
+- [x] It keeps running after its launching terminal exits.
+- [x] A second instance for the same profile refuses to start rather than corrupting shared state.
+- [x] Shutdown closes the gateway, stops workers, and removes the pidfile.
+- [x] Boot honors `PI_CODING_AGENT_DIR` for socket and pidfile placement.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Daemon suite, 29 tests incl. boot/detach/shutdown | [`tests/daemon-main.test.ts`](../../../tests/daemon-main.test.ts) |
+| Composition root | [`src/daemon/main.ts`](../../../src/daemon/main.ts) |
+| Thirteen-method socket server | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) |
+| Commit | `c99c961` |
 
 ## Out of scope
 

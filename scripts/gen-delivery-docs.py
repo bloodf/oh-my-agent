@@ -1570,7 +1570,7 @@ TASKS += [
     ),
     Task(
         id="T-502", slug="daemon-entry-point", title="Daemon entry point",
-        epic="EP-05", sprint="SP-05", status="Ready",
+        epic="EP-05", sprint="SP-05", status="Done",
         goal="`omp-agent daemon` boots every subsystem, serves the control protocol, and keeps running after its terminal closes.",
         read_first=[
             ARCH,
@@ -1607,6 +1607,12 @@ TASKS += [
             "Boot honors `PI_CODING_AGENT_DIR` for socket and pidfile placement.",
         ],
         depends_on=["T-501", "T-507"],
+        evidence=[
+            ("Daemon suite, 29 tests incl. boot/detach/shutdown", "tests/daemon-main.test.ts"),
+            ("Composition root", "src/daemon/main.ts"),
+            ("Thirteen-method socket server", "src/daemon/socket.ts"),
+            ("Commit", "c99c961"),
+        ],
         out_of_scope=[
             "TUI rendering, which is T-504.",
             "Persisting agents, runs, and schedules, which is T-508.",
