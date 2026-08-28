@@ -13,6 +13,7 @@
  * @Environment bun
  */
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -21,6 +22,7 @@ import { loadSkills } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import { parseFrontmatter } from "@oh-my-pi/pi-utils";
 import { materializeWorker } from "../src/daemon/materializer";
 import { parsePeerDefinition } from "../src/shared/agent-definition";
+import { resolveOmpCli } from "../src/worker/lifecycle";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -38,6 +40,27 @@ async function withTempRoot<T>(fn: (root: string) => Promise<T>): Promise<T> {
 		await rm(base, { recursive: true, force: true });
 	}
 }
+
+// ── CLI resolution under OMP's global resolver plugin ───────────────────────
+
+describe("worker CLI resolution once OMP's skill loader is imported", () => {
+	test("resolveOmpCli returns a real path, not a poisoned specifier", () => {
+		// The static `loadSkills` import above pulls in OMP's legacy-pi compat
+		// layer, which installs a process-global `Bun.plugin` onResolve hook for
+		// every `@oh-my-pi/*` specifier. Since bun runs all test files in one
+		// process, that leaves specifier-based CLI resolution broken for every
+		// later child-spawning suite — so this file is the precondition, and
+		// the regression belongs here rather than beside the resolver.
+		//
+		// Deliberately does not assert that upstream resolution *is* corrupted:
+		// pinning upstream's bug would fail the day upstream fixes it.
+
+		const cli = resolveOmpCli();
+		expect(cli).not.toContain("file:");
+		expect(cli.endsWith(join("dist", "cli.js"))).toBe(true);
+		expect(existsSync(cli)).toBe(true);
+	});
+});
 
 // ── Discovery through OMP's real loader ─────────────────────────────────────
 

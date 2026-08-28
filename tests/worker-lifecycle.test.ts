@@ -23,14 +23,17 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { materializeWorker } from "../src/daemon/materializer";
 import type { PeerDefinition } from "../src/shared/agent-definition";
 import { parsePeerDefinition } from "../src/shared/agent-definition";
 import { resolveSandboxLaunch } from "../src/worker/launch-gate";
 import type { WorkerHandle } from "../src/worker/lifecycle";
-import { classifyAgentSpawn, startWorker } from "../src/worker/lifecycle";
+import {
+	classifyAgentSpawn,
+	resolveOmpCli,
+	startWorker,
+} from "../src/worker/lifecycle";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -365,9 +368,7 @@ describe("sandbox wiring", () => {
 		// Drive the real gate, then swap only the adapter binary for the fake
 		// wrapper: the argv structure — profile flags and payload ordering — is
 		// the gate's own output, not something this test reassembled.
-		const realCli = fileURLToPath(
-			import.meta.resolve("@oh-my-pi/pi-coding-agent/package.json"),
-		).replace(/package\.json$/, "dist/cli.js");
+		const realCli = resolveOmpCli();
 		const gated = await resolveSandboxLaunch({
 			policy: {
 				workspace: cwd,

@@ -21,9 +21,9 @@
  * Performance: one child process per running peer. Parked peers hold only their
  * layout and fingerprint.
  */
+import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
 import type { WorkerLayout } from "../daemon/materializer";
 import type { PeerDefinition } from "../shared/agent-definition";
@@ -100,11 +100,37 @@ export function classifyAgentSpawn(payload: {
  * Absolute path to the installed OMP CLI. `RpcClient` defaults to a
  * cwd-relative `dist/cli.js`, which only resolves inside an OMP checkout — the
  * worker's cwd is the user's project.
+ *
+ * Deliberately walks `node_modules` ancestors instead of resolving the package
+ * specifier. OMP's legacy-pi compat layer registers a process-global, permanent
+ * `Bun.plugin` `onResolve` hook matching every `@oh-my-pi/*` specifier
+ * (legacy-pi-compat.ts:2876) whose handler resolves that same specifier
+ * (legacy-pi-compat.ts:1133). Once anything installs the shim — importing
+ * `@oh-my-pi/pi-coding-agent/extensibility/skills` does — the re-entry leaves
+ * every specifier-based resolver returning the real path behind accreted
+ * `file:` prefixes, and the spawned child dies with `Module not found`. A
+ * filesystem walk is plugin-proof; `existsSync` turns a bad layout into a named
+ * error here rather than an opaque child-exit downstream.
+ *
+ * Exported so tests spawn through the same construction production uses; a
+ * resolver duplicated in a test can pass while this one drifts.
  */
-function resolveOmpCli(): string {
-	return fileURLToPath(
-		import.meta.resolve("@oh-my-pi/pi-coding-agent/package.json"),
-	).replace(/package\.json$/, "dist/cli.js");
+export function resolveOmpCli(): string {
+	const suffix = join(
+		"node_modules",
+		"@oh-my-pi",
+		"pi-coding-agent",
+		"dist",
+		"cli.js",
+	);
+	for (let dir = import.meta.dir; ; dir = dirname(dir)) {
+		const candidate = join(dir, suffix);
+		if (existsSync(candidate)) return candidate;
+		if (dirname(dir) === dir) break;
+	}
+	throw new Error(
+		`Cannot locate the OMP CLI: no ${suffix} above ${import.meta.dir}`,
+	);
 }
 
 /**

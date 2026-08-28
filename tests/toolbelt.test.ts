@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import * as zod from "@oh-my-pi/omptype/zod";
 import type { ExtensionAPI, ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
@@ -17,6 +16,7 @@ import { Supervisor } from "../src/daemon/supervisor";
 import { RoomStore } from "../src/rooms/store";
 import { parsePeerDefinition } from "../src/shared/agent-definition";
 import type { AgentSpawnResult } from "../src/shared/protocol";
+import { resolveOmpCli } from "../src/worker/lifecycle";
 import toolbeltExtension from "../src/worker/toolbelt";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -212,9 +212,7 @@ describe("worker toolbelt", () => {
 				scout: "---\nname: scout\ndescription: Reads code.\n---\nRead code.",
 			},
 		});
-		const cliPath = fileURLToPath(
-			import.meta.resolve("@oh-my-pi/pi-coding-agent/package.json"),
-		).replace(/package\.json$/, "dist/cli.js");
+		const cliPath = resolveOmpCli();
 		const client = new RpcClient({
 			cliPath,
 			cwd: root,
