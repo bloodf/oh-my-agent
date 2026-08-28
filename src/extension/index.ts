@@ -22,6 +22,7 @@
 import { join } from "node:path";
 import type {
 	ExtensionAPI,
+	ExtensionContext,
 	ExtensionUIContext,
 } from "@oh-my-pi/pi-coding-agent";
 /** `getAgentDir()` from pi-utils resolves the active profile's agent dir. */
@@ -38,6 +39,8 @@ import {
 	scheduleListCommand,
 	spawnCommand,
 } from "./commands";
+import type { ManagerHostContext } from "./manager";
+import { openManager } from "./manager";
 import { createDaemonClient, refreshWidget } from "./widget";
 
 /** Adapt OMP's UI context onto the seam the commands are written against. */
@@ -51,6 +54,23 @@ function ioFrom(ui: ExtensionUIContext): ExtensionIO {
 				title,
 				options.map((label) => ({ label })),
 			),
+	};
+}
+
+/**
+ * Adapt OMP's context onto the manager's host seam. `mode`/`hasUI` guard the
+ * terminal-only surface; `custom` lives on `ctx.ui`, not on `ctx`, and is
+ * bound so the overlay call keeps its receiver.
+ *
+ * Exported for the suite: this adapter is the one place the manager's shape
+ * and OMP's shape have to agree, and a test cannot reach it through the
+ * registered handler (the socket path is resolved at module load).
+ */
+export function managerHostFrom(ctx: ExtensionContext): ManagerHostContext {
+	return {
+		mode: ctx.mode,
+		hasUI: ctx.hasUI,
+		custom: ctx.ui.custom.bind(ctx.ui) as ManagerHostContext["custom"],
 	};
 }
 
@@ -123,6 +143,29 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 			"Push an instruction into a peer's next turn: /inject <name> <message>.",
 		handler: async (args, ctx) => {
 			await injectCommand(client, ioFrom(ctx.ui), args);
+		},
+	});
+
+	// The manager owns no state: it opens over the transcript, drives the
+	// daemon through the same socket every command uses, and closes clean.
+	// `custom` lives on `ctx.ui` while the mode guard lives on `ctx`, so the
+	// two are adapted onto one host object here — bound, because `custom` is
+	// a method and would lose its receiver otherwise.
+	pi.registerCommand("manage", {
+		description: "Open the full-screen agent manager (needs the TUI).",
+		handler: async (_args, ctx) => {
+			await openManager(client, ioFrom(ctx.ui), managerHostFrom(ctx));
+		},
+	});
+
+	// Feature-guarded: `registerShortcut` is present on the real
+	// `ExtensionAPI`, but a host (or an older one) that lacks it must still
+	// load the extension — the shortcut is a convenience, and `/manage` is
+	// the surface that has to work.
+	pi.registerShortcut?.("ctrl+g", {
+		description: "Open the oh-my-agent manager.",
+		handler: async (ctx) => {
+			await openManager(client, ioFrom(ctx.ui), managerHostFrom(ctx));
 		},
 	});
 

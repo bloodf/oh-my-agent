@@ -42,7 +42,16 @@ import {
 	scheduleListCommand,
 	spawnCommand,
 } from "../src/extension/commands";
-import ohMyAgentExtension from "../src/extension/index";
+import ohMyAgentExtension, { managerHostFrom } from "../src/extension/index";
+import type { ManagerComponent } from "../src/extension/manager";
+import {
+	ACTIONS,
+	CASCADE,
+	createManagerComponent,
+	MANAGER_NEEDS_TUI,
+	ManagerState,
+	openManager,
+} from "../src/extension/manager";
 import {
 	createDaemonClient,
 	DAEMON_UNAVAILABLE,
@@ -138,6 +147,10 @@ interface TestDaemon {
 	supervisor: Supervisor;
 	workers: Map<string, ReturnType<typeof stubWorker>>;
 	rooms: RoomStore;
+	/** Every `killPeer` call, in order, when `options.trackKills` is set. */
+	kills: { name: string; keepChildren: boolean }[];
+	/** Live parentage, so a reparenting cascade is observable. */
+	parents: Map<string, string>;
 }
 
 /**
@@ -155,6 +168,12 @@ async function startDaemon(
 	options: {
 		schedules?: Map<string, ScheduleInfo>;
 		orphans?: Map<string, string>;
+		/**
+		 * Wire a `killPeer` that mirrors the production cascade (ADR-011):
+		 * without it the socket falls back to stopping one worker, and both
+		 * cascade choices would look identical.
+		 */
+		trackKills?: boolean;
 	} = {},
 ): Promise<TestDaemon> {
 	const dir = await mkdtemp(join(tmpdir(), "oma-ext-"));
@@ -174,6 +193,13 @@ async function startDaemon(
 		string,
 		{ id: string; kind: "channel"; name: string }
 	>();
+	// Parentage as live state the cascade mutates, mirroring the daemon's own
+	// `agents.parent` column rather than re-deriving it per call.
+	const parents = new Map<string, string>();
+	const kills: { name: string; keepChildren: boolean }[] = [];
+	for (const peer of peers) {
+		if (peer.parent !== undefined) parents.set(peer.name, peer.parent);
+	}
 	for (const peer of peers) {
 		const worker = stubWorker(peer.name);
 		workers.set(peer.name, worker);
@@ -260,6 +286,43 @@ async function startDaemon(
 			};
 		},
 		bumpAccount: async () => [],
+		...(options.trackKills !== true
+			? {}
+			: {
+					/**
+					 * Mirrors the production cascade: stop the subtree by default,
+					 * or stop only the named peer and reparent its children to
+					 * root when the operator opted out (ADR-011).
+					 */
+					killPeer: async (
+						name: string,
+						killOptions: { keepChildren: boolean },
+					) => {
+						kills.push({ name, keepChildren: killOptions.keepChildren });
+						const descendants: string[] = [];
+						const collect = (parent: string): void => {
+							for (const [child, owner] of parents) {
+								if (owner !== parent) continue;
+								descendants.push(child);
+								collect(child);
+							}
+						};
+						if (!killOptions.keepChildren) collect(name);
+						for (const doomed of [...descendants.reverse(), name]) {
+							await peerMap.get(doomed)?.worker.stop();
+						}
+						if (!killOptions.keepChildren) return;
+						// Reparenting must be visible on the wire, not just in the
+						// harness: `agent_status` reads `peerMap`, so the record's
+						// own `parent` is what an operator would see.
+						for (const [child, owner] of [...parents]) {
+							if (owner !== name) continue;
+							parents.delete(child);
+							const record = peerMap.get(child);
+							if (record !== undefined) delete record.parent;
+						}
+					},
+				}),
 	};
 
 	const socketPath = join(dir, "daemon.sock");
@@ -271,6 +334,8 @@ async function startDaemon(
 		supervisor,
 		workers,
 		rooms,
+		kills,
+		parents,
 	};
 }
 
@@ -706,9 +771,13 @@ describe("daemon unavailable", () => {
 describe("extension factory", () => {
 	test("registers the operator commands without touching the runtime", () => {
 		const registered: string[] = [];
+		const shortcuts: string[] = [];
 		const fakePi = {
 			registerCommand(name: string) {
 				registered.push(name);
+			},
+			registerShortcut(shortcut: string) {
+				shortcuts.push(shortcut);
 			},
 			on() {},
 		};
@@ -723,6 +792,472 @@ describe("extension factory", () => {
 		expect(registered).toContain("schedule");
 		expect(registered).toContain("logs");
 		expect(registered).toContain("inject");
+		expect(registered).toContain("manage");
+		expect(shortcuts).toHaveLength(1);
+	});
+
+	test("the manager host adapter binds ctx.ui.custom, not ctx.custom", async () => {
+		// The one place the manager's shape and OMP's shape must agree. OMP puts
+		// `custom` on `ctx.ui`; reading `ctx.custom` yields undefined and throws
+		// at call time, and an unbound method loses its receiver.
+		const daemon = await startDaemon([{ name: "alpha" }]);
+		let receiver: unknown;
+		const ui = {
+			async custom(this: unknown) {
+				receiver = this;
+				return undefined;
+			},
+		};
+		const host = managerHostFrom({
+			mode: "tui",
+			hasUI: true,
+			ui,
+		} as never);
+
+		expect(host.mode).toBe("tui");
+		expect(host.hasUI).toBe(true);
+		expect(typeof host.custom).toBe("function");
+
+		// Drive the whole command body through the adapter: it must reach
+		// `ui.custom` with `ui` as the receiver.
+		const io = fakeIo();
+		await openManager(daemon.client, io, host);
+		expect(receiver).toBe(ui);
+		expect(io.notices).toEqual([]);
+	});
+});
+
+// ── /manage (T-902 spike) ────────────────────────────────────────────────────
+
+describe("manager state", () => {
+	test("loads the nested tree from the real daemon socket", async () => {
+		const daemon = await startDaemon([
+			{ name: "zeta" },
+			{ name: "charlie", parent: "bravo" },
+			{ name: "bravo", parent: "alpha" },
+			{ name: "alpha" },
+		]);
+
+		const state = new ManagerState(daemon.client);
+		await state.load();
+
+		expect(
+			state.rows.map((row) => [row.agent.name, row.depth] as const),
+		).toEqual([
+			["alpha", 0],
+			["bravo", 1],
+			["charlie", 2],
+			["zeta", 0],
+		]);
+		expect(state.error).toBeUndefined();
+	});
+
+	test("moves the cursor and clamps at both ends", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }, { name: "bravo" }]);
+		const state = new ManagerState(daemon.client);
+		await state.load();
+
+		expect(state.selected()?.agent.name).toBe("alpha");
+		state.moveCursor(-1);
+		expect(state.cursor).toBe(0);
+		state.moveCursor(1);
+		expect(state.selected()?.agent.name).toBe("bravo");
+		state.moveCursor(5);
+		expect(state.cursor).toBe(1);
+	});
+
+	test("reports an absent daemon as an error instead of throwing", async () => {
+		const state = new ManagerState(
+			createDaemonClient(join(tmpdir(), "definitely-absent-manager.sock")),
+		);
+		await state.load();
+
+		expect(state.error).toBe(DAEMON_UNAVAILABLE);
+		expect(state.rows).toHaveLength(0);
+		expect(state.renderLines()).toEqual([DAEMON_UNAVAILABLE]);
+	});
+});
+
+/**
+ * The component fires daemon actions from a synchronous key handler, so a
+ * test must wait for the work itself rather than guess a duration. This
+ * polls the component's own rendered frame until the "working…" footer
+ * clears — the observable condition the following assertions depend on —
+ * and fails loudly instead of hanging if it never does.
+ *
+ * A real macrotask yield is required, not `Bun.sleep(0)`: a kill is two
+ * socket round trips (the kill, then the reload), and microtask draining
+ * alone never lets the loop run.
+ */
+async function settle(component: ManagerComponent): Promise<void> {
+	const deadline = Date.now() + 5_000;
+	while (component.render(80).join("\n").includes("working…")) {
+		if (Date.now() > deadline) {
+			throw new Error("manager action never settled");
+		}
+		const { promise, resolve } = Promise.withResolvers<void>();
+		setTimeout(resolve, 1);
+		await promise;
+	}
+}
+
+describe("manager component", () => {
+	test("renders the tree and closes on Esc", async () => {
+		const daemon = await startDaemon([
+			{ name: "bravo", parent: "alpha" },
+			{ name: "alpha" },
+		]);
+		const state = new ManagerState(daemon.client);
+		await state.load();
+
+		// A fake tui: the component is built exactly as the real factory builds
+		// it, but render() output is captured instead of painted.
+		let closed = false;
+		let renders = 0;
+		const component = createManagerComponent(state, {
+			done: () => {
+				closed = true;
+			},
+			requestRender: () => {
+				renders += 1;
+			},
+		});
+
+		const first = component.render(80);
+		expect(first.join("\n")).toContain("alpha");
+		// Indented under its parent, and the cursor marks the first row.
+		expect(first.some((line) => line.includes("  bravo"))).toBe(true);
+		expect(first.some((line) => line.startsWith("› alpha"))).toBe(true);
+
+		// An unchanged frame must return the identical array reference: the
+		// engine derives its stable prefix from that identity.
+		expect(component.render(80)).toBe(first);
+
+		component.handleInput("\u001b[B");
+		expect(renders).toBe(1);
+		const moved = component.render(80);
+		expect(moved).not.toBe(first);
+		expect(moved.some((line) => line.startsWith("›   bravo"))).toBe(true);
+
+		expect(closed).toBe(false);
+		component.handleInput("\u001b");
+		expect(closed).toBe(true);
+	});
+	test("Enter opens the action menu for the selected agent", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }]);
+		const state = new ManagerState(daemon.client);
+		await state.load();
+		const component = createManagerComponent(state, {
+			done: () => {},
+			requestRender: () => {},
+		});
+
+		component.handleInput("\r");
+		const menu = component.render(80).join("\n");
+		expect(menu).toContain("alpha");
+		expect(menu).toContain(ACTIONS.edit);
+		expect(menu).toContain(ACTIONS.logs);
+		expect(menu).toContain(ACTIONS.inject);
+		expect(menu).toContain(ACTIONS.kill);
+
+		// Esc backs out to the tree rather than closing the overlay.
+		component.handleInput("\u001b");
+		expect(component.render(80).join("\n")).toContain("↑/↓ move · Enter");
+	});
+
+	test("the logs action shows the tail and stays in the pane", async () => {
+		// The pane must survive the action completing: an action helper that
+		// always returns to the tree would blank it the instant it opened.
+		const daemon = await startDaemon([{ name: "alpha" }]);
+		daemon.workers.get("alpha")?.setStderr("first line\nsecond line");
+		const state = new ManagerState(daemon.client);
+		await state.load();
+		const component = createManagerComponent(state, {
+			done: () => {},
+			requestRender: () => {},
+		});
+
+		component.handleInput("\r");
+		component.handleInput("\u001b[B"); // to "View logs"
+		component.handleInput("\r");
+		// The tail is fetched over the socket; let it settle.
+		await settle(component);
+
+		const pane = component.render(80).join("\n");
+		expect(pane).toContain("logs: alpha");
+		expect(pane).toContain("first line");
+		expect(pane).toContain("second line");
+		expect(pane).toContain("Esc back");
+	});
+
+	test("inject types a line and delivers it through the daemon", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }]);
+		const state = new ManagerState(daemon.client);
+		await state.load();
+		const component = createManagerComponent(state, {
+			done: () => {},
+			requestRender: () => {},
+		});
+
+		component.handleInput("\r");
+		component.handleInput("\u001b[B");
+		component.handleInput("\u001b[B"); // to "Inject an instruction"
+		component.handleInput("\r");
+		for (const char of "ship it") component.handleInput(char);
+		// A typo is correctable before sending.
+		component.handleInput("\u007f");
+		expect(component.render(80).join("\n")).toContain("> ship i");
+
+		component.handleInput("\r");
+		await settle(component);
+
+		expect(daemon.workers.get("alpha")?.prompts.at(-1)).toBe("ship i");
+		expect(component.render(80).join("\n")).toContain("Delivered to alpha");
+	});
+
+	test("an empty inject line sends nothing", async () => {
+		// Enter on a blank draft must return to the tree without a round trip:
+		// an empty instruction would wake the agent for no reason.
+		const daemon = await startDaemon([{ name: "alpha" }]);
+		const state = new ManagerState(daemon.client);
+		await state.load();
+		const component = createManagerComponent(state, {
+			done: () => {},
+			requestRender: () => {},
+		});
+
+		component.handleInput("\r");
+		component.handleInput("\u001b[B");
+		component.handleInput("\u001b[B");
+		component.handleInput("\r");
+		component.handleInput(" ");
+		component.handleInput("\r");
+		await settle(component);
+
+		expect(daemon.workers.get("alpha")?.prompts).toEqual([]);
+		// And it lands back on the tree rather than sitting in the draft.
+		expect(component.render(80).join("\n")).toContain("Enter actions");
+	});
+});
+
+describe("manager kill cascade", () => {
+	test("a subtree kill stops the children too and sends keep_children false", async () => {
+		const daemon = await startDaemon(
+			[{ name: "boss" }, { name: "report", parent: "boss" }],
+			{ trackKills: true },
+		);
+		const state = new ManagerState(daemon.client);
+		await state.load();
+		const component = createManagerComponent(state, {
+			done: () => {},
+			requestRender: () => {},
+		});
+
+		component.handleInput("\r");
+		for (let i = 0; i < 3; i += 1) component.handleInput("\u001b[B");
+		component.handleInput("\r"); // Kill
+		expect(component.render(80).join("\n")).toContain("kill boss?");
+
+		component.handleInput("y");
+		// The cascade choice is presented explicitly; it is never defaulted.
+		const cascade = component.render(80).join("\n");
+		expect(cascade).toContain(CASCADE.subtree);
+		expect(cascade).toContain(CASCADE.keep);
+
+		component.handleInput("\r"); // subtree is the highlighted first option
+		await settle(component);
+
+		// The flag the daemon actually received, not the sentence the client
+		// printed: the two differ exactly when this wiring is broken.
+		expect(daemon.kills).toEqual([{ name: "boss", keepChildren: false }]);
+		expect(daemon.workers.get("boss")?.state).toBe("stopped");
+		expect(daemon.workers.get("report")?.state).toBe("stopped");
+		expect(component.render(80).join("\n")).toContain("everything under it");
+	});
+
+	test("keeping children spares them and reparents to root", async () => {
+		const daemon = await startDaemon(
+			[{ name: "boss" }, { name: "report", parent: "boss" }],
+			{ trackKills: true },
+		);
+		const state = new ManagerState(daemon.client);
+		await state.load();
+		const component = createManagerComponent(state, {
+			done: () => {},
+			requestRender: () => {},
+		});
+
+		component.handleInput("\r");
+		for (let i = 0; i < 3; i += 1) component.handleInput("\u001b[B");
+		component.handleInput("\r");
+		component.handleInput("y");
+		component.handleInput("\u001b[B"); // move to "Keep children"
+		component.handleInput("\r");
+		await settle(component);
+
+		expect(daemon.kills).toEqual([{ name: "boss", keepChildren: true }]);
+		expect(daemon.workers.get("boss")?.state).toBe("stopped");
+		// The child outlives its parent — the only way that is allowed —
+		// and no longer points at the dead parent.
+		expect(daemon.workers.get("report")?.state).toBe("running");
+		// Proven over the wire, where an operator would see it: the surviving
+		// child no longer claims a dead parent.
+		const status = await daemon.client.call<{
+			agents: { name: string; parent?: string }[];
+		}>("agent_status", {});
+		expect(
+			status.agents.find((a) => a.name === "report")?.parent,
+		).toBeUndefined();
+		expect(component.render(80).join("\n")).toContain("reparented to root");
+	});
+
+	test("declining the confirmation kills nothing", async () => {
+		const daemon = await startDaemon([{ name: "boss" }], {
+			trackKills: true,
+		});
+		const state = new ManagerState(daemon.client);
+		await state.load();
+		const component = createManagerComponent(state, {
+			done: () => {},
+			requestRender: () => {},
+		});
+
+		component.handleInput("\r");
+		for (let i = 0; i < 3; i += 1) component.handleInput("\u001b[B");
+		component.handleInput("\r");
+		component.handleInput("n");
+		await settle(component);
+
+		expect(daemon.kills).toEqual([]);
+		expect(daemon.workers.get("boss")?.state).toBe("running");
+	});
+
+	test("the state layer sends the cascade flag the daemon narrows", async () => {
+		// keep_children rides past METHODS (which checks only declared fields)
+		// and is narrowed server-side; drive both values over the real wire.
+		const daemon = await startDaemon([{ name: "solo" }, { name: "other" }], {
+			trackKills: true,
+		});
+		const state = new ManagerState(daemon.client);
+		await state.load();
+
+		expect(await state.kill("solo", true)).toContain("reparented to root");
+		expect(await state.kill("other", false)).toContain("everything under it");
+		expect(daemon.kills).toEqual([
+			{ name: "solo", keepChildren: true },
+			{ name: "other", keepChildren: false },
+		]);
+		// An unknown agent surfaces the daemon's own refusal, not a throw.
+		expect(await state.kill("ghost", false)).toContain("Unknown agent: ghost");
+		expect(daemon.kills).toHaveLength(2);
+	});
+});
+
+describe("manager edit seam", () => {
+	test("the edit action calls the T-903 flow and reports its message", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }]);
+		const state = new ManagerState(daemon.client);
+		await state.load();
+		const seen: string[] = [];
+		const component = createManagerComponent(state, {
+			done: () => {},
+			requestRender: () => {},
+			editFlow: async (agent) => {
+				seen.push(agent.name);
+				return `Edited ${agent.name}.`;
+			},
+		});
+
+		component.handleInput("\r");
+		component.handleInput("\r"); // "Edit definition / model" is first
+		await settle(component);
+
+		expect(seen).toEqual(["alpha"]);
+		expect(component.render(80).join("\n")).toContain("Edited alpha.");
+	});
+
+	test("without T-903 the default seam says editing is not built yet", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }]);
+		const state = new ManagerState(daemon.client);
+		await state.load();
+		const component = createManagerComponent(state, {
+			done: () => {},
+			requestRender: () => {},
+		});
+
+		component.handleInput("\r");
+		component.handleInput("\r");
+		await settle(component);
+
+		expect(component.render(80).join("\n")).toContain("not available yet");
+	});
+});
+
+describe("/manage degradations", () => {
+	test("reports that the manager needs a TUI outside interactive mode", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }]);
+		const io = fakeIo();
+		let opened = false;
+
+		await openManager(daemon.client, io, {
+			mode: "rpc",
+			hasUI: false,
+			custom: async () => {
+				opened = true;
+				return undefined as never;
+			},
+		});
+
+		expect(io.notices).toEqual([MANAGER_NEEDS_TUI]);
+		expect(opened).toBe(false);
+	});
+
+	test("reports an absent daemon without opening an overlay", async () => {
+		const io = fakeIo();
+		let opened = false;
+
+		await openManager(
+			createDaemonClient(join(tmpdir(), "definitely-absent-manage.sock")),
+			io,
+			{
+				mode: "tui",
+				hasUI: true,
+				custom: async () => {
+					opened = true;
+					return undefined as never;
+				},
+			},
+		);
+
+		expect(io.notices).toEqual([DAEMON_UNAVAILABLE]);
+		expect(opened).toBe(false);
+	});
+
+	test("opens a fullscreen overlay when the TUI and daemon are both present", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }]);
+		const io = fakeIo();
+		let options: { overlay?: boolean; overlayOptions?: unknown } | undefined;
+
+		await openManager(daemon.client, io, {
+			mode: "tui",
+			hasUI: true,
+			custom: async (factory, opts) => {
+				options = opts as typeof options;
+				// Drive the real factory the way OMP does, then close it.
+				let resolved = false;
+				const component = factory({ requestRender: () => {} }, {}, {}, () => {
+					resolved = true;
+				});
+				expect(component.render(80).join("\n")).toContain("alpha");
+				component.handleInput("\u001b");
+				expect(resolved).toBe(true);
+				return undefined as never;
+			},
+		});
+
+		expect(options?.overlay).toBe(true);
+		expect(options?.overlayOptions).toEqual({ fullscreen: true });
+		expect(io.notices).toEqual([]);
 	});
 });
 
