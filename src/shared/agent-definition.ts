@@ -125,6 +125,8 @@ export interface PeerDefinition
 	> {
 	spawns: string[] | "*";
 	body: string;
+	/** Source file the definition was parsed from; spread through from the native parse. */
+	filePath?: string;
 	workspace?: string;
 	rooms?: string[];
 	wake?: WakeConfig;
