@@ -2274,7 +2274,7 @@ TASKS += [
     ),
     Task(
         id="T-704", slug="deflake-intermittent-test", title="Identify and fix the intermittent test failure",
-        epic="EP-07", sprint="SP-08", status="Ready",
+        epic="EP-07", sprint="SP-08", status="Blocked",
         goal="The suite is deterministic: the failure seen once in twelve local runs is named, reproduced, and fixed.",
         read_first=[ARCH, ("Test harness", "tests/harness.test.ts")],
         files=["tests/"],

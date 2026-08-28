@@ -2,22 +2,20 @@
 
 An [oh-my-pi (OMP)](https://omp.sh/docs) plugin that runs **autonomous, long-lived agents** which keep working while you're away, talk to each other in chat rooms, and are fully observable/steerable from inside the interactive OMP TUI.
 
-Status: design. Everything here is grounded in verified OMP surfaces (docs + `dist/types` of the installed `@oh-my-pi/pi-coding-agent`), not guesses.
+Status: shipped architecture. Every implementation claim below names production modules and covering suites.
 
 ---
-> **Status: this document is a design specification, not a description of shipped code.**
+> **Status: this document describes shipped EP-05 and EP-06 architecture.**
 >
-> Sections below describe the intended system in present tense. Some of it is
-> built and tested; some is not written yet. Every subsection carries an
-> explicit marker:
+> Sections use present tense and carry explicit evidence markers:
 >
-> - **[Implemented]** — code exists and is covered by tests. The marker names the module and its suite.
-> - **[Partial]** — some of the described behavior exists; the marker says what is missing.
-> - **[Planned]** — no implementation yet. The marker names the delivery task that would build it.
+> - Implemented sections name production modules and covering suites.
+> - Partial sections name their shipped behavior and remaining gap.
+> - Planned sections identify architecture outside the shipped surface.
 >
 > Current suite state lives in [`docs/delivery/README.md`](docs/delivery/README.md).
-> The runtime is largely built; the operator surface (daemon binary, control
-> socket, toolbelt, TUI) is not. Treat the delivery tree as authoritative when
+> The daemon, control socket, worker toolbelt, TUI extension, and browser console
+> are shipped operator surfaces. Treat the delivery tree as authoritative when
 > it disagrees with this document.
 
 
@@ -51,9 +49,8 @@ Status: design. Everything here is grounded in verified OMP surfaces (docs + `di
 
 ## 4. Component architecture
 
-*The diagram below shows the intended whole. Two of its five boxes do not exist
-yet: the daemon process and the TUI extension. Each subsection carries its own
-marker.*
+*The diagram shows the shipped whole. The daemon and both operator surfaces
+compose the tested runtime described below.*
 
 ```
 ┌────────────────────────────── omp (interactive TUI) ──────────────────────────────┐
@@ -71,79 +68,82 @@ marker.*
 └───────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.1 Daemon — [Planned]
+### 4.1 Daemon - [Implemented]
 
-*No daemon binary exists: `package.json` declares no `bin`, and no module boots the
-subsystems together. Delivery task [T-502](docs/delivery/tasks/T-502-daemon-entry-point.md)
-owns the entry point; T-507 owns the control-socket protocol contract; T-508 owns
-durable agents, runs, and schedules plus the startup orphan sweep. Broker hosting
-resolution is built ([`src/daemon/boot.ts`](src/daemon/boot.ts),
-`tests/daemon-boot.test.ts`, 14 tests).*
+*The `omp-agent` binary and composition root live in
+[`src/daemon/main.ts`](src/daemon/main.ts); the JSON-RPC control plane lives in
+[`src/daemon/socket.ts`](src/daemon/socket.ts). [`src/shared/protocol.ts`](src/shared/protocol.ts)
+defines the 17-method contract, including `logs_tail`, `inject`, `chat_react`,
+and `chat_unreact`, covered by `tests/protocol.contract.test.ts` and exercised by
+the daemon, toolbelt, and extension suites. `tests/daemon-main.test.ts` covers
+boot, detachment, socket behavior, worker composition, and shutdown.
+[`src/daemon/db.ts`](src/daemon/db.ts) supplies durable state, covered by
+`tests/daemon-persistence.test.ts`.*
 
 - `omp-agent daemon` — long-running Bun process, detached from any TTY; **this** is what "keeps working while I'm away" means.
 - Single instance per user profile; socket + pidfile under the active agent dir (honors `PI_CODING_AGENT_DIR` / `--profile`).
 - Owns all durable state (SQLite via `bun:sqlite`): agents, runs, room messages, schedules, delivery cursors.
 
-### 4.2 Workers (agent runtimes) — [Partial]
+### 4.2 Workers (agent runtimes) - [Implemented]
 
-*RPC subprocess workers are built ([`src/worker/lifecycle.ts`](src/worker/lifecycle.ts),
-`tests/worker-lifecycle.test.ts`, 22 tests), including park, resume, and the §5.1
-delegation invariant proven against a real child. The in-process optimization path
-and the agent toolbelt are not written: no `chat_send`, `chat_read`, `chat_wait`,
-`agent_status`, or `task_handoff` exists in `src/`. Toolbelt is delivery task
-[T-503](docs/delivery/tasks/T-503-agent-toolbelt.md).*
+*RPC subprocess lifecycle, park, resume, sandbox launch, and delegation policy
+live in [`src/worker/lifecycle.ts`](src/worker/lifecycle.ts), covered by
+`tests/worker-lifecycle.test.ts`. The daemon-backed collaboration tools live in
+[`src/worker/toolbelt.ts`](src/worker/toolbelt.ts), covered by
+`tests/toolbelt.test.ts`.*
 
 - Default: **subprocess per agent** in RPC mode — crash isolation, per-agent env/cwd, daemon supervises restarts with backoff.
-- Optimization path: in-process `createAgentSession` for cheap/short-lived agents. Same worker interface either way.
-- Each worker gets the oh-my-agent **agent toolbelt** injected as an extension: `chat_send`, `chat_read`, `chat_wait` (block until mention/new message), `agent_spawn` (create a long-lived **peer** agent in the daemon — never for coding subtasks, see §5.1), `agent_status`, `task_handoff`.
+- Each worker gets the oh-my-agent **agent toolbelt** injected as an extension: `chat_send`, `chat_read`, `chat_wait` (block until mention/new message), `chat_react`, `chat_unreact`, `agent_spawn` (create a long-lived **peer** agent in the daemon - never for coding subtasks, see §5.1), `agent_status`, `task_handoff`.
 
-### 4.3 Bus (chat rooms) — [Partial]
+### 4.3 Bus (chat rooms) - [Implemented]
 
-*The store is built ([`src/rooms/store.ts`](src/rooms/store.ts), `tests/rooms.test.ts`,
-25 tests) with `rooms`, `messages`, and `subscriptions` tables. Subscription-scoped
-delivery and wake are built ([`src/daemon/supervisor.ts`](src/daemon/supervisor.ts),
-`tests/supervisor.test.ts`, 13 tests). Mention parsing and per-agent wake filters are
-not implemented: `wake` is parsed from a definition but nothing consumes it, so a
-wake is triggered by subscription alone. T-509 owns wake filters and mention parsing.
-`Supervisor.post()` accepts any author including `@you`, so human posting works at
-the API; no human-facing surface exists to call it
-([T-504](docs/delivery/tasks/T-504-tui-surface.md)).*
+*Persistent rooms, messages, threads, reactions, mentions, subscriptions, and
+read cursors live in [`src/rooms/store.ts`](src/rooms/store.ts), covered by
+`tests/rooms.test.ts`. [`src/daemon/supervisor.ts`](src/daemon/supervisor.ts)
+consumes mention and room wake filters, batches delivery, and resumes eligible
+peers; `tests/supervisor.test.ts` covers that behavior. Human posts from the TUI
+flow through the supervisor and socket, covered end to end by
+`tests/extension.test.ts` and `tests/daemon-main.test.ts`.*
 
-- Rooms = channels (`#general`, `#reviews`, …) and DMs (`@researcher`). SQLite-backed, append-only messages with per-agent read cursors. This flat log becomes threads and reactions under ADR-009 when EP-06 lands.
+- Rooms = channels (`#general`, `#reviews`, …) and DMs (`@researcher`). SQLite-backed messages support threads, reactions, durable mentions, subscriptions, and per-agent read cursors.
 - Wakeups: a parked (idle) agent is resumed by the daemon when it is `@mentioned` or a room it subscribes to gets a message matching its wake filter — the daemon calls `session.prompt()` / RPC prompt with the pending messages batched into one turn.
 - Humans are first-class participants: the TUI extension posts into rooms as `@you`.
 
-### 4.4 Scheduler — [Partial]
+### 4.4 Scheduler - [Implemented]
 
-*Cron evaluation and one-shot timers are built ([`src/daemon/scheduler.ts`](src/daemon/scheduler.ts),
-`tests/scheduler.test.ts`, 47 tests), including Vixie DOM/DOW semantics, and drive
-quota auto-resume. Schedules are held in memory, not SQLite; T-508 owns their
-persistence. Nothing arms a definition's `schedules:` or `automations:` blocks —
-the parser accepts them and no consumer reads them. Arming belongs to
-[T-502](docs/delivery/tasks/T-502-daemon-entry-point.md).*
+*Cron evaluation and one-shot timers live in
+[`src/daemon/scheduler.ts`](src/daemon/scheduler.ts), covered by
+`tests/scheduler.test.ts`. [`src/daemon/main.ts`](src/daemon/main.ts) arms
+definition `schedules:` at boot and composes them with
+[`src/daemon/db.ts`](src/daemon/db.ts); `tests/daemon-main.test.ts` covers
+definition arming and `tests/daemon-persistence.test.ts` covers persisted arm
+state across restart. Definition `automations:` are persisted and listed as
+event-driven entries; they have no timer.*
 
-- Cron expressions + one-shot timers stored in SQLite; on fire → spawn agent or post a message into a room (which may wake subscribers).
-- Automations are markdown too: prompt body + `schedule:` frontmatter.
+- Cron expressions + one-shot timers are stored in SQLite; a cron fire posts its configured prompt into a room, which may wake subscribers.
+- Definitions carry `schedules:` and `automations:` blocks; schedules arm cron timers, while automations persist and list as event-driven entries.
 
-### 4.5 TUI extension — [Planned]
+### 4.5 TUI extension - [Implemented]
 
-*[`src/extension/index.ts`](src/extension/index.ts) is a five-line no-op factory. No
-command, widget, renderer, or socket client exists. Delivery task
-[T-504](docs/delivery/tasks/T-504-tui-surface.md), which depends on the daemon socket
-from T-502.*
+*[`src/extension/index.ts`](src/extension/index.ts) registers the operator
+surface, [`src/extension/commands.ts`](src/extension/commands.ts) implements its
+commands, and [`src/extension/widget.ts`](src/extension/widget.ts) owns the
+daemon socket client and status widget. `tests/extension.test.ts` covers the
+extension surface.*
 
 - Slash commands: `/agents` (hub: list/spawn/kill/logs), `/rooms` (join/read/post), `/schedule`.
 - Status widget: running/parked agent count, unread room messages.
-- Custom renderer for room transcripts; ask-dialogs for confirmations.
+- Room transcripts render through `/rooms` output; destructive actions use ask-dialog confirmations.
 - Talks **only** to the daemon socket — no direct DB access, so the TUI and daemon can't race.
 
-### 4.6 Web console — [Planned]
+### 4.6 Web console - [Implemented]
 
-*No browser operator surface exists. EP-06 tasks T-601 (conversation model), T-602
-(console API), T-603 (console client), T-604 (reaction toolbelt), and T-605 (console
-management) own it. The console manages agents and channels, posts as the human,
-and receives live membership updates while talking only to the daemon socket like
-the TUI. Threads and reactions follow ADR-009.*
+*[`src/daemon/console-api.ts`](src/daemon/console-api.ts) exposes token-protected
+loopback HTTP management for agents, channels, memberships, messages, threads,
+and reactions, plus a WebSocket feed for live message and reaction events.
+[`src/console/`](src/console/) supplies the browser client.
+`tests/console-api.test.ts` covers the HTTP and WebSocket API;
+`tests/console-client.test.ts` covers browser management flows.*
 
 ## 5. Agent definitions — [Implemented]
 
@@ -173,28 +173,27 @@ OMP-known keys behave identically to native task agents (so definitions stay por
 
 ### 5.1 Delegation contract (worker agents are orchestrators) — [Implemented]
 
-*[`src/worker/lifecycle.ts`](src/worker/lifecycle.ts) (`classifyAgentSpawn`),
-pinned by `tests/contracts/spawn-policy.contract.test.ts` (23 tests) and proven
-against a real child in `tests/end-to-end.test.ts`. The `agent_spawn` rejection
-described below is specified but unbuilt, because no toolbelt exists yet
-([T-503](docs/delivery/tasks/T-503-agent-toolbelt.md)); the classifier it would
-call is built and tested.*
+*[`src/worker/toolbelt.ts`](src/worker/toolbelt.ts) enforces `agent_spawn`
+rejection by calling `classifyAgentSpawn` from
+[`src/worker/lifecycle.ts`](src/worker/lifecycle.ts). The behavior is covered by
+`tests/toolbelt.test.ts`, pinned by
+`tests/contracts/spawn-policy.contract.test.ts`, and proven against a real child
+in `tests/end-to-end.test.ts`.*
 
 A top-level worker agent's job is to **coordinate**, and in OMP coordination means the native `task` tool. An explicit `tools:` list *replaces* the default set — write it naively and you silently strip `task`, leaving the agent unable to spawn subagents at all. The contract:
 
 - **Every worker agent keeps native delegation.** Either include `task` in `tools:` or declare `spawns:` — OMP auto-adds `task` to a restricted tool list when `spawns:` is declared and depth permits (`runSubprocess`). Declaring `spawns: [a, b]` is preferred: it doubles as the allowlist, and an omitted `agent` field in a dispatch defaults to the first listed entry. (`tools: [task]` without `spawns:` implies `spawns: *` via backward-compat.)
-- **Two spawn verbs, two meanings.** Native `task` = in-run subagent (bounded, transcript folds into the parent run, subject to spawn policy). `agent_spawn` toolbelt = new long-lived peer in the daemon (own lifecycle, rooms, budget). Coding/research subtasks MUST dispatch through native `task`; `agent_spawn` is reserved for standing up durable teammates. The toolbelt tool description states this and the daemon rejects `agent_spawn` calls whose payload looks like a one-shot subtask (has `expected_output`, no `rooms`).
+- **Two spawn verbs, two meanings.** Native `task` = in-run subagent (bounded, transcript folds into the parent run, subject to spawn policy). `agent_spawn` toolbelt = new long-lived peer in the daemon (own lifecycle, rooms, budget). Coding/research subtasks MUST dispatch through native `task`; `agent_spawn` is reserved for standing up durable teammates. The toolbelt calls `classifyAgentSpawn` and locally rejects calls without a non-empty `rooms` array before any daemon call. `expected_output` signals one-shot intent when such a payload also omits rooms.
 - **Recursion & approval policy is OMP's, inherited.** Depth is governed by `task.maxRecursionDepth` (default `2`; at the cap OMP strips `task` and empties the spawn policy), self-recursion by the `PI_BLOCKED_AGENT` guard, and per-agent bans by `task.disabledAgents`. oh-my-agent adds nothing on top except `autonomy.maxTurns`/`budgetUsd` at the run level — one policy system, not two.
 - **Tested invariant.** The integration suite runs a worker with a restricted `tools:` list, has it perform a coding task, and asserts (a) the effective tool list contains `task`, (b) at least one dispatch went through native `task`, (c) zero `agent_spawn` calls occurred during the run.
 
-### 5.2 Private store + materialized worker dirs (no global leakage) — [Partial]
+### 5.2 Private store + materialized worker dirs (no global leakage) - [Implemented]
 
-*Materialization is built ([`src/daemon/materializer.ts`](src/daemon/materializer.ts),
-`tests/materializer.test.ts`, 30 tests) including the synthetic root, the `spawns:`
-closure, the `task.disabledAgents` snapshot, and atomic swap with restore. Reading
-definitions from the two private store paths is not: nothing enumerates them
-([T-501](docs/delivery/tasks/T-501-peer-store.md)). The startup orphan sweep is
-also unbuilt; T-508 owns it with run persistence.*
+*[`src/daemon/peer-store.ts`](src/daemon/peer-store.ts) enumerates and writes the
+plugin-private definition roots, covered by `tests/peer-store.test.ts`.
+[`src/daemon/materializer.ts`](src/daemon/materializer.ts) builds isolated worker
+roots and spawn-policy snapshots, covered by `tests/materializer.test.ts`.
+`tests/daemon-persistence.test.ts` verifies the daemon startup orphan sweep.*
 
 - **Source of truth is plugin-private.** Peer definitions live in `~/.omp/agent/oh-my-agent/agents/*.md` (user) and `<project>/.omp/oh-my-agent/agents/*.md` (project). Neither path is an OMP discovery root, so normal OMP sessions never see them. A user who *wants* a definition available to plain OMP copies it into the global root explicitly.
 - **Materialize per worker at spawn.** The daemon builds a synthetic user root per worker under `~/.omp/agent/oh-my-agent/workers/<agent>/home/`. It owns `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME`; the canonical OMP agent dir is `<home>/.omp/agent`, and its `agents/` contains only the worker's own definition plus definitions named by `spawns:`. This is required because `discoverAgents()` consults generic native config roots as well as `getAgentDir()`; `PI_CODING_AGENT_DIR` alone does not reroot both. The dir starts with no `agent.db`; never seed it from the user's credential store.
@@ -202,37 +201,36 @@ also unbuilt; T-508 owns it with run persistence.*
 - **`spawns:` policy is the enforcement — materialization is not.** Discovery precedence (`discoverAgents`, `src/task/discovery.ts`) consults the nearest project `.omp/agents` *before* the active agent dir, and extension + bundled roots after it. Workers keep the project `cwd` (they edit the project tree), so an unmaterialized project agent — or any extension/bundled agent — remains discoverable regardless of what the worker dir contains. Materialization only curates the user-root slice; the actual allowlist is §5.1's `spawns:` policy, checked at dispatch time. As defense-in-depth, at spawn the daemon snapshots `discoverAgents(workerCwd)` and writes every discovered name outside the worker's allowlist into the worker's `task.disabledAgents` — a static deny-list (filtered after discovery, preflight-enforced at dispatch): agents appearing after spawn stay enabled until the next materialization, so it hardens listings but never replaces `spawns:`.
 - **Cleanup.** Materialized dirs are ephemeral; the daemon rebuilds them on every spawn (definitions may have changed) and sweeps orphans at startup.
 
-## 6. Persistence (SQLite sketch) — [Partial]
+## 6. Persistence (SQLite sketch) - [Implemented]
 
-*Built: `rooms`, `messages`, and `subscriptions` (the `cursors` role, folded into
-`subscriptions.last_read_id`) in [`src/rooms/store.ts`](src/rooms/store.ts),
-covered by `tests/rooms.test.ts` (25 tests). Not built: `agents`, `runs`, and
-`schedules`. Agent and schedule state currently lives in memory inside the
-supervisor, registry, and scheduler, so nothing survives a restart yet; run
-history has no storage at all. T-502 opens the store; T-508 owns persistence,
-including the startup sweep that depends on the `runs` table.*
+*[`src/rooms/store.ts`](src/rooms/store.ts) persists rooms, messages, threads,
+reactions, subscriptions, mentions, and read cursors; `tests/rooms.test.ts`
+covers the room database. [`src/daemon/db.ts`](src/daemon/db.ts) persists agents,
+runs, and schedules; `tests/daemon-persistence.test.ts` covers restart survival,
+run outcomes, schedule arm state, and the startup orphan sweep.*
 
 ```
 agents(name, definition_path, status, worker_pid, cwd, started_at, …)
 runs(id, agent, trigger, started_at, ended_at, outcome, cost_usd, transcript_ref)
 rooms(id, kind)                      -- channel | dm
 messages(id, room_id, author, body, created_at)
-cursors(agent, room_id, last_msg_id)
+subscriptions(agent, room_id, last_read_id)
 schedules(id, cron, action, payload, next_fire_at, enabled)
 ```
 
-## 7. Isolation and security model — read this before assuming anything — [Partial]
+## 7. Isolation and security model - read this before assuming anything - [Implemented]
 
-*The mechanism is built and tested: [`src/worker/sandbox.ts`](src/worker/sandbox.ts)
-compiles the policy (51 tests), [`src/worker/launch-gate.ts`](src/worker/launch-gate.ts)
-fails closed on a missing adapter or unreachable bridge (13 tests),
-[`src/worker/lifecycle.ts`](src/worker/lifecycle.ts) gates opted-in peers itself, and
-`tests/seatbelt-wiring.test.ts` verifies the profile against the materialized layout
-(10 tests). What is missing is production reach: no daemon launches a worker, so no
-sandboxed process has ever run outside a test
-([T-502](docs/delivery/tasks/T-502-daemon-entry-point.md)). Layers 2 and 3 are OMP's
-own behavior, inherited. The `/agents` shield at the end of this section is
-[Planned] ([T-504](docs/delivery/tasks/T-504-tui-surface.md)).*
+*[`src/worker/sandbox.ts`](src/worker/sandbox.ts),
+[`src/worker/launch-gate.ts`](src/worker/launch-gate.ts), and
+[`src/worker/lifecycle.ts`](src/worker/lifecycle.ts) compile, gate, and launch
+opted-in sandboxed workers; `tests/sandbox.test.ts`,
+`tests/sandbox-gate.test.ts`, `tests/worker-lifecycle.test.ts`, and
+`tests/seatbelt-wiring.test.ts` cover the boundary. The daemon launches workers
+through [`src/daemon/main.ts`](src/daemon/main.ts),
+[`src/daemon/socket.ts`](src/daemon/socket.ts) carries actual sandbox state on
+the wire, and [`src/extension/commands.ts`](src/extension/commands.ts) renders
+the `/agents` shield only for sandboxed peers. `tests/daemon-main.test.ts` and
+`tests/extension.test.ts` cover that operator-visible state.*
 
 This section is deliberately blunt because the intuitive mental model is wrong.
 
@@ -246,43 +244,53 @@ Three distinct layers, in decreasing strength:
 
 Defaults: layer 2 + 3 on, layer 1 opt-in (it constrains tooling and needs per-OS setup). `/agents` shows a shield icon only for sandboxed agents so the actual guarantee is visible.
 
-## 8. Repo layout — [Partial]
+## 8. Repo layout - [Implemented]
 
-*`src/daemon/`, `src/worker/`, `src/shared/`, and `tests/` exist as shown.
-`src/extension/` remains a no-op factory until T-504, there is no socket server in
-`src/daemon/`, no toolbelt in `src/worker/`, and no `agents/` example directory
-exists yet; T-501 owns shipping it.*
+*Daemon, worker, shared, extension, browser console, example-agent, and test
+trees exist. [`src/daemon/main.ts`](src/daemon/main.ts),
+[`src/daemon/socket.ts`](src/daemon/socket.ts),
+[`src/worker/toolbelt.ts`](src/worker/toolbelt.ts),
+[`src/extension/index.ts`](src/extension/index.ts), [`src/console/`](src/console/),
+and [`agents/`](agents/) are covered by `tests/daemon-main.test.ts`,
+`tests/toolbelt.test.ts`, `tests/extension.test.ts`,
+`tests/console-client.test.ts`, and `tests/peer-store.test.ts`.*
 
 ```
 oh-my-agent/
   package.json            # omp.extensions manifest → installs the TUI extension
   src/
-    extension/            # in-TUI plugin (commands, widget, renderers)
+    extension/            # in-TUI plugin (commands, widget, transcript output)
     daemon/               # supervisor, scheduler, bus, sqlite, socket server
     worker/               # worker bootstrap + agent toolbelt extension
     shared/               # JSON-RPC protocol types, agent-definition parsing
+    console/              # browser operator client (HTTP reads/writes + WebSocket events)
   agents/                 # example agent definitions
   tests/                  # unit, integration, and OMP contract suites
 ```
 
-## 9. Decisions (confirmed) — [Partial]
+## 9. Decisions (confirmed) - [Implemented]
 
-*Decisions 1, 3, and 6 are built and tested. Decision 2 (per-worker gateway tokens)
-is built at the gateway; the worker side that consumes it is unwired, because no
-daemon composes them ([T-502](docs/delivery/tasks/T-502-daemon-entry-point.md)).
-Decision 4 is split: subscription park and unattended auto-resume are built and
-tested ([`src/daemon/account-registry.ts`](src/daemon/account-registry.ts), 16
-tests), but the metered half is unreachable — the 80% warning fires into an empty
-callback in [`src/daemon/supervisor.ts`](src/daemon/supervisor.ts) and no caller
-supplies `budgetUsd`, so no warning can reach a human
-([T-506](docs/delivery/tasks/T-506-metered-budget-wiring.md)). Decision 5 (no
-phased delivery) states intent and is not met: the operator surface is unbuilt.*
+*Every documented subsystem is shipped. [`src/daemon/main.ts`](src/daemon/main.ts)
+composes workers, rooms, schedules, persistence, broker hosting, and the scoped
+credential gateway; `tests/daemon-main.test.ts` covers the composition.
+[`src/daemon/materializer.ts`](src/daemon/materializer.ts) routes each worker
+through its per-worker gateway credentials, covered by
+`tests/materializer.test.ts` and `tests/toolbelt.test.ts`.
+[`src/daemon/credential-gateway.ts`](src/daemon/credential-gateway.ts) enforces
+the scoped broker view, covered by `tests/credential-gateway.test.ts` and
+`tests/gateway-client.test.ts`. [`src/daemon/supervisor.ts`](src/daemon/supervisor.ts)
+and [`src/daemon/account-registry.ts`](src/daemon/account-registry.ts) make both
+subscription recovery and metered `budgetUsd` warnings, parking, and bumps
+reachable; `tests/supervisor.test.ts`, `tests/account-registry.test.ts`, and
+`tests/daemon-main.test.ts` cover those paths. Operator surfaces are covered by
+`tests/extension.test.ts`, `tests/console-api.test.ts`, and
+`tests/console-client.test.ts`.*
 
-1. **Worker mode:** RPC subprocess is the default; in-process SDK sessions are for tests and daemon-internal tooling only (§5.2).
+1. **Worker mode:** RPC subprocess is the production worker mode; the daemon owns worker lifecycle (§5.2).
 2. **RPC worker auth:** every worker connects to the daemon's scoped credential gateway with its own revocable bearer token; only the daemon can access the upstream broker with the vault-wide token (§9.6).
 3. **Discovery hygiene:** `spawns:` is the enforcement; enumerated `task.disabledAgents` snapshot at spawn as defense-in-depth (§5.2).
 4. **Budget & quotas:** billing is a property of the **account**, not the agent. *Metered* (API-key) accounts: warn in the room at 80% of `budgetUsd`, park at 100%; a human resumes with a bump or kills. *Subscription* accounts: no dollar cap — on a quota-exhaustion signal, every run on that account parks and the daemon schedules auto-resume at quota reset via a one-shot timer (§4); work continues with no human in the loop. `budgetUsd` in agent frontmatter is metered-only; quota state is tracked per account in the daemon's account registry beside the broker.
-5. **Delivery & method:** no phased delivery — the first shipped version has everything working (daemon, broker, rooms/bus, scheduler, materialization, sandboxing, quota handling), built test-first (§11).
+5. **Delivery & method:** the shipped architecture substantially meets the no-phased-delivery decision: every documented subsystem now has production code and covering suites. T-704 is a blocked, never-reproduced release-readiness flake investigation, not a missing subsystem.
 6. **Broker hosting: discover, else embed - fronted by a per-worker gateway.** At boot the daemon runs the client discovery chain (`OMP_AUTH_BROKER_URL` env → `auth.broker.*` config → token file). Admin-token sourcing differs by mode: *external broker reused* → authenticate with the discovered token, treat it read-only, never rotate it; *embedded* → run `startAuthBroker` over the shared vault with a fresh in-memory admin token generated at boot. Workers receive only per-worker gateway tokens bound to one account. The gateway rewrites all upstream generations into a monotonically increasing **worker-view generation** and filters `GET /v1/snapshot`, `GET /v1/snapshot/stream`, refresh, block, and usage data to bound credentials. Foreign-id access, credential upload, and `/v1/usage/clients` are admin-only. Usage routes required by stock `RemoteAuthCredentialStore` remain compatible: observed usage is attributed to the worker; aggregate/history responses are account-filtered; stale notification is allowed. **Shared disable reconciliation is explicit:** `RemoteAuthCredentialStore.deleteAuthCredential()` removes locally before its fire-and-forget disable request and streaming clients skip pull refresh. For a dedicated account, the gateway proxies disable and returns the upstream result. For a shared account, the gateway (a) queues an idempotent policy request containing the route credential id and gateway-token worker identity, (b) returns retryable `409 {"status":"pending_policy","requestId":"…"}`, (c) leaves upstream state unchanged, (d) increments only the requester's worker-view generation, and (e) immediately emits a valid full filtered `snapshot` SSE event to that worker's active stream; conditional long-poll uses the same synthetic generation bump. `RemoteAuthCredentialStore` accepts a full snapshot when its generation is not older (`remote-store.ts:499-512`), restoring the locally removed credential. Peers remain unchanged. After approval, the daemon disables upstream and normal gateway events converge every worker. Embedded lifecycle mirrors `runServe` (`auth-broker-cli.ts:154-194`): open `SqliteAuthCredentialStore` → `AuthStorage.reload()` → `startAuthBroker`, loopback-only ephemeral bind; shutdown revokes worker tokens, closes gateway, then closes embedded handle/storage. Reused external brokers are never closed or mutated except through approved credential operations.
 
 ## 10. Open questions
@@ -295,14 +303,16 @@ phased delivery) states intent and is not met: the operator surface is unbuilt.*
 
 ## 11. Engineering practice — [Implemented]
 
-*Followed throughout: `tsc --noEmit` clean; current suite state lives in
-[`docs/delivery/README.md`](docs/delivery/README.md). Two practices were added after
-this document was written, both from defects found in review: every regression test
-is proven non-vacuous by reverting the fix and confirming failure, and a test that
-asserts on a construction production performs must call the same builder rather
-than rebuilding it (see
-[ADR-008](docs/delivery/adr/ADR-008-tests-share-production-builders.md)).*
+*Production modules including [`src/daemon/main.ts`](src/daemon/main.ts),
+[`src/worker/lifecycle.ts`](src/worker/lifecycle.ts), and
+[`src/extension/index.ts`](src/extension/index.ts) are covered by focused and
+integration suites including `tests/daemon-main.test.ts`,
+`tests/worker-lifecycle.test.ts`, `tests/extension.test.ts`, and
+`tests/end-to-end.test.ts`. Current suite state lives in
+[`docs/delivery/README.md`](docs/delivery/README.md). Regression tests are proven
+non-vacuous, and tests that assert production construction call the same builder
+(see [ADR-008](docs/delivery/adr/ADR-008-tests-share-production-builders.md)).*
 
 - **TDD, strictly:** red → green → refactor. A failing test precedes every behavior; no daemon, broker, scheduler, or extension code lands without one.
 - **Unit tests** colocated per module (`bun test`): protocol types, definition parsing, materialization, spawn-policy snapshots, quota state machine, room routing.
-- **Integration suite** for cross-component invariants. Built: the §5.1 delegation invariant; broker round-trip through the gateway; foreign ids return 403; shared disable returns `409 pending_policy`, queues `{credentialId, workerId}`, emits a full snapshot with a newer worker-view generation, and leaves peers usable; dedicated disable proxies upstream; usage routes return account-filtered data; quota-park → auto-resume; end-to-end room message flow through the bus; T-303 proves a real `RemoteAuthCredentialStore` restores its locally removed credential through [`src/daemon/credential-gateway.ts`](src/daemon/credential-gateway.ts) (`tests/gateway-client.test.ts`, 8 tests).
+- **Integration suite** for cross-component invariants. Built: the §5.1 delegation invariant; broker round-trip through the gateway; foreign ids return 403; shared disable returns `409 pending_policy`, queues `{credentialId, workerId}`, emits a full snapshot with a newer worker-view generation, and leaves peers usable; dedicated disable proxies upstream; usage routes return account-filtered data; quota-park → auto-resume; end-to-end room message flow through the bus. **T-303 is Built:** a real `RemoteAuthCredentialStore` restores its locally removed credential through [`src/daemon/credential-gateway.ts`](src/daemon/credential-gateway.ts), covered by `tests/gateway-client.test.ts`.

@@ -52,7 +52,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-04](epics/EP-04-autonomy-runtime.md) | Autonomy runtime: workers, rooms, scheduler, quota | Done | 5 |
 | [EP-05](epics/EP-05-operator-surface.md) | Operator surface: daemon entry point and TUI | Done | 13 |
 | [EP-06](epics/EP-06-web-console.md) | Web console: manage agents and channels from a browser | Done | 5 |
-| [EP-07](epics/EP-07-release-readiness.md) | Release readiness: CI, lint, and a README a stranger can act on | Ready | 4 |
+| [EP-07](epics/EP-07-release-readiness.md) | Release readiness: CI, lint, and a README a stranger can act on | Blocked | 4 |
 
 ## Sprints
 
@@ -65,7 +65,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [SP-05](sprints/SP-05-operator-surface.md) | Operator surface | Done | The parts a human touches: protocol, daemon entry point, persistence, toolbelt, and TUI. |
 | [SP-06](sprints/SP-06-conversation-model.md) | Conversation model | Done | Threads, replies, and reactions in the store, then over the wire. |
 | [SP-07](sprints/SP-07-web-console.md) | Web console | Done | The browser client and the daemon API behind it. |
-| [SP-08](sprints/SP-08-release-readiness.md) | Release readiness | Ready | The things that make the repository checkable by a machine and explicable to a stranger: CI, lint, and a README. |
+| [SP-08](sprints/SP-08-release-readiness.md) | Release readiness | Blocked | The things that make the repository checkable by a machine and explicable to a stranger: CI, lint, and a README. |
 
 ## Decisions
 
