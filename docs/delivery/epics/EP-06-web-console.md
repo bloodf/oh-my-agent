@@ -1,6 +1,6 @@
 # EP-06 — Web console: manage agents and channels from a browser
 
-**Status:** In progress
+**Status:** Blocked
 
 *Derived from the tasks below.*
 
@@ -36,8 +36,6 @@ The TUI (EP-05) reaches whoever is at the terminal that launched the daemon. Lon
 - [ ] A membership change reaches a running agent on the next post, with no restart.
 - [ ] Closing the browser does not stop or park any agent.
 
-Unchecked items above are covered by the Ready tasks below.
-
 ## Decisions
 
 - [ADR-009](../adr/ADR-009-threads-and-reactions.md) — Conversation gains threads and reactions; reactions carry agent status
@@ -49,5 +47,5 @@ Unchecked items above are covered by the Ready tasks below.
 | [T-601](../tasks/T-601-conversation-model.md) | Threads, replies, and reactions in the store | Done |
 | [T-602](../tasks/T-602-console-api.md) | Daemon HTTP and WebSocket API | Done |
 | [T-603](../tasks/T-603-console-client.md) | Browser client | Done |
-| [T-604](../tasks/T-604-reaction-toolbelt.md) | Agents set reactions as status | In progress |
+| [T-604](../tasks/T-604-reaction-toolbelt.md) | Agents set reactions as status | Done |
 | [T-605](../tasks/T-605-console-management.md) | Create agents and channels from the UI | Blocked |

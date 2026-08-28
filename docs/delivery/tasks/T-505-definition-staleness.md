@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -42,10 +42,17 @@ A parked worker whose definition changed is rebuilt before it is reused.
 
 ## Acceptance
 
-- [ ] An unchanged definition reuses the parked worker with no re-materialization.
-- [ ] A changed definition rebuilds the worker directory and starts a fresh session.
-- [ ] Messages queued during the rebuild are delivered afterwards, not dropped.
-- [ ] No policy-changing file is mutated under a live process.
+- [x] An unchanged definition reuses the parked worker with no re-materialization.
+- [x] A changed definition rebuilds the worker directory and starts a fresh session.
+- [x] Messages queued during the rebuild are delivered afterwards, not dropped.
+- [x] No policy-changing file is mutated under a live process.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Fingerprint-checked delivery and respawn seam | [`src/daemon/supervisor.ts`](../../../src/daemon/supervisor.ts) |
+| Staleness cases in the supervisor suite plus a daemon-level rebuild test | [`tests/supervisor.test.ts`](../../../tests/supervisor.test.ts) |
 
 ## Out of scope
 

@@ -54,7 +54,7 @@ Every runtime subsystem is built and tested, but nothing a user can launch or lo
 | [T-504](../tasks/T-504-tui-surface.md) | TUI commands, status widget, and dialogs | Done |
 | [T-511](../tasks/T-511-operator-steering.md) | Operator steering: logs tail and instruction injection | Ready |
 | [T-512](../tasks/T-512-sandboxed-on-the-wire.md) | Surface sandboxed state in agent_status | Done |
-| [T-513](../tasks/T-513-reaction-methods-on-the-socket.md) | Reaction methods on the control socket | Ready |
-| [T-505](../tasks/T-505-definition-staleness.md) | Rebuild a worker when its definition changes | Ready |
+| [T-513](../tasks/T-513-reaction-methods-on-the-socket.md) | Reaction methods on the control socket | Done |
+| [T-505](../tasks/T-505-definition-staleness.md) | Rebuild a worker when its definition changes | Done |
 | [T-506](../tasks/T-506-metered-budget-wiring.md) | Wire metered budget warnings into rooms | Done |
 | [T-509](../tasks/T-509-wake-filters.md) | Wake filters and mention parsing | Done |

@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -45,10 +45,17 @@ The daemon serves `chat_react` and `chat_unreact`, so the T-604 toolbelt works i
 
 ## Acceptance
 
-- [ ] A toolbelt chat_react call against the real daemon lands on the message and is visible in chat_read.
-- [ ] chat_unreact removes it; reacting twice leaves one reaction.
-- [ ] The protocol contract suite names both methods in its exact set.
-- [ ] The T-604 acceptance items pass against the production socket, which is what flips T-604 to Done.
+- [x] A toolbelt chat_react call against the real daemon lands on the message and is visible in chat_read.
+- [x] chat_unreact removes it; reacting twice leaves one reaction.
+- [x] The protocol contract suite names both methods in its exact set.
+- [x] The T-604 acceptance items pass against the production socket, which is what flips T-604 to Done.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Fifteen-method protocol with reaction shapes | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) |
+| Daemon serves both methods through the store | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) |
 
 ## Out of scope
 

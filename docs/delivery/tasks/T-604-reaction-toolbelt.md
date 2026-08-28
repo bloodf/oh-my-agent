@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-06](../epics/EP-06-web-console.md) | [SP-07](../sprints/SP-07-web-console.md) | In progress | [asset-map](../asset-map.md) |
+| [EP-06](../epics/EP-06-web-console.md) | [SP-07](../sprints/SP-07-web-console.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -37,10 +37,17 @@ An agent can mark a message with an emoji to signal what it is doing about it.
 
 ## Acceptance
 
-- [ ] An agent's reaction appears on the message for every reader.
-- [ ] An unknown emoji is refused with a message naming the allowed set.
-- [ ] Reacting twice is idempotent.
-- [ ] A reaction does not mark the message read or suppress a wake.
+- [x] An agent's reaction appears on the message for every reader.
+- [x] An unknown emoji is refused with a message naming the allowed set.
+- [x] Reacting twice is idempotent.
+- [x] A reaction does not mark the message read or suppress a wake.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Reaction tools with the ADR-009 status vocabulary | [`src/worker/toolbelt.ts`](../../../src/worker/toolbelt.ts) |
+| Toolbelt suite drives the production socket handlers | [`tests/toolbelt.test.ts`](../../../tests/toolbelt.test.ts) |
 
 ## Out of scope
 

@@ -1829,7 +1829,7 @@ TASKS += [
     ),
     Task(
         id="T-513", slug="reaction-methods-on-the-socket", title="Reaction methods on the control socket",
-        epic="EP-05", sprint="SP-05", status="Ready",
+        epic="EP-05", sprint="SP-05", status="Done",
         goal="The daemon serves `chat_react` and `chat_unreact`, so the T-604 toolbelt works in production instead of returning method-not-found.",
         read_first=[
             ARCH,
@@ -1867,11 +1867,15 @@ TASKS += [
             "The T-604 acceptance items pass against the production socket, which is what flips T-604 to Done.",
         ],
         depends_on=["T-507", "T-604"],
+        evidence=[
+            ("Fifteen-method protocol with reaction shapes", "src/shared/protocol.ts"),
+            ("Daemon serves both methods through the store", "src/daemon/socket.ts"),
+        ],
         out_of_scope=["Streaming reactions to the console; T-602's live feed already covers browser readers."],
     ),
     Task(
         id="T-505", slug="definition-staleness", title="Rebuild a worker when its definition changes",
-        epic="EP-05", sprint="SP-05", status="Ready",
+        epic="EP-05", sprint="SP-05", status="Done",
         goal="A parked worker whose definition changed is rebuilt before it is reused.",
         read_first=[ARCH, ("Materializer", "src/daemon/materializer.ts"), ("Lifecycle", "src/worker/lifecycle.ts")],
         files=[
@@ -1902,6 +1906,10 @@ TASKS += [
             "No policy-changing file is mutated under a live process.",
         ],
         depends_on=["T-501", "T-502"],
+        evidence=[
+            ("Fingerprint-checked delivery and respawn seam", "src/daemon/supervisor.ts"),
+            ("Staleness cases in the supervisor suite plus a daemon-level rebuild test", "tests/supervisor.test.ts"),
+        ],
     ),
     Task(
         id="T-506", slug="metered-budget-wiring", title="Wire metered budget warnings into rooms",
@@ -2079,7 +2087,7 @@ TASKS += [
     ),
     Task(
         id="T-604", slug="reaction-toolbelt", title="Agents set reactions as status",
-        epic="EP-06", sprint="SP-07", status="In progress",
+        epic="EP-06", sprint="SP-07", status="Done",
         goal="An agent can mark a message with an emoji to signal what it is doing about it.",
         read_first=[
             ARCH,
@@ -2106,6 +2114,10 @@ TASKS += [
             "A reaction does not mark the message read or suppress a wake.",
         ],
         depends_on=["T-503", "T-601"],
+        evidence=[
+            ("Reaction tools with the ADR-009 status vocabulary", "src/worker/toolbelt.ts"),
+            ("Toolbelt suite drives the production socket handlers", "tests/toolbelt.test.ts"),
+        ],
     ),
     Task(
         id="T-605", slug="console-management", title="Create agents and channels from the UI",
