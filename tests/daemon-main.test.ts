@@ -35,12 +35,15 @@ import { bootDaemon } from "../src/daemon/main";
 import { type PeerRecord, startControlSocket } from "../src/daemon/socket";
 import type { SupervisedWorker, Supervisor } from "../src/daemon/supervisor";
 import { RoomStore } from "../src/rooms/store";
+import { fingerprintPeerDefinition } from "../src/shared/agent-definition";
 import type {
 	AgentSpawnResult,
 	AgentStatusResult,
 	BumpResult,
+	ChatReactResult,
 	ChatReadResult,
 	ChatSendResult,
+	ChatUnreactResult,
 	ChatWaitResult,
 	JsonRpcFailure,
 	JsonRpcSuccess,
@@ -483,6 +486,103 @@ describe("bootDaemon — composition and the control socket", () => {
 		expect(read.messages[0]?.author).toBe("@you");
 	});
 
+	test("reactions preserve actor, report idempotency, and remain visible", async () => {
+		const { handle } = await boot();
+		const posted = await call<ChatSendResult>(handle.socketPath, "chat_send", {
+			room: "#reviews",
+			body: "reaction target",
+		});
+		const params = {
+			messageId: posted.messageId,
+			actor: "reviewer",
+			emoji: "👀",
+		};
+
+		const reacted = await Promise.all([
+			call<ChatReactResult & { reacted: true }>(
+				handle.socketPath,
+				"chat_react",
+				params,
+				1,
+			),
+			call<ChatReactResult & { reacted: true }>(
+				handle.socketPath,
+				"chat_react",
+				params,
+				2,
+			),
+		]);
+		expect(reacted.map(({ added }) => added).sort()).toEqual([false, true]);
+		expect(reacted.every(({ reacted }) => reacted)).toBe(true);
+
+		for (const method of ["chat_read", "chat_wait"] as const) {
+			const result = await call<ChatReadResult | ChatWaitResult>(
+				handle.socketPath,
+				method,
+				method === "chat_read"
+					? { room: "#reviews" }
+					: { room: "#reviews", sinceId: 0, timeoutMs: 50 },
+			);
+			expect(result.messages).toContainEqual({
+				id: posted.messageId,
+				room: "#reviews",
+				author: "@you",
+				body: "reaction target",
+				createdAt: expect.any(Number),
+				parentId: null,
+				threadRootId: null,
+				replyCount: 0,
+				reactions: [{ actor: "reviewer", emoji: "👀" }],
+			});
+		}
+
+		const unreacted = await Promise.all([
+			call<ChatUnreactResult & { reacted: false }>(
+				handle.socketPath,
+				"chat_unreact",
+				params,
+				3,
+			),
+			call<ChatUnreactResult & { reacted: false }>(
+				handle.socketPath,
+				"chat_unreact",
+				params,
+				4,
+			),
+		]);
+		expect(unreacted.map(({ removed }) => removed).sort()).toEqual([
+			false,
+			true,
+		]);
+		expect(unreacted.every(({ reacted }) => !reacted)).toBe(true);
+		const read = await call<ChatReadResult>(handle.socketPath, "chat_read", {
+			room: "#reviews",
+		});
+		expect(read.messages[0]?.reactions).toEqual([]);
+	});
+
+	test("missing reaction targets preserve react and unreact semantics", async () => {
+		const { handle } = await boot();
+		const params = { messageId: 999, actor: "reviewer", emoji: "👀" };
+
+		const missingReact = expectFailure(
+			await rpc(handle.socketPath, "chat_react", params),
+		);
+		expect(missingReact.error.code).toBe(ERROR_CODE.INVALID_PARAMS);
+		expect(missingReact.error.data.field).toBe("messageId");
+
+		const missingUnreact = await call<ChatUnreactResult & { reacted: false }>(
+			handle.socketPath,
+			"chat_unreact",
+			params,
+		);
+		expect(missingUnreact).toEqual({
+			...params,
+			removed: false,
+			reacted: false,
+		});
+	});
+
 	test("a peer's wake filter reaches the supervisor through registration", async () => {
 		const agentDir = await tempAgentDir();
 		await writePeer(agentDir, "silent", { wake: { rooms: false } });
@@ -497,6 +597,61 @@ describe("bootDaemon — composition and the control socket", () => {
 		// not pass the definition's wake config into Supervisor.register, this
 		// peer would have been prompted.
 		expect(workers.get("silent")?.prompts ?? []).toHaveLength(0);
+	});
+
+	test("a definition change rebuilds the worker before the next delivery", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+
+		// A factory that fingerprints each build from the definition it was
+		// handed, so the supervisor's staleness check has something to compare.
+		const builds: { prompts: string[]; stopped: boolean }[] = [];
+		const factory: WorkerFactory = async ({ peer }) => {
+			const record = { prompts: [] as string[], stopped: false };
+			builds.push(record);
+			return {
+				name: peer.name,
+				fingerprint: fingerprintPeerDefinition(peer),
+				get state() {
+					return record.stopped ? "stopped" : "running";
+				},
+				prompt: async (message) => {
+					record.prompts.push(message);
+				},
+				park: async () => {},
+				resume: async () => {},
+				stop: async () => {
+					record.stopped = true;
+				},
+			} as SupervisedWorker;
+		};
+
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: await tempAgentDir(),
+			workerFactory: factory,
+		});
+		cleanups.push(() => handle.close());
+
+		await call<ChatSendResult>(handle.socketPath, "chat_send", {
+			room: "#reviews",
+			body: "first message",
+		});
+		expect(builds).toHaveLength(1);
+		expect(builds[0]?.prompts[0]).toContain("first message");
+
+		// Policy-changing edit on disk: the next delivery must go to a fresh
+		// worker built from the new definition, not the stale one.
+		await writePeer(agentDir, "reviewer", { wake: { rooms: false } });
+		await call<ChatSendResult>(handle.socketPath, "chat_send", {
+			room: "#reviews",
+			body: "second message",
+		});
+
+		expect(builds).toHaveLength(2);
+		expect(builds[0]?.stopped).toBe(true);
+		expect(builds[1]?.prompts[0]).toContain("second message");
 	});
 
 	test("chat_wait returns when a message lands after the call started", async () => {
@@ -759,6 +914,8 @@ describe("bootDaemon — protocol errors", () => {
 			chat_send: { room: "#reviews", body: "hello" },
 			chat_read: { room: "#reviews" },
 			chat_wait: { room: "#reviews", sinceId: 999, timeoutMs: 50 },
+			chat_react: { messageId: 1, actor: "reviewer", emoji: "👀" },
+			chat_unreact: { messageId: 1, actor: "reviewer", emoji: "👀" },
 			agent_spawn: { name: "researcher" },
 			agent_status: {},
 			task_handoff: {

@@ -15,19 +15,35 @@
  * The worker is a stub here: this suite is about orchestration, not about the
  * RPC child (covered in tests/worker-lifecycle.test.ts).
  *
+ * The staleness cases (T-505) are the exception: they build a real
+ * `createPeerStore` over a temp directory and edit files on disk, because a
+ * faked store cannot prove the definition is re-read rather than re-hashed
+ * from the copy the worker was built from.
+ *
  * @Environment bun
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { AccountRegistry } from "../src/daemon/account-registry";
+import type { PeerStore } from "../src/daemon/peer-store";
+import { createPeerStore } from "../src/daemon/peer-store";
 import type { QuotaBlock } from "../src/daemon/quota-state";
 import { Scheduler } from "../src/daemon/scheduler";
-import type { SupervisedWorker } from "../src/daemon/supervisor";
+import type {
+	RespawnRequest,
+	SupervisedWorker,
+	SupervisorDeps,
+} from "../src/daemon/supervisor";
 import { Supervisor } from "../src/daemon/supervisor";
 import { RoomStore } from "../src/rooms/store";
+import type { PeerDefinition } from "../src/shared/agent-definition";
+import {
+	fingerprintPeerDefinition,
+	parsePeerDefinition,
+} from "../src/shared/agent-definition";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -38,12 +54,13 @@ afterEach(async () => {
 });
 
 /** Records what the supervisor asked the worker to do. */
-function stubWorker(name = "reviewer") {
+function stubWorker(name = "reviewer", fingerprint?: string) {
 	const prompts: string[] = [];
 	let state: "running" | "parked" | "stopped" = "running";
 
 	const worker: SupervisedWorker = {
 		name,
+		fingerprint,
 		get state() {
 			return state;
 		},
@@ -70,7 +87,9 @@ function stubWorker(name = "reviewer") {
 	};
 }
 
-async function harness() {
+async function harness(
+	overrides: Partial<Pick<SupervisorDeps, "peers" | "respawn">> = {},
+) {
 	const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-sup-"));
 	cleanups.push(() => rm(dir, { recursive: true, force: true }));
 
@@ -96,6 +115,7 @@ async function harness() {
 		scheduler,
 		now: () => now,
 		onError: (error, peerName) => errors.push({ error, peerName }),
+		...overrides,
 	});
 
 	return {
@@ -956,5 +976,355 @@ describe("wake filters", () => {
 
 		expect(woken).toEqual([]);
 		expect(rev.prompts).toEqual([]);
+	});
+});
+
+// ── Definition staleness (T-505) ─────────────────────────────────────────────
+
+/**
+ * A real peer store over a temp directory. Production `createPeerStore` is used
+ * rather than a hand-rolled fake, so a store that stops re-reading disk breaks
+ * these tests instead of passing them (ADR-008).
+ */
+interface DiskPeer {
+	store: PeerStore;
+	write: (frontmatter: Record<string, unknown>, body?: string) => Promise<void>;
+	remove: () => Promise<void>;
+	definition: () => Promise<PeerDefinition>;
+}
+
+async function peerStoreOnDisk(): Promise<DiskPeer> {
+	const base = await mkdtemp(join(tmpdir(), "oh-my-agent-stale-"));
+	cleanups.push(() => rm(base, { recursive: true, force: true }));
+	const roots = {
+		user: join(base, "user", "agents"),
+		project: join(base, "project", "agents"),
+	};
+	await mkdir(roots.user, { recursive: true });
+	const path = join(roots.user, "reviewer.md");
+
+	return {
+		store: createPeerStore(roots),
+		write: async (frontmatter, body = "You are reviewer.") => {
+			const yaml = Object.entries(frontmatter)
+				.map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+				.join("\n");
+			await writeFile(path, `---\n${yaml}\n---\n${body}`, "utf8");
+		},
+		remove: () => rm(path, { force: true }),
+		definition: async () =>
+			parsePeerDefinition(path, await readFile(path, "utf8")),
+	};
+}
+
+/** The baseline frontmatter every staleness case starts from. */
+function reviewerFrontmatter(
+	extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+	return {
+		name: "reviewer",
+		description: "Reviews PRs.",
+		model: "@review",
+		tools: ["read", "grep"],
+		spawns: ["scout"],
+		rooms: ["#reviews"],
+		...extra,
+	};
+}
+
+describe("definition staleness", () => {
+	test("an unchanged definition reuses the parked worker with no rebuild", async () => {
+		const disk = await peerStoreOnDisk();
+		await disk.write(reviewerFrontmatter());
+		const fingerprint = fingerprintPeerDefinition(await disk.definition());
+
+		const respawns: RespawnRequest[] = [];
+		const stale = stubWorker("reviewer", fingerprint);
+		const h = await harness({
+			peers: disk.store,
+			respawn: async (request) => {
+				respawns.push(request);
+				return stubWorker("reviewer", fingerprint).worker;
+			},
+		});
+		await h.rooms.createRoom({ id: "#reviews", kind: "channel" });
+		await h.supervisor.register({
+			worker: stale.worker,
+			accountId: "acct-1",
+			mode: "subscription",
+			rooms: ["#reviews"],
+		});
+		await stale.worker.park();
+
+		await h.rooms.post({ room: "#reviews", author: "@you", body: "Same." });
+		expect(await h.supervisor.deliver("reviewer")).toBe(true);
+
+		expect(respawns).toEqual([]);
+		expect(stale.prompts).toHaveLength(1);
+		expect(stale.prompts[0]).toContain("Same.");
+		expect(stale.state).not.toBe("stopped");
+		expect(h.errors).toEqual([]);
+	});
+
+	test("formatting-only edits do not rebuild, because the fingerprint is semantic", async () => {
+		const disk = await peerStoreOnDisk();
+		await disk.write(reviewerFrontmatter());
+		const fingerprint = fingerprintPeerDefinition(await disk.definition());
+
+		const respawns: RespawnRequest[] = [];
+		const stale = stubWorker("reviewer", fingerprint);
+		const h = await harness({
+			peers: disk.store,
+			respawn: async (request) => {
+				respawns.push(request);
+				return stubWorker("reviewer", fingerprint).worker;
+			},
+		});
+		await h.rooms.createRoom({ id: "#reviews", kind: "channel" });
+		await h.supervisor.register({
+			worker: stale.worker,
+			accountId: "acct-1",
+			mode: "subscription",
+			rooms: ["#reviews"],
+		});
+		await stale.worker.park();
+
+		// Same semantics, different bytes: keys reordered on disk. A textual
+		// hash of the file would rebuild here and throw away a live session for
+		// nothing.
+		await disk.write({
+			rooms: ["#reviews"],
+			spawns: ["scout"],
+			tools: ["read", "grep"],
+			model: "@review",
+			description: "Reviews PRs.",
+			name: "reviewer",
+		});
+		expect(fingerprintPeerDefinition(await disk.definition())).toBe(
+			fingerprint,
+		);
+
+		await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Reordered.",
+		});
+		expect(await h.supervisor.deliver("reviewer")).toBe(true);
+
+		expect(respawns).toEqual([]);
+		expect(stale.prompts).toHaveLength(1);
+	});
+
+	test("a policy change rebuilds: the old worker stops and the fresh one is prompted", async () => {
+		const disk = await peerStoreOnDisk();
+		await disk.write(reviewerFrontmatter());
+		const fingerprint = fingerprintPeerDefinition(await disk.definition());
+
+		const stale = stubWorker("reviewer", fingerprint);
+		const respawns: RespawnRequest[] = [];
+		let fresh = stale;
+		const h = await harness({
+			peers: disk.store,
+			respawn: async (request) => {
+				respawns.push(request);
+				fresh = stubWorker(
+					"reviewer",
+					fingerprintPeerDefinition(request.definition),
+				);
+				return fresh.worker;
+			},
+		});
+		await h.rooms.createRoom({ id: "#reviews", kind: "channel" });
+		await h.supervisor.register({
+			worker: stale.worker,
+			accountId: "acct-1",
+			mode: "subscription",
+			rooms: ["#reviews"],
+		});
+		await stale.worker.park();
+
+		// Deliver once against the unchanged definition first. This is what makes
+		// the case prove the re-read: the store has already answered for this
+		// peer, so a store that caches its first listing — or a check that
+		// re-hashes the definition the worker was built from — would compare the
+		// stale answer here and never fire.
+		await h.rooms.post({ room: "#reviews", author: "@you", body: "Before." });
+		expect(await h.supervisor.deliver("reviewer")).toBe(true);
+		expect(stale.prompts).toHaveLength(1);
+
+		// A policy-changing edit: the peer may now spawn an extra agent.
+		await disk.write(reviewerFrontmatter({ spawns: ["scout", "implementor"] }));
+		const rebuilt = fingerprintPeerDefinition(await disk.definition());
+		expect(rebuilt).not.toBe(fingerprint);
+
+		await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "After edit.",
+		});
+		expect(await h.supervisor.deliver("reviewer")).toBe(true);
+
+		expect(respawns).toHaveLength(1);
+		expect(respawns[0].peerName).toBe("reviewer");
+		expect(respawns[0].previousFingerprint).toBe(fingerprint);
+		expect(fingerprintPeerDefinition(respawns[0].definition)).toBe(rebuilt);
+
+		// The superseded process is gone, and never saw the second message.
+		expect(stale.state).toBe("stopped");
+		expect(stale.prompts).toHaveLength(1);
+		expect(fresh.prompts).toHaveLength(1);
+		expect(fresh.prompts[0]).toContain("After edit.");
+	});
+
+	test("the rebuilt worker is the one every later turn reaches", async () => {
+		const disk = await peerStoreOnDisk();
+		await disk.write(reviewerFrontmatter());
+		const fingerprint = fingerprintPeerDefinition(await disk.definition());
+
+		const stale = stubWorker("reviewer", fingerprint);
+		let fresh = stale;
+		let rebuilds = 0;
+		const h = await harness({
+			peers: disk.store,
+			respawn: async (request) => {
+				rebuilds += 1;
+				fresh = stubWorker(
+					"reviewer",
+					fingerprintPeerDefinition(request.definition),
+				);
+				return fresh.worker;
+			},
+		});
+		await h.rooms.createRoom({ id: "#reviews", kind: "channel" });
+		await h.supervisor.register({
+			worker: stale.worker,
+			accountId: "acct-1",
+			mode: "subscription",
+			rooms: ["#reviews"],
+		});
+		await disk.write(reviewerFrontmatter({ spawns: ["scout", "implementor"] }));
+
+		await h.rooms.post({ room: "#reviews", author: "@you", body: "First." });
+		await h.supervisor.deliver("reviewer");
+		// Queued behind the rebuild: it must land on the fresh worker, not be
+		// dropped and not trigger a second rebuild.
+		await h.rooms.post({ room: "#reviews", author: "@you", body: "Second." });
+		await h.supervisor.deliver("reviewer");
+
+		expect(rebuilds).toBe(1);
+		expect(fresh.prompts).toHaveLength(2);
+		expect(fresh.prompts[1]).toContain("Second.");
+		expect(stale.prompts).toEqual([]);
+	});
+
+	test("a definition missing from disk holds the turn and reports, without throwing", async () => {
+		const disk = await peerStoreOnDisk();
+		await disk.write(reviewerFrontmatter());
+		const fingerprint = fingerprintPeerDefinition(await disk.definition());
+
+		let respawned = false;
+		const stale = stubWorker("reviewer", fingerprint);
+		const h = await harness({
+			peers: disk.store,
+			respawn: async () => {
+				respawned = true;
+				return stubWorker("reviewer", fingerprint).worker;
+			},
+		});
+		await h.rooms.createRoom({ id: "#reviews", kind: "channel" });
+		await h.supervisor.register({
+			worker: stale.worker,
+			accountId: "acct-1",
+			mode: "subscription",
+			rooms: ["#reviews"],
+		});
+		await disk.remove();
+
+		await h.rooms.post({ room: "#reviews", author: "@you", body: "Orphaned." });
+
+		// Held, not thrown: the daemon delivery path must not blow up because an
+		// operator deleted a file.
+		expect(await h.supervisor.deliver("reviewer")).toBe(false);
+		expect(stale.prompts).toEqual([]);
+		expect(respawned).toBe(false);
+		expect(h.errors).toHaveLength(1);
+		expect(h.errors[0].peerName).toBe("reviewer");
+		expect(String((h.errors[0].error as Error).message)).toContain("reviewer");
+
+		// The message is still waiting once the definition is restored.
+		await disk.write(reviewerFrontmatter());
+		expect(await h.supervisor.deliver("reviewer")).toBe(true);
+		expect(stale.prompts[0]).toContain("Orphaned.");
+	});
+
+	test("an unwired respawn reports a clear error instead of prompting a stale worker", async () => {
+		const disk = await peerStoreOnDisk();
+		await disk.write(reviewerFrontmatter());
+		const fingerprint = fingerprintPeerDefinition(await disk.definition());
+
+		const stale = stubWorker("reviewer", fingerprint);
+		// No `respawn` override: the default seam is what production gets before
+		// the daemon wires it.
+		const h = await harness({ peers: disk.store });
+		await h.rooms.createRoom({ id: "#reviews", kind: "channel" });
+		await h.supervisor.register({
+			worker: stale.worker,
+			accountId: "acct-1",
+			mode: "subscription",
+			rooms: ["#reviews"],
+		});
+		await disk.write(reviewerFrontmatter({ spawns: ["scout", "implementor"] }));
+
+		await h.rooms.post({ room: "#reviews", author: "@you", body: "Unwired." });
+
+		expect(await h.supervisor.deliver("reviewer")).toBe(false);
+		expect(stale.prompts).toEqual([]);
+		expect(h.errors).toHaveLength(1);
+		expect((h.errors[0].error as Error).message).toContain("respawn not wired");
+	});
+
+	test("without a peer store configured, delivery is unchanged", async () => {
+		// The staleness check is opt-in: a supervisor built without a store must
+		// keep delivering, or every existing caller silently stops working.
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#reviews", kind: "channel" });
+		await h.supervisor.register({
+			worker: h.stub.worker,
+			accountId: "acct-1",
+			mode: "subscription",
+			rooms: ["#reviews"],
+		});
+
+		await h.rooms.post({ room: "#reviews", author: "@you", body: "No store." });
+
+		expect(await h.supervisor.deliver("reviewer")).toBe(true);
+		expect(h.stub.prompts).toHaveLength(1);
+	});
+
+	test("a worker exposing no fingerprint is reported once, and still delivers", async () => {
+		const disk = await peerStoreOnDisk();
+		await disk.write(reviewerFrontmatter());
+
+		// A wrapper that dropped `fingerprint`: the check cannot run, and the
+		// silent version of this is a staleness gate that never fires.
+		const blind = stubWorker("reviewer", undefined);
+		const h = await harness({ peers: disk.store });
+		await h.rooms.createRoom({ id: "#reviews", kind: "channel" });
+		await h.supervisor.register({
+			worker: blind.worker,
+			accountId: "acct-1",
+			mode: "subscription",
+			rooms: ["#reviews"],
+		});
+
+		await h.rooms.post({ room: "#reviews", author: "@you", body: "One." });
+		expect(await h.supervisor.deliver("reviewer")).toBe(true);
+		await h.rooms.post({ room: "#reviews", author: "@you", body: "Two." });
+		expect(await h.supervisor.deliver("reviewer")).toBe(true);
+
+		expect(blind.prompts).toHaveLength(2);
+		// Reported, but once — not on every turn for the daemon's lifetime.
+		expect(h.errors).toHaveLength(1);
+		expect((h.errors[0].error as Error).message).toContain("no fingerprint");
 	});
 });

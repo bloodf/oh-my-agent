@@ -242,17 +242,52 @@ export async function bootDaemon(
 		scheduler.start();
 		started.push(async () => scheduler.stop());
 
-		const supervisor = new Supervisor({
-			rooms,
-			scheduler,
-			now,
-			onError: (error, peerName) => log(`peer ${peerName}: ${String(error)}`),
-		});
+		const store = createPeerStore(
+			resolvePeerStoreRoots({ agentDir, projectDir }),
+		);
 
 		const peers = new Map<string, PeerRecord>();
 		const knownRooms = new Map<string, RoomInfo>();
 		const schedules = new Map<string, ScheduleRecord>();
 		const definitions = new Map<string, PeerDefinition>();
+
+		const supervisor = new Supervisor({
+			rooms,
+			scheduler,
+			now,
+			onError: (error, peerName) => log(`peer ${peerName}: ${String(error)}`),
+			// T-505: definitions re-read per delivery; a fingerprint mismatch
+			// rebuilds through this seam rather than reusing stale policy.
+			peers: store,
+			respawn: async ({ peerName, definition, previousFingerprint }) => {
+				log(
+					`rebuilding ${peerName}: definition changed (was ${previousFingerprint.slice(0, 12)}…)`,
+				);
+				const fresh = recordRuns(
+					await workerFactory({
+						peer: definition,
+						cwd: projectDir,
+						rootDir: join(stateDir, "workers", peerName),
+						discoveredAgentNames,
+						inferenceGateway: {
+							url: gateway.url,
+							token: gateway.issueWorkerToken({
+								workerId: peerName,
+								credentialIds: [],
+							}).token,
+						},
+						sourceSpawnAgents: await spawnSourcesFor(definition),
+						socketPath,
+					}),
+				);
+				// The supervisor swaps its own Peer record on return; the daemon's
+				// parallel map backs status/stop, so it must point at the live
+				// worker too.
+				const record = peers.get(peerName);
+				if (record) peers.set(peerName, { ...record, worker: fresh });
+				return fresh;
+			},
+		});
 
 		/**
 		 * Why the turn being delivered is happening. The supervisor decides who
@@ -270,9 +305,6 @@ export async function bootDaemon(
 			knownRooms.set(id, { id, kind, name: id });
 		};
 
-		const store = createPeerStore(
-			resolvePeerStoreRoots({ agentDir, projectDir }),
-		);
 		const listing = await store.list();
 		for (const failed of listing.errors) {
 			// A malformed definition must not take the whole daemon down with it.
@@ -294,7 +326,8 @@ export async function bootDaemon(
 		 */
 		const recordRuns = (
 			worker: SupervisedWorker,
-		): SupervisedWorker & Partial<Pick<WorkerHandle, "sandboxed">> => ({
+		): SupervisedWorker &
+			Partial<Pick<WorkerHandle, "sandboxed" | "fingerprint">> => ({
 			get name() {
 				return worker.name;
 			},
@@ -306,6 +339,13 @@ export async function bootDaemon(
 			// downgrades every wire answer to "unsandboxed".
 			get sandboxed() {
 				return (worker as Partial<Pick<WorkerHandle, "sandboxed">>).sandboxed;
+			},
+			// Pass the definition fingerprint through too: the staleness check
+			// compares it against the store, and a wrapper that drops it disables
+			// the rebuild-on-change path (T-505).
+			get fingerprint() {
+				return (worker as Partial<Pick<WorkerHandle, "fingerprint">>)
+					.fingerprint;
 			},
 			prompt: async (message) => {
 				if (!recording) return await worker.prompt(message);

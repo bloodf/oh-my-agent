@@ -5,24 +5,41 @@
  * quota, and resumes it when the armed timer fires so nothing outside this
  * module has to choreograph `pendingForAgent` → wake → prompt → `markRead`.
  *
- * Public API: `Supervisor`.
+ * It also enforces §10.3: before any turn is handed to a worker, the peer's
+ * definition is re-read from disk and its fingerprint compared with the one the
+ * live worker was built from. A match reuses the worker; a mismatch stops it
+ * and rebuilds through `SupervisorDeps.respawn` before delivering, so a
+ * policy-changing edit never applies to a running process and no file mutates
+ * under one. There is no hot-reload path.
+ *
+ * Public API: `Supervisor`, `SupervisedWorker`, `SupervisorDeps`,
+ * `RespawnRequest`.
  *
  * Upstream deps: `./account-registry` (quota state + wake gating),
- * `./scheduler` (one-shot resume timers), `../rooms/store` (durable rooms).
+ * `./scheduler` (one-shot resume timers), `../rooms/store` (durable rooms),
+ * `./peer-store` (current on-disk definitions), `../shared/agent-definition`
+ * (`fingerprintPeerDefinition`).
  *
  * Downstream consumers: the daemon entry point and the TUI extension, which
- * post into rooms and read worker status.
+ * post into rooms and read worker status. The entry point owns materialization
+ * and so supplies `respawn`; without it a stale peer holds rather than rebuilds.
  *
  * Failure modes: delivering to an unregistered peer throws — silently dropping
  * a message would look like an idle agent. A parked peer is never prompted;
- * its backlog waits in the room until the resume lands.
+ * its backlog waits in the room until the resume lands. A definition that is
+ * missing, unreadable, or whose rebuild fails holds the peer's backlog and
+ * reports through `onError` rather than throwing into delivery or waking the
+ * peer on a superseded policy.
  *
- * Performance: per-peer delivery is serialized; it reads subscribed and mentioned pending messages, then writes acknowledgements after prompting.
+ * Performance: per-peer delivery is serialized; it reads subscribed and mentioned pending messages, then writes acknowledgements after prompting. The staleness check re-reads the peer store once per delivered turn.
  */
 
 import type { RoomStore } from "../rooms/store";
+import type { PeerDefinition } from "../shared/agent-definition";
+import { fingerprintPeerDefinition } from "../shared/agent-definition";
 import type { AccountMode } from "./account-registry";
 import { AccountRegistry } from "./account-registry";
+import type { PeerStore } from "./peer-store";
 import type { QuotaBlock } from "./quota-state";
 import type { Scheduler } from "./scheduler";
 
@@ -30,16 +47,45 @@ import type { Scheduler } from "./scheduler";
 export interface SupervisedWorker {
 	readonly name: string;
 	readonly state: "running" | "parked" | "stopped";
+	/**
+	 * Fingerprint of the definition this worker was materialized from, when the
+	 * handle exposes one. `WorkerHandle` always does; a wrapper that drops it
+	 * leaves the supervisor unable to compare, and an unanswerable comparison
+	 * reuses the worker rather than rebuilding it on every turn.
+	 */
+	readonly fingerprint?: string;
 	prompt(message: string): Promise<void>;
 	park(): Promise<void>;
 	resume(): Promise<void>;
 	stop(): Promise<void>;
 }
 
+/** What the daemon needs in order to rebuild one peer from current disk. */
+export interface RespawnRequest {
+	peerName: string;
+	/** Definition as it now reads on disk, already parsed. */
+	definition: PeerDefinition;
+	/** Fingerprint the superseded worker was built from, for logging. */
+	previousFingerprint: string;
+}
+
 export interface SupervisorDeps {
 	rooms: RoomStore;
 	scheduler: Scheduler;
 	now: () => number;
+	/**
+	 * Definitions as they currently sit on disk. Supplied, every delivery
+	 * re-reads the peer's definition and compares fingerprints; omitted, the
+	 * staleness check is skipped entirely and delivery is unchanged.
+	 */
+	peers?: PeerStore;
+	/**
+	 * Re-materialize a peer and start a fresh session, returning the new
+	 * worker. Constructed in the daemon entry point, which owns materialization
+	 * and the credential gateway; the default refuses rather than pretending a
+	 * rebuild happened.
+	 */
+	respawn?: (request: RespawnRequest) => Promise<SupervisedWorker>;
 	/** Surfaced when a queued park/resume fails; the daemon must not strand. */
 	onError?: (error: unknown, peerName: string) => void;
 }
@@ -81,6 +127,8 @@ export class Supervisor {
 	#deliveries = new Map<string, Promise<boolean>>();
 	/** Serialize held notification flushes per account. */
 	#notificationFlushes = new Map<string, Promise<void>>();
+	/** Peers already reported as unable to answer the staleness check. */
+	#unfingerprinted = new Set<string>();
 
 	constructor(private deps: SupervisorDeps) {
 		this.registry = new AccountRegistry({
@@ -373,6 +421,11 @@ export class Supervisor {
 			)
 			.join("\n");
 
+		// §10.3: the definition on disk is re-read and compared here, so a turn
+		// is never handled by a worker running a superseded policy. Held rather
+		// than thrown — a rebuild that cannot happen leaves the backlog pending.
+		if (!(await this.#ensureFresh(peerName, peer))) return false;
+
 		await peer.worker.prompt(batch);
 		await this.#advanceCursors(peerName, pending);
 		await this.deps.rooms.acknowledgeMentions(
@@ -380,6 +433,91 @@ export class Supervisor {
 			mentionPending.map((message) => message.id),
 		);
 		return true;
+	}
+
+	/**
+	 * Recompute the peer's fingerprint from current disk and rebuild on a
+	 * mismatch. Returns whether the peer may now be prompted.
+	 *
+	 * The comparison must re-read the store rather than re-hash the definition
+	 * the worker was built from: a fingerprint recomputed from the in-memory
+	 * copy can never differ from itself, which is exactly the check that looks
+	 * like it works and never fires.
+	 *
+	 * `fingerprintPeerDefinition` hashes the parsed definition's semantic
+	 * fields, so reformatting a file — reordered keys, changed whitespace —
+	 * produces the same fingerprint and reuses the live session.
+	 */
+	async #ensureFresh(peerName: string, peer: Peer): Promise<boolean> {
+		const store = this.deps.peers;
+		const current = peer.worker.fingerprint;
+		if (!store) return true;
+		if (current === undefined) {
+			// A store is configured, so staleness was asked for, but this worker
+			// cannot answer. `WorkerHandle` always carries a fingerprint, so the
+			// cause is a wrapper that dropped it — report it once rather than
+			// letting the whole check quietly never fire. Delivery continues:
+			// holding every turn forever is worse than the check being absent.
+			if (!this.#unfingerprinted.has(peerName)) {
+				this.#unfingerprinted.add(peerName);
+				this.deps.onError?.(
+					new Error(
+						`Peer ${peerName} exposes no fingerprint; the definition staleness check cannot run for it`,
+					),
+					peerName,
+				);
+			}
+			return true;
+		}
+
+		let definition: PeerDefinition | undefined;
+		try {
+			definition = await store.get(peerName);
+		} catch (error) {
+			this.deps.onError?.(error, peerName);
+			return false;
+		}
+		if (!definition) {
+			// The file is gone. Waking on the last known policy is the one
+			// outcome staleness handling exists to prevent, so hold the backlog
+			// and report instead of prompting or throwing into delivery.
+			this.deps.onError?.(
+				new Error(
+					`Peer ${peerName} has no definition on disk; holding delivery rather than waking it on a stale policy`,
+				),
+				peerName,
+			);
+			return false;
+		}
+
+		const fingerprint = fingerprintPeerDefinition(definition);
+		if (fingerprint === current) return true;
+
+		try {
+			// Stop first: §10.3 forbids hot reload, so the superseded process is
+			// gone before its replacement's files are written.
+			await peer.worker.stop();
+			const replacement = await this.#respawn({
+				peerName,
+				definition,
+				previousFingerprint: current,
+			});
+			peer.worker = replacement;
+			return true;
+		} catch (error) {
+			this.deps.onError?.(error, peerName);
+			return false;
+		}
+	}
+
+	async #respawn(request: RespawnRequest): Promise<SupervisedWorker> {
+		const respawn = this.deps.respawn;
+		if (!respawn) {
+			throw new Error(
+				`Cannot rebuild ${request.peerName}: respawn not wired into the supervisor`,
+			);
+		}
+		return await respawn(request);
 	}
 
 	/** Update a metered account's configured ceiling, then reset its latch. */
