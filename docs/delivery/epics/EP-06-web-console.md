@@ -1,6 +1,6 @@
 # EP-06 — Web console: manage agents and channels from a browser
 
-**Status:** Blocked
+**Status:** Done
 
 *Derived from the tasks below.*
 
@@ -29,12 +29,12 @@ The TUI (EP-05) reaches whoever is at the terminal that launched the daemon. Lon
 
 ## Acceptance
 
-- [ ] A channel created in the UI is immediately visible to a worker. Worker-side channel creation is deliberately not in this epic: no task builds such a tool, and an acceptance item nothing implements is a promise that quietly fails.
-- [ ] An agent added to a channel receives its next message.
-- [ ] A reply appears in a thread without cluttering the channel root.
-- [ ] An agent can set a reaction, and it appears in an open browser without a refresh.
-- [ ] A membership change reaches a running agent on the next post, with no restart.
-- [ ] Closing the browser does not stop or park any agent.
+- [x] A channel created in the UI is immediately visible to a worker. Worker-side channel creation is deliberately not in this epic: no task builds such a tool, and an acceptance item nothing implements is a promise that quietly fails.
+- [x] An agent added to a channel receives its next message.
+- [x] A reply appears in a thread without cluttering the channel root.
+- [x] An agent can set a reaction, and it appears in an open browser without a refresh.
+- [x] A membership change reaches a running agent on the next post, with no restart.
+- [x] Closing the browser does not stop or park any agent.
 
 ## Decisions
 
@@ -48,4 +48,4 @@ The TUI (EP-05) reaches whoever is at the terminal that launched the daemon. Lon
 | [T-602](../tasks/T-602-console-api.md) | Daemon HTTP and WebSocket API | Done |
 | [T-603](../tasks/T-603-console-client.md) | Browser client | Done |
 | [T-604](../tasks/T-604-reaction-toolbelt.md) | Agents set reactions as status | Done |
-| [T-605](../tasks/T-605-console-management.md) | Create agents and channels from the UI | Blocked |
+| [T-605](../tasks/T-605-console-management.md) | Create agents and channels from the UI | Done |

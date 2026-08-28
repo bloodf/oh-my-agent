@@ -2126,7 +2126,7 @@ TASKS += [
     ),
     Task(
         id="T-605", slug="console-management", title="Create agents and channels from the UI",
-        epic="EP-06", sprint="SP-07", status="Blocked",
+        epic="EP-06", sprint="SP-07", status="Done",
         goal="An operator can stand up an agent or channel, and manage membership, without editing files.",
         read_first=[
             ARCH,
@@ -2166,6 +2166,11 @@ TASKS += [
             "The membership tests drive `Supervisor.post()`, not `RoomStore.post()`, since only the supervisor path proves a live peer was actually woken.",
         ],
         depends_on=["T-501", "T-505", "T-603"],
+        evidence=[
+            ("Management routes with hardened write path", "src/daemon/console-api.ts"),
+            ("Store writes: safe names, path-keyed conflicts, atomic landings", "src/daemon/peer-store.ts"),
+            ("Console suites, API and browser, cover forms and membership", "tests/console-api.test.ts"),
+        ],
     ),
 ]
 

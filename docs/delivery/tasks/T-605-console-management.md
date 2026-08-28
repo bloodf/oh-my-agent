@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-06](../epics/EP-06-web-console.md) | [SP-07](../sprints/SP-07-web-console.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-06](../epics/EP-06-web-console.md) | [SP-07](../sprints/SP-07-web-console.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -45,12 +45,20 @@ An operator can stand up an agent or channel, and manage membership, without edi
 
 ## Acceptance
 
-- [ ] An agent created in the UI appears as a definition file and loads on the next daemon start.
-- [ ] An invalid definition is refused with the parser's own error, and no file is written.
-- [ ] Adding a *running* agent to a channel makes it receive the very next message there, with no restart.
-- [ ] Removing a running agent stops delivery on the next post, and does not disturb the channel's other members.
-- [ ] A definition edit that changes policy is reported as needing a rebuild rather than silently applied to a live worker.
-- [ ] The membership tests drive `Supervisor.post()`, not `RoomStore.post()`, since only the supervisor path proves a live peer was actually woken.
+- [x] An agent created in the UI appears as a definition file and loads on the next daemon start.
+- [x] An invalid definition is refused with the parser's own error, and no file is written.
+- [x] Adding a *running* agent to a channel makes it receive the very next message there, with no restart.
+- [x] Removing a running agent stops delivery on the next post, and does not disturb the channel's other members.
+- [x] A definition edit that changes policy is reported as needing a rebuild rather than silently applied to a live worker.
+- [x] The membership tests drive `Supervisor.post()`, not `RoomStore.post()`, since only the supervisor path proves a live peer was actually woken.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Management routes with hardened write path | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) |
+| Store writes: safe names, path-keyed conflicts, atomic landings | [`src/daemon/peer-store.ts`](../../../src/daemon/peer-store.ts) |
+| Console suites, API and browser, cover forms and membership | [`tests/console-api.test.ts`](../../../tests/console-api.test.ts) |
 
 ## Out of scope
 
