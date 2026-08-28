@@ -2636,7 +2636,7 @@ TASKS += [
     ),
     Task(
         id="T-903", slug="tui-editing", title="Definition and model editing flows",
-        epic="EP-09", sprint="SP-10", status="Ready",
+        epic="EP-09", sprint="SP-10", status="Done",
         goal="An operator edits an agent's definition and model in guided dialogs, and the change persists and takes effect.",
         read_first=[
             ("Commands", "src/extension/commands.ts"),
@@ -2658,6 +2658,7 @@ TASKS += [
             "A model change is reflected in the worker's next session without a daemon restart.",
             "Both flows are reachable from `/edit` and from the manager.",
         ],
+                evidence=[("Guided edit flows with refusal-preserving editor", "src/extension/commands.ts"), ("Round-trip, refusal, and rebuild surfacing in the extension suite", "tests/extension.test.ts")],
         depends_on=["T-801", "T-901"],
         out_of_scope=["Spawning new agents from the editor, which `/spawn` and T-901 cover."],
     ),

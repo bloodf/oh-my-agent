@@ -1,6 +1,6 @@
 # EP-09 — Full TUI management surface
 
-**Status:** Ready
+**Status:** Done
 
 *Derived from the tasks below.*
 
@@ -25,10 +25,10 @@ The hierarchy makes the flat `/agents` list a lie, and definitions today are edi
 
 ## Acceptance
 
-- [ ] The tree renders parented agents nested under their parents.
-- [ ] A definition edited in the manager persists, reparses cleanly, and triggers the staleness rebuild on next delivery.
-- [ ] A model change takes effect on the worker's next session.
-- [ ] The manager never throws into the TUI when the daemon is absent.
+- [x] The tree renders parented agents nested under their parents.
+- [x] A definition edited in the manager persists, reparses cleanly, and triggers the staleness rebuild on next delivery.
+- [x] A model change takes effect on the worker's next session.
+- [x] The manager never throws into the TUI when the daemon is absent.
 
 ## Decisions
 
@@ -40,4 +40,4 @@ The hierarchy makes the flat `/agents` list a lie, and definitions today are edi
 |---|---|---|
 | [T-901](../tasks/T-901-tui-tree.md) | Hierarchy in /agents and the spawn flow | Done |
 | [T-902](../tasks/T-902-tui-manager.md) | Full-screen agent manager | Done |
-| [T-903](../tasks/T-903-tui-editing.md) | Definition and model editing flows | Ready |
+| [T-903](../tasks/T-903-tui-editing.md) | Definition and model editing flows | Done |

@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-09](../epics/EP-09-tui-management.md) | [SP-10](../sprints/SP-10-tui-management.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-09](../epics/EP-09-tui-management.md) | [SP-10](../sprints/SP-10-tui-management.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -35,9 +35,16 @@ An operator edits an agent's definition and model in guided dialogs, and the cha
 
 ## Acceptance
 
-- [ ] An edited definition persists to the store and reparses; a refused edit loses no input.
-- [ ] A model change is reflected in the worker's next session without a daemon restart.
-- [ ] Both flows are reachable from `/edit` and from the manager.
+- [x] An edited definition persists to the store and reparses; a refused edit loses no input.
+- [x] A model change is reflected in the worker's next session without a daemon restart.
+- [x] Both flows are reachable from `/edit` and from the manager.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Guided edit flows with refusal-preserving editor | [`src/extension/commands.ts`](../../../src/extension/commands.ts) |
+| Round-trip, refusal, and rebuild surfacing in the extension suite | [`tests/extension.test.ts`](../../../tests/extension.test.ts) |
 
 ## Out of scope
 
