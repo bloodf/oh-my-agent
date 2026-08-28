@@ -90,6 +90,8 @@ function resolveChrome(): string {
 let browser: Browser;
 
 beforeAll(async () => {
+	// A cold browser launch on a loaded runner can take tens of seconds; the
+	// default 5s hook timeout is the flake this opts out of.
 	browser = await puppeteer.launch({
 		executablePath: resolveChrome(),
 		args: ["--no-sandbox"],
@@ -97,11 +99,11 @@ beforeAll(async () => {
 	browser.on("disconnected", () => {
 		console.error("[browser disconnected]");
 	});
-});
+}, 60_000);
 
 afterAll(async () => {
 	await browser?.close();
-});
+}, 30_000);
 
 const cleanups: (() => Promise<void>)[] = [];
 
@@ -111,7 +113,7 @@ afterEach(async () => {
 		if (cleanup === undefined) continue;
 		await cleanup();
 	}
-});
+}, 30_000);
 
 /** A page plus the client-side errors it raised (pageerror + console.error). */
 interface TrackedPage {
