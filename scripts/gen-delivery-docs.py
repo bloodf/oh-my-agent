@@ -1790,7 +1790,7 @@ TASKS += [
     ),
     Task(
         id="T-512", slug="sandboxed-on-the-wire", title="Surface sandboxed state in agent_status",
-        epic="EP-05", sprint="SP-05", status="Ready",
+        epic="EP-05", sprint="SP-05", status="Done",
         goal="The daemon reports which peers actually run under an OS sandbox, so the TUI shield (T-504, fail-closed) can ever appear.",
         read_first=[
             ARCH,
@@ -1821,7 +1821,53 @@ TASKS += [
             "The extension's shield test (already landed) needs no change to pass against the production server.",
         ],
         depends_on=["T-502"],
+        evidence=[
+            ("Optional sandboxed flag in the wire type and validators", "src/shared/protocol.ts"),
+            ("Daemon status mapping emits it from the worker handle", "src/daemon/socket.ts"),
+        ],
         out_of_scope=["Changing which peers are sandboxed — that is definition-level (`sandbox: true`), already shipped in EP-02."],
+    ),
+    Task(
+        id="T-513", slug="reaction-methods-on-the-socket", title="Reaction methods on the control socket",
+        epic="EP-05", sprint="SP-05", status="Ready",
+        goal="The daemon serves `chat_react` and `chat_unreact`, so the T-604 toolbelt works in production instead of returning method-not-found.",
+        read_first=[
+            ARCH,
+            ("Control protocol", "src/shared/protocol.ts"),
+            ("Socket server", "src/daemon/socket.ts"),
+            ("Toolbelt", "src/worker/toolbelt.ts"),
+            ("ADR-009: threads and reactions", "docs/delivery/adr/ADR-009-threads-and-reactions.md"),
+        ],
+        files=[
+            "src/shared/protocol.ts",
+            "src/shared/protocol-schemas.ts",
+            "src/daemon/socket.ts",
+            "tests/protocol.contract.test.ts",
+            "tests/daemon-main.test.ts",
+            "tests/toolbelt.test.ts",
+        ],
+        assets=[
+            ("src/shared/protocol.ts", "Edited", "Adds `chat_react`/`chat_unreact`; wire RoomMessage gains the T-601 fields (parentId, threadRootId, replyCount, reactions) as optional, additive, no version bump (T-511's policy)."),
+            ("src/shared/protocol-schemas.ts", "Edited", "Validators for both methods and the widened message shape."),
+            ("src/daemon/socket.ts", "Edited", "Serves both methods through `RoomStore.react`/`unreact`; reactions ride chat_read/chat_wait results."),
+            ("tests/protocol.contract.test.ts", "Edited", "The method set grows from thirteen; fixtures for both new methods."),
+            ("tests/daemon-main.test.ts", "Edited", "A react over the socket lands in the store and in chat_read output."),
+            ("tests/toolbelt.test.ts", "Edited", "The fake-backed reaction tests migrate to the production handlers."),
+        ],
+        steps=[
+            "Follow the additive-no-bump policy already documented for T-511: new methods and optional result fields, no version change.",
+            "Serve react/unreact in the daemon by delegating to the store; the allowed-set refusal stays a toolbelt-local concern, and the daemon accepts what the store accepts.",
+            "Widen the wire RoomMessage so chat_read and chat_wait return the conversation model T-601 built; without it a reacting agent is invisible to every socket reader.",
+            "Migrate the toolbelt's reaction tests from the test-only backing to the production socket handlers, per ADR-008.",
+        ],
+        acceptance=[
+            "A toolbelt chat_react call against the real daemon lands on the message and is visible in chat_read.",
+            "chat_unreact removes it; reacting twice leaves one reaction.",
+            "The protocol contract suite names both methods in its exact set.",
+            "The T-604 acceptance items pass against the production socket, which is what flips T-604 to Done.",
+        ],
+        depends_on=["T-507", "T-604"],
+        out_of_scope=["Streaming reactions to the console; T-602's live feed already covers browser readers."],
     ),
     Task(
         id="T-505", slug="definition-staleness", title="Rebuild a worker when its definition changes",
@@ -1994,14 +2040,15 @@ TASKS += [
     ),
     Task(
         id="T-603", slug="console-client", title="Browser client",
-        epic="EP-06", sprint="SP-07", status="Blocked",
+        epic="EP-06", sprint="SP-07", status="In progress",
         goal="A human can watch and join agent conversations in a browser.",
         read_first=[ARCH, ("Console API", "docs/delivery/tasks/T-602-console-api.md"), ("ADR-009: threads and reactions", "docs/delivery/adr/ADR-009-threads-and-reactions.md")],
-        files=["src/console/index.html", "src/console/app.ts", "src/console/style.css"],
+        files=["src/console/index.html", "src/console/app.ts", "src/console/style.css", "tests/console-client.test.ts"],
         assets=[
             ("src/console/app.ts", "New", "Client logic."),
             ("src/console/index.html", "New", "Shell."),
             ("src/console/style.css", "New", "Styling."),
+            ("tests/console-client.test.ts", "New", "Drives a real browser against a running daemon."),
             ("src/daemon/console-api.ts", "Read", "The API it consumes."),
         ],
         steps=[
@@ -2024,7 +2071,7 @@ TASKS += [
     ),
     Task(
         id="T-604", slug="reaction-toolbelt", title="Agents set reactions as status",
-        epic="EP-06", sprint="SP-07", status="Blocked",
+        epic="EP-06", sprint="SP-07", status="In progress",
         goal="An agent can mark a message with an emoji to signal what it is doing about it.",
         read_first=[
             ARCH,

@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-06](../epics/EP-06-web-console.md) | [SP-07](../sprints/SP-07-web-console.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-06](../epics/EP-06-web-console.md) | [SP-07](../sprints/SP-07-web-console.md) | In progress | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -53,4 +53,4 @@ An agent can mark a message with an emoji to signal what it is doing about it.
 
 ## Unblocks
 
-- Nothing.
+- T-513

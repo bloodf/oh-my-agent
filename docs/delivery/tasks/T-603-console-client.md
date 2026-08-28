@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-06](../epics/EP-06-web-console.md) | [SP-07](../sprints/SP-07-web-console.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-06](../epics/EP-06-web-console.md) | [SP-07](../sprints/SP-07-web-console.md) | In progress | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -19,14 +19,16 @@ A human can watch and join agent conversations in a browser.
 - `src/console/index.html`
 - `src/console/app.ts`
 - `src/console/style.css`
+- `tests/console-client.test.ts`
 
 ## Modules and assets in play
 
 | Path | Role | Note |
 |---|---|---|
 | `src/console/app.ts` (to be created) | New | Client logic. |
-| `src/console/index.html` (to be created) | New | Shell. |
-| `src/console/style.css` (to be created) | New | Styling. |
+| [`src/console/index.html`](../../../src/console/index.html) | New | Shell. |
+| [`src/console/style.css`](../../../src/console/style.css) | New | Styling. |
+| [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) | New | Drives a real browser against a running daemon. |
 | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Read | The API it consumes. |
 
 ## Steps

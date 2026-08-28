@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -39,9 +39,16 @@ The daemon reports which peers actually run under an OS sandbox, so the TUI shie
 
 ## Acceptance
 
-- [ ] A sandboxed peer's status arrives with `sandboxed: true`; an unsandboxed peer arrives without it or with `false`.
-- [ ] The protocol suite accepts both shapes.
-- [ ] The extension's shield test (already landed) needs no change to pass against the production server.
+- [x] A sandboxed peer's status arrives with `sandboxed: true`; an unsandboxed peer arrives without it or with `false`.
+- [x] The protocol suite accepts both shapes.
+- [x] The extension's shield test (already landed) needs no change to pass against the production server.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Optional sandboxed flag in the wire type and validators | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) |
+| Daemon status mapping emits it from the worker handle | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) |
 
 ## Out of scope
 
