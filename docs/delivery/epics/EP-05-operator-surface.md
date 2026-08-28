@@ -1,6 +1,6 @@
 # EP-05 — Operator surface: daemon entry point and TUI
 
-**Status:** Ready
+**Status:** Done
 
 *Derived from the tasks below.*
 
@@ -28,13 +28,13 @@ Every runtime subsystem is built and tested, but nothing a user can launch or lo
 
 ## Acceptance
 
-- [ ] `omp-agent daemon` starts, serves a socket, and survives its launching terminal closing.
-- [ ] The socket answers every method the protocol declares, or reports method-not-found with the protocol version.
-- [ ] Agents, runs, and schedules survive a daemon restart, and orphaned worker directories are swept at boot.
-- [ ] `/agents` lists peers with state, and shows a shield only for sandboxed ones.
-- [ ] `/rooms` reads and posts as `@you`.
-- [ ] A worker can call `chat_send` and `chat_wait` against the daemon's bus.
-- [ ] An `@name` mention wakes that peer when it opted in, and a room post wakes only its subscribers.
+- [x] `omp-agent daemon` starts, serves a socket, and survives its launching terminal closing.
+- [x] The socket answers every method the protocol declares, or reports method-not-found with the protocol version.
+- [x] Agents, runs, and schedules survive a daemon restart, and orphaned worker directories are swept at boot.
+- [x] `/agents` lists peers with state, and shows a shield only for sandboxed ones.
+- [x] `/rooms` reads and posts as `@you`.
+- [x] A worker can call `chat_send` and `chat_wait` against the daemon's bus.
+- [x] An `@name` mention wakes that peer when it opted in, and a room post wakes only its subscribers.
 
 ## Decisions
 
@@ -52,7 +52,7 @@ Every runtime subsystem is built and tested, but nothing a user can launch or lo
 | [T-508](../tasks/T-508-daemon-persistence.md) | Daemon persistence and orphan sweep | Done |
 | [T-503](../tasks/T-503-agent-toolbelt.md) | Worker toolbelt extension | Done |
 | [T-504](../tasks/T-504-tui-surface.md) | TUI commands, status widget, and dialogs | Done |
-| [T-511](../tasks/T-511-operator-steering.md) | Operator steering: logs tail and instruction injection | Ready |
+| [T-511](../tasks/T-511-operator-steering.md) | Operator steering: logs tail and instruction injection | Done |
 | [T-512](../tasks/T-512-sandboxed-on-the-wire.md) | Surface sandboxed state in agent_status | Done |
 | [T-513](../tasks/T-513-reaction-methods-on-the-socket.md) | Reaction methods on the control socket | Done |
 | [T-505](../tasks/T-505-definition-staleness.md) | Rebuild a worker when its definition changes | Done |

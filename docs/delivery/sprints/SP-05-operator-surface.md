@@ -1,6 +1,6 @@
 # SP-05 — Operator surface
 
-**Status:** Ready
+**Status:** Done
 
 *Derived from the tasks below.*
 
@@ -19,7 +19,7 @@ The parts a human touches: protocol, daemon entry point, persistence, toolbelt, 
 | [T-508](../tasks/T-508-daemon-persistence.md) | [EP-05](../epics/EP-05-operator-surface.md) | Daemon persistence and orphan sweep | Done |
 | [T-503](../tasks/T-503-agent-toolbelt.md) | [EP-05](../epics/EP-05-operator-surface.md) | Worker toolbelt extension | Done |
 | [T-504](../tasks/T-504-tui-surface.md) | [EP-05](../epics/EP-05-operator-surface.md) | TUI commands, status widget, and dialogs | Done |
-| [T-511](../tasks/T-511-operator-steering.md) | [EP-05](../epics/EP-05-operator-surface.md) | Operator steering: logs tail and instruction injection | Ready |
+| [T-511](../tasks/T-511-operator-steering.md) | [EP-05](../epics/EP-05-operator-surface.md) | Operator steering: logs tail and instruction injection | Done |
 | [T-512](../tasks/T-512-sandboxed-on-the-wire.md) | [EP-05](../epics/EP-05-operator-surface.md) | Surface sandboxed state in agent_status | Done |
 | [T-513](../tasks/T-513-reaction-methods-on-the-socket.md) | [EP-05](../epics/EP-05-operator-surface.md) | Reaction methods on the control socket | Done |
 | [T-505](../tasks/T-505-definition-staleness.md) | [EP-05](../epics/EP-05-operator-surface.md) | Rebuild a worker when its definition changes | Done |

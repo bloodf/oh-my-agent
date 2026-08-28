@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -47,10 +47,18 @@
 
 ## Acceptance
 
-- [ ] An old client calling `logs_tail` against this daemon gets a validated result; this daemon calling an unknown method still answers method-not-found with the version.
-- [ ] `/logs --tail` against a running stub worker streams its output in the extension suite.
-- [ ] An injected instruction reaches the worker's next prompt, proven against the daemon suite's stub worker prompts.
-- [ ] The protocol header documents the additive-no-bump policy.
+- [x] An old client calling `logs_tail` against this daemon gets a validated result; this daemon calling an unknown method still answers method-not-found with the version.
+- [x] `/logs --tail` against a running stub worker streams its output in the extension suite.
+- [x] An injected instruction reaches the worker's next prompt, proven against the daemon suite's stub worker prompts.
+- [x] The protocol header documents the additive-no-bump policy.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Seventeen-method protocol with steering shapes | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) |
+| Steering verbs registered in the TUI | [`src/extension/index.ts`](../../../src/extension/index.ts) |
+| Extension suite covers /logs and /inject over the real socket | [`tests/extension.test.ts`](../../../tests/extension.test.ts) |
 
 ## Out of scope
 

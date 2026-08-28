@@ -1744,7 +1744,7 @@ TASKS += [
     ),
     Task(
         id="T-511", slug="operator-steering", title="Operator steering: logs tail and instruction injection",
-        epic="EP-05", sprint="SP-05", status="Ready",
+        epic="EP-05", sprint="SP-05", status="Done",
         goal="`/logs --tail` follows a running worker's output and an injected instruction reaches a live session's next turn — the steering half of the TUI that T-504 deferred because the protocol had no methods for it.",
         read_first=[
             ARCH,
@@ -1784,6 +1784,11 @@ TASKS += [
             "The protocol header documents the additive-no-bump policy.",
         ],
         depends_on=["T-502", "T-504"],
+        evidence=[
+            ("Seventeen-method protocol with steering shapes", "src/shared/protocol.ts"),
+            ("Steering verbs registered in the TUI", "src/extension/index.ts"),
+            ("Extension suite covers /logs and /inject over the real socket", "tests/extension.test.ts"),
+        ],
         out_of_scope=[
             "Streaming logs over a subscription (a method per call is enough at this size; SSE/websocket tailing belongs to the console API, T-602).",
         ],
