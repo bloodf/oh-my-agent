@@ -24,6 +24,41 @@ import { METHODS } from "../src/shared/protocol-schemas";
 // which is the point: the declared set and the exercised set cannot drift.
 // ---------------------------------------------------------------------------
 
+const VALID_PEER_DEFINITION = {
+	name: "researcher",
+	description: "Investigates codebases and reports findings.",
+	tools: ["read", "grep"],
+	model: ["sonnet"],
+	thinkingLevel: "medium",
+	blocking: false,
+	autoloadSkills: ["dinostack"],
+	readSummarize: true,
+	prewalk: false,
+	advisor: false,
+	spawns: ["#research"],
+	body: "You are the researcher. Investigate and report findings.",
+	workspace: "/tmp/proj",
+	rooms: ["#research"],
+	wake: { mention: true, rooms: false },
+	autonomy: { maxTurns: 10, budgetUsd: 5 },
+	sandbox: { enabled: true, extraRoots: ["/tmp/proj"] },
+	mcps: ["github"],
+	skills: ["dinostack"],
+	schedules: [
+		{
+			cron: "*/10 * * * *",
+			prompt: "check for new findings",
+			room: "#research",
+		},
+	],
+	automations: [
+		{ event: "on_mention", prompt: "respond promptly", room: "#research" },
+	],
+	sha256: "a".repeat(64),
+};
+
+const DEFINITION_FILE_PATH = "/agents/researcher.md";
+
 const VALID_PARAMS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 	status: {},
 	chat_send: { room: "#reviews", body: "looks good", author: "@you" },
@@ -31,8 +66,28 @@ const VALID_PARAMS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 	chat_wait: { room: "#reviews", sinceId: 41, timeoutMs: 5000 },
 	chat_react: { messageId: 42, actor: "reviewer", emoji: "👀" },
 	chat_unreact: { messageId: 42, actor: "reviewer", emoji: "👀" },
-	agent_spawn: { name: "researcher", rooms: ["#research"], cwd: "/tmp/proj" },
+	agent_spawn: {
+		name: "researcher",
+		rooms: ["#research"],
+		cwd: "/tmp/proj",
+		parent: "orchestrator",
+	},
 	agent_status: { name: "researcher" },
+	agent_create: {
+		name: "researcher",
+		description: "Investigates codebases and reports findings.",
+		model: ["sonnet"],
+		rooms: ["#research"],
+		wake: { mention: true, rooms: false },
+		autonomy: { maxTurns: 10, budgetUsd: 5 },
+		spawns: ["#research"],
+		body: "You are the researcher. Investigate and report findings.",
+	},
+	definition_get: { name: "researcher" },
+	definition_update: {
+		name: "researcher",
+		changes: { description: "Updated description", autonomy: { maxTurns: 20 } },
+	},
 	logs_tail: { name: "researcher", lines: 50 },
 	inject: { name: "researcher", message: "prioritize the failing test" },
 	task_handoff: {
@@ -77,8 +132,23 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 	},
 	agent_spawn: { name: "researcher", state: "running" },
 	agent_status: {
-		agents: [{ name: "researcher", state: "parked", account: "acct-1" }],
+		agents: [
+			{
+				name: "researcher",
+				state: "parked",
+				account: "acct-1",
+				parent: "orchestrator",
+				children: ["intern-1"],
+			},
+		],
 	},
+	agent_create: { name: "researcher", created: true },
+	definition_get: {
+		name: "researcher",
+		filePath: DEFINITION_FILE_PATH,
+		definition: VALID_PEER_DEFINITION,
+	},
+	definition_update: { name: "researcher", rebuildRequired: true },
 	logs_tail: { name: "researcher", lines: ["first", "second"] },
 	inject: { name: "researcher", queued: false },
 	task_handoff: { handoffId: "handoff-1" },
@@ -115,9 +185,10 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 // ---------------------------------------------------------------------------
 
 describe("declared method set", () => {
-	test("is exactly the seventeen contracted methods", () => {
+	test("is exactly the twenty contracted methods", () => {
 		expect(([...METHOD_NAMES] as string[]).sort()).toEqual(
 			[
+				"agent_create",
 				"agent_spawn",
 				"agent_status",
 				"bump",
@@ -126,6 +197,8 @@ describe("declared method set", () => {
 				"chat_send",
 				"chat_unreact",
 				"chat_wait",
+				"definition_get",
+				"definition_update",
 				"kill",
 				"inject",
 				"rooms_list",
@@ -256,6 +329,130 @@ describe("params validation", () => {
 			if (!result.ok) expect(result.field).toBe("params");
 		}
 	});
+
+	test("agent_spawn accepts an optional parent, refusing a wrong type", () => {
+		expect(
+			METHODS.agent_spawn.validateParams({
+				name: "researcher",
+				parent: "orchestrator",
+			}).ok,
+		).toBe(true);
+		const result = METHODS.agent_spawn.validateParams({
+			name: "researcher",
+			parent: 7,
+		});
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.field).toBe("parent");
+	});
+
+	test("agent_create requires name/description/body, naming malformed authoring fields", () => {
+		expect(
+			METHODS.agent_create.validateParams({
+				name: "researcher",
+				description: "Investigates codebases and reports findings.",
+				model: ["sonnet"],
+				rooms: ["#research"],
+				wake: { mention: true, rooms: false },
+				autonomy: { maxTurns: 10, budgetUsd: 5 },
+				spawns: ["#research"],
+				body: "You are the researcher. Investigate and report findings.",
+			}).ok,
+		).toBe(true);
+
+		const wrongName = METHODS.agent_create.validateParams({
+			name: 7,
+			description: "x",
+			body: "y",
+		});
+		expect(wrongName.ok).toBe(false);
+		if (!wrongName.ok) expect(wrongName.field).toBe("name");
+
+		const missingDescription = METHODS.agent_create.validateParams({
+			name: "researcher",
+			body: "y",
+		});
+		expect(missingDescription.ok).toBe(false);
+		if (!missingDescription.ok)
+			expect(missingDescription.field).toBe("description");
+
+		const missingBody = METHODS.agent_create.validateParams({
+			name: "researcher",
+			description: "x",
+		});
+		expect(missingBody.ok).toBe(false);
+		if (!missingBody.ok) expect(missingBody.field).toBe("body");
+
+		const badWake = METHODS.agent_create.validateParams({
+			name: "researcher",
+			description: "x",
+			body: "y",
+			wake: { mention: "yes" },
+		});
+		expect(badWake.ok).toBe(false);
+		if (!badWake.ok) expect(badWake.field).toBe("wake.mention");
+
+		const badAutonomy = METHODS.agent_create.validateParams({
+			name: "researcher",
+			description: "x",
+			body: "y",
+			autonomy: { maxTurns: "many" },
+		});
+		expect(badAutonomy.ok).toBe(false);
+		if (!badAutonomy.ok) expect(badAutonomy.field).toBe("autonomy.maxTurns");
+
+		for (const field of ["tools", "sha256"] as const) {
+			const result = METHODS.agent_create.validateParams({
+				name: "researcher",
+				description: "x",
+				body: "y",
+				[field]: field === "tools" ? ["read"] : "a".repeat(64),
+			});
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.field).toBe(field);
+		}
+	});
+
+	test("definition_get requires a non-empty name", () => {
+		expect(
+			METHODS.definition_get.validateParams({ name: "researcher" }).ok,
+		).toBe(true);
+		const result = METHODS.definition_get.validateParams({ name: "" });
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.field).toBe("name");
+	});
+
+	test("definition_update requires name and a valid changes object, naming nested fields", () => {
+		expect(
+			METHODS.definition_update.validateParams({
+				name: "researcher",
+				changes: { description: "new" },
+			}).ok,
+		).toBe(true);
+
+		const missingChanges = METHODS.definition_update.validateParams({
+			name: "researcher",
+		});
+		expect(missingChanges.ok).toBe(false);
+		if (!missingChanges.ok) expect(missingChanges.field).toBe("changes");
+
+		const badNestedField = METHODS.definition_update.validateParams({
+			name: "researcher",
+			changes: { autonomy: { maxTurns: "many" } },
+		});
+		expect(badNestedField.ok).toBe(false);
+		if (!badNestedField.ok) {
+			expect(badNestedField.field).toBe("changes.autonomy.maxTurns");
+		}
+
+		for (const field of ["name", "sha256"] as const) {
+			const result = METHODS.definition_update.validateParams({
+				name: "researcher",
+				changes: { [field]: "forbidden" },
+			});
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.field).toBe(`changes.${field}`);
+		}
+	});
 });
 
 describe("result validation", () => {
@@ -359,6 +556,174 @@ describe("result validation", () => {
 			expect(result.ok).toBe(false);
 			if (!result.ok) expect(result.field).toContain(field);
 		}
+	});
+
+	test("agent_status accepts both legacy and hierarchical AgentStatus shapes", () => {
+		const legacyShape = {
+			agents: [{ name: "researcher", state: "running", account: "acct-1" }],
+		};
+		expect(METHODS.agent_status.validateResult(legacyShape).ok).toBe(true);
+
+		const hierarchicalShape = {
+			agents: [
+				{
+					name: "researcher",
+					state: "running",
+					account: "acct-1",
+					parent: "orchestrator",
+					children: ["intern-1", "intern-2"],
+				},
+			],
+		};
+		expect(METHODS.agent_status.validateResult(hierarchicalShape).ok).toBe(
+			true,
+		);
+
+		const badParent = METHODS.agent_status.validateResult({
+			agents: [{ ...legacyShape.agents[0], parent: 7 }],
+		});
+		expect(badParent.ok).toBe(false);
+		if (!badParent.ok) expect(badParent.field).toContain("parent");
+
+		const badChildren = METHODS.agent_status.validateResult({
+			agents: [{ ...legacyShape.agents[0], children: ["ok", 7] }],
+		});
+		expect(badChildren.ok).toBe(false);
+		if (!badChildren.ok) expect(badChildren.field).toContain("children");
+	});
+
+	test("agent_create result requires name and created, accepting true and false", () => {
+		expect(
+			METHODS.agent_create.validateResult({
+				name: "researcher",
+				created: true,
+			}).ok,
+		).toBe(true);
+		expect(
+			METHODS.agent_create.validateResult({
+				name: "researcher",
+				created: false,
+			}).ok,
+		).toBe(true);
+
+		const missingCreated = METHODS.agent_create.validateResult({
+			name: "researcher",
+		});
+		expect(missingCreated.ok).toBe(false);
+		if (!missingCreated.ok) expect(missingCreated.field).toBe("created");
+
+		const wrongCreated = METHODS.agent_create.validateResult({
+			name: "researcher",
+			created: "yes",
+		});
+		expect(wrongCreated.ok).toBe(false);
+		if (!wrongCreated.ok) expect(wrongCreated.field).toBe("created");
+
+		const missingName = METHODS.agent_create.validateResult({
+			created: true,
+		});
+		expect(missingName.ok).toBe(false);
+		if (!missingName.ok) expect(missingName.field).toBe("name");
+	});
+
+	test("definition_get result requires name, filePath, and a valid definition, naming nested fields", () => {
+		expect(
+			METHODS.definition_get.validateResult({
+				name: "researcher",
+				filePath: DEFINITION_FILE_PATH,
+				definition: VALID_PEER_DEFINITION,
+			}).ok,
+		).toBe(true);
+
+		const missingName = METHODS.definition_get.validateResult({
+			filePath: DEFINITION_FILE_PATH,
+			definition: VALID_PEER_DEFINITION,
+		});
+		expect(missingName.ok).toBe(false);
+		if (!missingName.ok) expect(missingName.field).toBe("name");
+
+		const missingDefinition = METHODS.definition_get.validateResult({
+			name: "researcher",
+			filePath: DEFINITION_FILE_PATH,
+		});
+		expect(missingDefinition.ok).toBe(false);
+		if (!missingDefinition.ok)
+			expect(missingDefinition.field).toBe("definition");
+
+		const missingFilePath = METHODS.definition_get.validateResult({
+			name: "researcher",
+			definition: VALID_PEER_DEFINITION,
+		});
+		expect(missingFilePath.ok).toBe(false);
+		if (!missingFilePath.ok) expect(missingFilePath.field).toBe("filePath");
+
+		const badNestedField = METHODS.definition_get.validateResult({
+			name: "researcher",
+			filePath: DEFINITION_FILE_PATH,
+			definition: { ...VALID_PEER_DEFINITION, sha256: 7 },
+		});
+		expect(badNestedField.ok).toBe(false);
+		if (!badNestedField.ok) {
+			expect(badNestedField.field).toBe("definition.sha256");
+		}
+
+		const badAutomation = METHODS.definition_get.validateResult({
+			name: "researcher",
+			filePath: DEFINITION_FILE_PATH,
+			definition: {
+				...VALID_PEER_DEFINITION,
+				automations: [{ event: "on_mention", prompt: false }],
+			},
+		});
+		expect(badAutomation.ok).toBe(false);
+		if (!badAutomation.ok) {
+			expect(badAutomation.field).toBe("definition.automations[0].prompt");
+		}
+
+		const systemField = METHODS.definition_get.validateResult({
+			name: "researcher",
+			filePath: DEFINITION_FILE_PATH,
+			definition: { ...VALID_PEER_DEFINITION, systemPrompt: "not data" },
+		});
+		expect(systemField.ok).toBe(false);
+		if (!systemField.ok)
+			expect(systemField.field).toBe("definition.systemPrompt");
+	});
+
+	test("definition_update result requires name and rebuildRequired, naming malformed fields", () => {
+		expect(
+			METHODS.definition_update.validateResult({
+				name: "researcher",
+				rebuildRequired: true,
+			}).ok,
+		).toBe(true);
+		expect(
+			METHODS.definition_update.validateResult({
+				name: "researcher",
+				rebuildRequired: false,
+			}).ok,
+		).toBe(true);
+
+		const missingName = METHODS.definition_update.validateResult({
+			rebuildRequired: true,
+		});
+		expect(missingName.ok).toBe(false);
+		if (!missingName.ok) expect(missingName.field).toBe("name");
+
+		const missingRebuildRequired = METHODS.definition_update.validateResult({
+			name: "researcher",
+		});
+		expect(missingRebuildRequired.ok).toBe(false);
+		if (!missingRebuildRequired.ok)
+			expect(missingRebuildRequired.field).toBe("rebuildRequired");
+
+		const wrongRebuildRequired = METHODS.definition_update.validateResult({
+			name: "researcher",
+			rebuildRequired: "yes",
+		});
+		expect(wrongRebuildRequired.ok).toBe(false);
+		if (!wrongRebuildRequired.ok)
+			expect(wrongRebuildRequired.field).toBe("rebuildRequired");
 	});
 });
 

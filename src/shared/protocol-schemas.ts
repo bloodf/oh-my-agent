@@ -23,6 +23,8 @@
  */
 
 import type {
+	AgentCreateParams,
+	AgentCreateResult,
 	AgentSpawnParams,
 	AgentSpawnResult,
 	AgentStatus,
@@ -39,6 +41,11 @@ import type {
 	ChatUnreactResult,
 	ChatWaitParams,
 	ChatWaitResult,
+	DefinitionData,
+	DefinitionGetParams,
+	DefinitionGetResult,
+	DefinitionUpdateParams,
+	DefinitionUpdateResult,
 	InjectParams,
 	InjectResult,
 	KillParams,
@@ -110,6 +117,15 @@ function explainAgentStatus(value: unknown): string | null {
 		return "model";
 	if (value.sandboxed !== undefined && typeof value.sandboxed !== "boolean")
 		return "sandboxed";
+	if (value.parent !== undefined && typeof value.parent !== "string")
+		return "parent";
+	if (value.children !== undefined) {
+		if (!Array.isArray(value.children)) return "children";
+		const invalid = value.children.findIndex(
+			(child) => typeof child !== "string",
+		);
+		if (invalid !== -1) return `children[${invalid}]`;
+	}
 	return null;
 }
 
@@ -163,6 +179,239 @@ function explainScheduleInfo(value: unknown): string | null {
 		return "nextFireAt";
 	}
 	if (typeof value.enabled !== "boolean") return "enabled";
+	return null;
+}
+
+function explainStringArray(value: unknown): string | null {
+	if (!Array.isArray(value)) return "";
+	const invalid = value.findIndex((item) => typeof item !== "string");
+	return invalid === -1 ? null : `[${invalid}]`;
+}
+
+function explainWake(value: unknown): string | null {
+	if (!isRecord(value)) return "";
+	for (const field of Object.keys(value)) {
+		if (field !== "mention" && field !== "rooms") return field;
+	}
+	if (value.mention !== undefined && typeof value.mention !== "boolean")
+		return "mention";
+	if (value.rooms !== undefined && typeof value.rooms !== "boolean")
+		return "rooms";
+	return null;
+}
+
+function explainAutonomy(value: unknown): string | null {
+	if (!isRecord(value)) return "";
+	for (const field of Object.keys(value)) {
+		if (field !== "maxTurns" && field !== "budgetUsd") return field;
+	}
+	if (
+		value.maxTurns !== undefined &&
+		(typeof value.maxTurns !== "number" ||
+			!Number.isSafeInteger(value.maxTurns) ||
+			value.maxTurns <= 0)
+	)
+		return "maxTurns";
+	if (
+		value.budgetUsd !== undefined &&
+		(!isFiniteNumber(value.budgetUsd) || value.budgetUsd <= 0)
+	)
+		return "budgetUsd";
+	return null;
+}
+
+function explainSandbox(value: unknown): string | null {
+	if (typeof value === "boolean") return null;
+	if (!isRecord(value)) return "";
+	for (const field of Object.keys(value)) {
+		if (field !== "enabled" && field !== "extraRoots") return field;
+	}
+	if (value.enabled !== undefined && typeof value.enabled !== "boolean")
+		return "enabled";
+	if (value.extraRoots !== undefined) {
+		const leaf = explainStringArray(value.extraRoots);
+		if (leaf !== null) return leaf === "" ? "extraRoots" : `extraRoots${leaf}`;
+	}
+	return null;
+}
+
+function explainSchedule(value: unknown): string | null {
+	if (!isRecord(value)) return "";
+	for (const field of Object.keys(value)) {
+		if (field !== "cron" && field !== "prompt" && field !== "room")
+			return field;
+	}
+	if (!isNonEmptyString(value.cron)) return "cron";
+	if (!isNonEmptyString(value.prompt)) return "prompt";
+	if (value.room !== undefined && typeof value.room !== "string") return "room";
+	return null;
+}
+
+function explainAutomation(value: unknown): string | null {
+	if (!isRecord(value)) return "";
+	for (const field of Object.keys(value)) {
+		if (field !== "event" && field !== "prompt" && field !== "room")
+			return field;
+	}
+	if (!isNonEmptyString(value.event)) return "event";
+	if (!isNonEmptyString(value.prompt)) return "prompt";
+	if (value.room !== undefined && typeof value.room !== "string") return "room";
+	return null;
+}
+
+function nestedLeaf(
+	record: Record<string, unknown>,
+	field: string,
+	explain: (value: unknown) => string | null,
+	required = false,
+): string | null {
+	const value = record[field];
+	if (value === undefined) return required ? field : null;
+	const leaf = explain(value);
+	if (leaf === null) return null;
+	return leaf === ""
+		? field
+		: `${field}${leaf.startsWith("[") ? "" : "."}${leaf}`;
+}
+
+const DEFINITION_FIELDS: Record<string, boolean> = {
+	name: true,
+	description: true,
+	model: true,
+	tools: true,
+	spawns: true,
+	thinkingLevel: true,
+	output: true,
+	blocking: true,
+	autoloadSkills: true,
+	readSummarize: true,
+	prewalk: true,
+	advisor: true,
+	body: true,
+	workspace: true,
+	rooms: true,
+	wake: true,
+	autonomy: true,
+	sandbox: true,
+	mcps: true,
+	skills: true,
+	schedules: true,
+	automations: true,
+	sha256: true,
+};
+
+const CREATE_FIELDS: Record<string, boolean> = {
+	name: true,
+	description: true,
+	model: true,
+	rooms: true,
+	wake: true,
+	autonomy: true,
+	spawns: true,
+	body: true,
+};
+
+const CHANGE_FIELDS: Record<string, boolean> = {
+	...DEFINITION_FIELDS,
+	name: false,
+	sha256: false,
+};
+
+function explainDefinitionFields(
+	value: unknown,
+	required: "definition" | "create" | "changes",
+): string | null {
+	if (!isRecord(value)) return "";
+	const requireDefinition = required === "definition";
+	const allowed =
+		required === "definition"
+			? DEFINITION_FIELDS
+			: required === "create"
+				? CREATE_FIELDS
+				: CHANGE_FIELDS;
+	for (const field of Object.keys(value)) {
+		if (allowed[field] !== true) return field;
+	}
+	const requireCreate = required === "create";
+	for (const field of ["name", "description", "body"] as const) {
+		if ((requireDefinition || requireCreate) && !isNonEmptyString(value[field]))
+			return field;
+		if (value[field] !== undefined && !isNonEmptyString(value[field]))
+			return field;
+	}
+	if (value.description !== undefined && typeof value.description !== "string")
+		return "description";
+	if (requireDefinition && !isNonEmptyString(value.sha256)) return "sha256";
+	if (value.sha256 !== undefined && !isNonEmptyString(value.sha256))
+		return "sha256";
+
+	for (const field of [
+		"model",
+		"tools",
+		"autoloadSkills",
+		"rooms",
+		"mcps",
+		"skills",
+	] as const) {
+		const leaf = nestedLeaf(value, field, explainStringArray);
+		if (leaf !== null) return leaf;
+	}
+	if (value.spawns === undefined) {
+		if (requireDefinition) return "spawns";
+	} else if (value.spawns !== "*") {
+		const leaf = explainStringArray(value.spawns);
+		if (leaf !== null) return leaf === "" ? "spawns" : `spawns${leaf}`;
+	}
+	if (
+		value.thinkingLevel !== undefined &&
+		![
+			"inherit",
+			"off",
+			"minimal",
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+			"max",
+			"auto",
+		].includes(value.thinkingLevel as string)
+	)
+		return "thinkingLevel";
+	for (const field of ["blocking", "readSummarize"] as const) {
+		if (value[field] !== undefined && typeof value[field] !== "boolean")
+			return field;
+	}
+	for (const field of ["prewalk", "advisor"] as const) {
+		if (
+			value[field] !== undefined &&
+			typeof value[field] !== "boolean" &&
+			typeof value[field] !== "string"
+		)
+			return field;
+	}
+	if (value.workspace !== undefined && typeof value.workspace !== "string")
+		return "workspace";
+	for (const [field, explain] of [
+		["wake", explainWake],
+		["autonomy", explainAutonomy],
+		["sandbox", explainSandbox],
+	] as const) {
+		const leaf = nestedLeaf(value, field, explain);
+		if (leaf !== null) return leaf;
+	}
+	for (const [field, explain] of [
+		["schedules", explainSchedule],
+		["automations", explainAutomation],
+	] as const) {
+		const list = value[field];
+		if (list === undefined) continue;
+		if (!Array.isArray(list)) return field;
+		for (let i = 0; i < list.length; i++) {
+			const leaf = explain(list[i]);
+			if (leaf !== null)
+				return leaf === "" ? `${field}[${i}]` : `${field}[${i}].${leaf}`;
+		}
+	}
 	return null;
 }
 
@@ -230,6 +479,15 @@ function optionalString(
 	return record[field] === undefined || typeof record[field] === "string"
 		? null
 		: { field, message: `${field} must be a string when present` };
+}
+
+function optionalNonEmptyString(
+	record: Record<string, unknown>,
+	field: string,
+): FieldCheck {
+	return record[field] === undefined || isNonEmptyString(record[field])
+		? null
+		: { field, message: `${field} must be a non-empty string when present` };
 }
 
 function optionalNumber(
@@ -346,6 +604,32 @@ function validateAgentsResult(
 	return ok(value as { agents: AgentStatus[] });
 }
 
+function validateDefinitionShape<T>(
+	value: unknown,
+	prefix: string,
+	kind: "definition" | "create" | "changes",
+): Validation<T> {
+	const leaf = explainDefinitionFields(value, kind);
+	if (leaf !== null) {
+		const field = leaf === "" ? prefix : prefix ? `${prefix}.${leaf}` : leaf;
+		return fail(field, `${field} is malformed`);
+	}
+	return ok(value as T);
+}
+
+function validateNamedBooleanResult<T>(
+	value: unknown,
+	field: string,
+): Validation<T> {
+	return fromFields(
+		value,
+		checkFields(value, [
+			(r) => requireString(r, "name"),
+			(r) => requireBoolean(r, field),
+		]),
+	);
+}
+
 // ── Registry ────────────────────────────────────────────────────────────────
 
 interface MethodContract {
@@ -416,6 +700,7 @@ export const METHODS: Record<MethodName, MethodContract> = {
 					(r) => requireString(r, "name"),
 					(r) => optionalStringArray(r, "rooms"),
 					(r) => optionalString(r, "cwd"),
+					(r) => optionalNonEmptyString(r, "parent"),
 				]),
 			),
 		validateResult: (v): Validation<AgentSpawnResult> => {
@@ -428,6 +713,44 @@ export const METHODS: Record<MethodName, MethodContract> = {
 				return fail(state, "state must be running, parked, or stopped");
 			return ok(v as unknown as AgentSpawnResult);
 		},
+	},
+	agent_create: {
+		validateParams: (v): Validation<AgentCreateParams> =>
+			isRecord(v)
+				? validateDefinitionShape(v, "", "create")
+				: fail("params", "expected an object"),
+		validateResult: (v): Validation<AgentCreateResult> =>
+			validateNamedBooleanResult(v, "created"),
+	},
+	definition_get: {
+		validateParams: (v): Validation<DefinitionGetParams> =>
+			fromFields(v, checkFields(v, [(r) => requireString(r, "name")])),
+		validateResult: (v): Validation<DefinitionGetResult> => {
+			if (!isRecord(v)) return fail("result", "expected an object");
+			const base = checkFields(v, [
+				(r) => requireString(r, "name"),
+				(r) => requireString(r, "filePath"),
+			]);
+			if (base) return fail(base.field, base.message);
+			const definition = validateDefinitionShape<DefinitionData>(
+				v.definition,
+				"definition",
+				"definition",
+			);
+			return definition.ok
+				? ok(v as unknown as DefinitionGetResult)
+				: definition;
+		},
+	},
+	definition_update: {
+		validateParams: (v): Validation<DefinitionUpdateParams> => {
+			if (!isRecord(v)) return fail("params", "expected an object");
+			const name = requireString(v, "name");
+			if (name) return fail(name.field, name.message);
+			return validateDefinitionShape(v.changes, "changes", "changes");
+		},
+		validateResult: (v): Validation<DefinitionUpdateResult> =>
+			validateNamedBooleanResult(v, "rebuildRequired"),
 	},
 	agent_status: {
 		validateParams: (v): Validation<AgentStatusParams> =>

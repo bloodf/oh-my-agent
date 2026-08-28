@@ -9,8 +9,8 @@
  * / `invalidParams` error builders. Runtime validation lives in
  * `./protocol-schemas`.
  *
- * Upstream deps: none. This module must stay free of transport, I/O, and
- * daemon state — the contract suite asserts that statically.
+ * Upstream deps: `./agent-definition` (type only, for the parsed definition
+ * data shape). This module stays free of transport, I/O, and daemon state.
  *
  * Downstream consumers: the daemon socket server, the worker toolbelt, the
  * TUI extension, and the web console API.
@@ -24,6 +24,7 @@
  * Performance: type declarations only; zero runtime cost beyond the small
  * error builders.
  */
+import type { PeerDefinition } from "./agent-definition";
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -35,6 +36,9 @@ export const METHOD_NAMES = [
 	"chat_react",
 	"chat_unreact",
 	"agent_spawn",
+	"agent_create",
+	"definition_get",
+	"definition_update",
 	"agent_status",
 	"logs_tail",
 	"inject",
@@ -59,6 +63,8 @@ export interface AgentStatus {
 	account: string;
 	model?: string;
 	sandboxed?: boolean;
+	parent?: string;
+	children?: string[];
 }
 
 export interface RoomMessage {
@@ -140,6 +146,7 @@ export interface AgentSpawnParams {
 	name: string;
 	rooms?: string[];
 	cwd?: string;
+	parent?: string;
 }
 export interface AgentSpawnResult {
 	name: string;
@@ -151,6 +158,41 @@ export interface AgentStatusParams {
 }
 export interface AgentStatusResult {
 	agents: AgentStatus[];
+}
+
+export type DefinitionData = Omit<PeerDefinition, "filePath">;
+
+export interface AgentCreateParams {
+	name: string;
+	description: string;
+	model?: string[];
+	rooms?: string[];
+	wake?: PeerDefinition["wake"];
+	autonomy?: PeerDefinition["autonomy"];
+	spawns?: PeerDefinition["spawns"];
+	body: string;
+}
+export interface AgentCreateResult {
+	name: string;
+	created: boolean;
+}
+
+export interface DefinitionGetParams {
+	name: string;
+}
+export interface DefinitionGetResult {
+	name: string;
+	definition: DefinitionData;
+	filePath: string;
+}
+
+export interface DefinitionUpdateParams {
+	name: string;
+	changes: Partial<Omit<DefinitionData, "name" | "sha256">>;
+}
+export interface DefinitionUpdateResult {
+	name: string;
+	rebuildRequired: boolean;
 }
 
 export interface LogsTailParams {
