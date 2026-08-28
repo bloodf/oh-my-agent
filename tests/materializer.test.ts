@@ -19,15 +19,25 @@
  */
 import { describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	stat,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const realRename = fs.rename;
 
-import type { PeerDefinition } from "../src/shared/agent-definition";
-import { fingerprintPeerDefinition, parsePeerDefinition } from "../src/shared/agent-definition";
 import { materializeWorker } from "../src/daemon/materializer";
+import type { PeerDefinition } from "../src/shared/agent-definition";
+import {
+	fingerprintPeerDefinition,
+	parsePeerDefinition,
+} from "../src/shared/agent-definition";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -40,7 +50,10 @@ async function withTempRoot<T>(fn: (root: string) => Promise<T>): Promise<T> {
 	}
 }
 
-function buildPeerDoc(frontmatter: Record<string, unknown>, body: string): string {
+function buildPeerDoc(
+	frontmatter: Record<string, unknown>,
+	body: string,
+): string {
 	const yaml = Object.entries(frontmatter)
 		.map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
 		.join("\n");
@@ -85,13 +98,25 @@ function fullPeer(overrides: Record<string, unknown> = {}): PeerDefinition {
 	);
 }
 
-const GATEWAY = { url: "http://127.0.0.1:9999", token: "inference-token" } as const;
+const GATEWAY = {
+	url: "http://127.0.0.1:9999",
+	token: "inference-token",
+} as const;
 
 /** Sources for every agent the fixtures name in `spawns:`. */
 const DEFAULT_SPAWN_SOURCES: Record<string, string> = {
-	scout: buildPeerDoc({ name: "scout", description: "Reads code." }, "You are a scout."),
-	implementor: buildPeerDoc({ name: "implementor", description: "Writes code." }, "You are an implementor."),
-	beta: buildPeerDoc({ name: "beta", description: "Beta agent." }, "You are beta."),
+	scout: buildPeerDoc(
+		{ name: "scout", description: "Reads code." },
+		"You are a scout.",
+	),
+	implementor: buildPeerDoc(
+		{ name: "implementor", description: "Writes code." },
+		"You are an implementor.",
+	),
+	beta: buildPeerDoc(
+		{ name: "beta", description: "Beta agent." },
+		"You are beta.",
+	),
 };
 
 type MaterializeArgs = Parameters<typeof materializeWorker>[0];
@@ -154,6 +179,45 @@ describe("synthetic directory creation", () => {
 		});
 	});
 
+	test("blanks inherited config-root and profile selectors", async () => {
+		const poisonedSelectors = {
+			PI_CONFIG_DIR: "/poison/pi-config",
+			CLAUDE_CONFIG_DIR: "/poison/claude-config",
+			OMP_PROFILE: "poison",
+			PI_PROFILE: "poison",
+			OMP_PROFILE_DIR: "/poison/omp-profile",
+			PI_PROFILE_DIR: "/poison/pi-profile",
+		} as const;
+		const originalValues = Object.fromEntries(
+			Object.keys(poisonedSelectors).map((key) => [key, process.env[key]]),
+		);
+
+		try {
+			Object.assign(process.env, poisonedSelectors);
+			await withTempRoot(async (root) => {
+				const result = await materialize({
+					rootDir: root,
+					parsedPeer: minimalPeer(),
+					discoveredAgentNames: [],
+					inferenceGateway: GATEWAY,
+				});
+
+				expect(result.env).toMatchObject({
+					...Object.fromEntries(
+						Object.keys(poisonedSelectors).map((key) => [key, ""]),
+					),
+					HOME: join(root, "home"),
+					PI_CODING_AGENT_DIR: join(root, ...AGENT_DIR_SEGMENTS),
+				});
+			});
+		} finally {
+			for (const [key, value] of Object.entries(originalValues)) {
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	});
+
 	test("agents/ and sessions/ exist under the synthetic agent dir", async () => {
 		await withTempRoot(async (root) => {
 			await materialize({
@@ -178,7 +242,9 @@ describe("synthetic directory creation", () => {
 				inferenceGateway: GATEWAY,
 			});
 
-			expect(await Bun.file(join(root, ...AGENT_DIR_SEGMENTS, "agent.db")).exists()).toBe(false);
+			expect(
+				await Bun.file(join(root, ...AGENT_DIR_SEGMENTS, "agent.db")).exists(),
+			).toBe(false);
 		});
 	});
 });
@@ -195,7 +261,12 @@ describe("generated native OMP definition", () => {
 				inferenceGateway: GATEWAY,
 			});
 
-			const generatedPath = join(root, ...AGENT_DIR_SEGMENTS, "agents", "reviewer.md");
+			const generatedPath = join(
+				root,
+				...AGENT_DIR_SEGMENTS,
+				"agents",
+				"reviewer.md",
+			);
 			expect(result.generatedAgentPath).toBe(generatedPath);
 
 			const content = await readFile(generatedPath, "utf8");
@@ -217,9 +288,19 @@ describe("generated native OMP definition", () => {
 				inferenceGateway: GATEWAY,
 			});
 
-			const content = await readFile(join(root, ...AGENT_DIR_SEGMENTS, "agents", "reviewer.md"), "utf8");
+			const content = await readFile(
+				join(root, ...AGENT_DIR_SEGMENTS, "agents", "reviewer.md"),
+				"utf8",
+			);
 			const frontmatter = content.split(/^---$/m)[1] ?? "";
-			for (const key of ["rooms:", "wake:", "autonomy:", "schedules:", "automations:", "workspace:"]) {
+			for (const key of [
+				"rooms:",
+				"wake:",
+				"autonomy:",
+				"schedules:",
+				"automations:",
+				"workspace:",
+			]) {
 				expect(frontmatter).not.toContain(key);
 			}
 		});
@@ -250,8 +331,12 @@ describe("generated native OMP definition", () => {
 
 			const agents = join(root, ...AGENT_DIR_SEGMENTS, "agents");
 			expect(await Bun.file(join(agents, "scout.md")).exists()).toBe(true);
-			expect(await Bun.file(join(agents, "implementor.md")).exists()).toBe(true);
-			expect(await Bun.file(join(agents, "other-agent.md")).exists()).toBe(false);
+			expect(await Bun.file(join(agents, "implementor.md")).exists()).toBe(
+				true,
+			);
+			expect(await Bun.file(join(agents, "other-agent.md")).exists()).toBe(
+				false,
+			);
 		});
 	});
 
@@ -264,7 +349,10 @@ describe("generated native OMP definition", () => {
 					discoveredAgentNames: [],
 					inferenceGateway: GATEWAY,
 					sourceSpawnAgents: {
-						scout: buildPeerDoc({ name: "scout", description: "Reads code." }, "Scout."),
+						scout: buildPeerDoc(
+							{ name: "scout", description: "Reads code." },
+							"Scout.",
+						),
 					},
 				}),
 			).rejects.toThrow(/implementor/);
@@ -348,7 +436,11 @@ describe("config generation", () => {
 			).rejects.toThrow(/provider\/id/);
 
 			// Nothing was written: the worker dir must not exist yet.
-			expect(await Bun.file(join(root, ...AGENT_DIR_SEGMENTS, "models.yml")).exists()).toBe(false);
+			expect(
+				await Bun.file(
+					join(root, ...AGENT_DIR_SEGMENTS, "models.yml"),
+				).exists(),
+			).toBe(false);
 		});
 	});
 
@@ -454,7 +546,9 @@ describe("WorkerLayout return shape", () => {
 				inferenceGateway: GATEWAY,
 			});
 
-			expect(result.definitionFingerprint).toBe(fingerprintPeerDefinition(peer));
+			expect(result.definitionFingerprint).toBe(
+				fingerprintPeerDefinition(peer),
+			);
 		});
 	});
 });
@@ -471,13 +565,20 @@ describe("mcps selection", () => {
 				inferenceGateway: GATEWAY,
 				sourceMCPs: {
 					kept: { command: "node", args: [join(root, "servers", "kept.js")] },
-					dropped: { command: "node", args: [join(root, "servers", "dropped.js")] },
+					dropped: {
+						command: "node",
+						args: [join(root, "servers", "dropped.js")],
+					},
 				},
 			});
 
 			expect(result.mcpPath).toBeDefined();
-			const parsed = JSON.parse(await readFile(result.mcpPath as string, "utf8"));
-			expect(Object.keys(parsed.mcpServers ?? parsed.mcps ?? {})).toEqual(["kept"]);
+			const parsed = JSON.parse(
+				await readFile(result.mcpPath as string, "utf8"),
+			);
+			expect(Object.keys(parsed.mcpServers ?? parsed.mcps ?? {})).toEqual([
+				"kept",
+			]);
 		});
 	});
 
@@ -505,7 +606,9 @@ describe("mcps selection", () => {
 			});
 
 			expect(result.mcpPath).toBeUndefined();
-			expect(await Bun.file(join(root, ...AGENT_DIR_SEGMENTS, "mcp.json")).exists()).toBe(false);
+			expect(
+				await Bun.file(join(root, ...AGENT_DIR_SEGMENTS, "mcp.json")).exists(),
+			).toBe(false);
 		});
 	});
 });
@@ -530,8 +633,12 @@ describe("skills selection", () => {
 
 			const dest = join(root, ...AGENT_DIR_SEGMENTS, "skills", "pr-review");
 			expect(result.skillPaths).toEqual([dest]);
-			expect(await readFile(join(dest, "SKILL.md"), "utf8")).toBe("# pr-review\n");
-			expect(await readFile(join(dest, "reference", "notes.md"), "utf8")).toBe("notes\n");
+			expect(await readFile(join(dest, "SKILL.md"), "utf8")).toBe(
+				"# pr-review\n",
+			);
+			expect(await readFile(join(dest, "reference", "notes.md"), "utf8")).toBe(
+				"notes\n",
+			);
 		});
 	});
 
@@ -605,7 +712,9 @@ describe("rebuild semantics", () => {
 			});
 
 			expect(second.definitionFingerprint).toBe(first.definitionFingerprint);
-			expect(await readFile(second.generatedAgentPath, "utf8")).toBe(beforeAgent);
+			expect(await readFile(second.generatedAgentPath, "utf8")).toBe(
+				beforeAgent,
+			);
 			expect(await readFile(second.configPath, "utf8")).toBe(beforeConfig);
 		});
 	});
@@ -626,12 +735,20 @@ describe("rebuild semantics", () => {
 				discoveredAgentNames: ["alpha", "beta"],
 				inferenceGateway: GATEWAY,
 				sourceSpawnAgents: {
-					scout: buildPeerDoc({ name: "scout", description: "Reads code." }, "Scout."),
-					beta: buildPeerDoc({ name: "beta", description: "Beta agent." }, "Beta."),
+					scout: buildPeerDoc(
+						{ name: "scout", description: "Reads code." },
+						"Scout.",
+					),
+					beta: buildPeerDoc(
+						{ name: "beta", description: "Beta agent." },
+						"Beta.",
+					),
 				},
 			});
 
-			expect(after.definitionFingerprint).not.toBe(before.definitionFingerprint);
+			expect(after.definitionFingerprint).not.toBe(
+				before.definitionFingerprint,
+			);
 			expect(after.disabledAgents).toEqual(["alpha"]);
 			expect(await readFile(after.configPath, "utf8")).not.toContain("beta");
 		});
@@ -645,7 +762,10 @@ describe("rebuild semantics", () => {
 				discoveredAgentNames: [],
 				inferenceGateway: GATEWAY,
 				sourceSpawnAgents: {
-					scout: buildPeerDoc({ name: "scout", description: "Reads code." }, "Scout."),
+					scout: buildPeerDoc(
+						{ name: "scout", description: "Reads code." },
+						"Scout.",
+					),
 					implementor: buildPeerDoc(
 						{ name: "implementor", description: "Writes code." },
 						"Implementor.",
@@ -653,7 +773,9 @@ describe("rebuild semantics", () => {
 				},
 			});
 			const agents = join(root, ...AGENT_DIR_SEGMENTS, "agents");
-			expect(await Bun.file(join(agents, "implementor.md")).exists()).toBe(true);
+			expect(await Bun.file(join(agents, "implementor.md")).exists()).toBe(
+				true,
+			);
 
 			await materialize({
 				rootDir: root,
@@ -661,11 +783,16 @@ describe("rebuild semantics", () => {
 				discoveredAgentNames: [],
 				inferenceGateway: GATEWAY,
 				sourceSpawnAgents: {
-					scout: buildPeerDoc({ name: "scout", description: "Reads code." }, "Scout."),
+					scout: buildPeerDoc(
+						{ name: "scout", description: "Reads code." },
+						"Scout.",
+					),
 				},
 			});
 
-			expect(await Bun.file(join(agents, "implementor.md")).exists()).toBe(false);
+			expect(await Bun.file(join(agents, "implementor.md")).exists()).toBe(
+				false,
+			);
 			expect(await Bun.file(join(agents, "scout.md")).exists()).toBe(true);
 		});
 	});
@@ -710,8 +837,11 @@ describe("rebuild semantics", () => {
 			// the restore rename is delegated to the real implementation.
 			const attempted: string[] = [];
 			const spy = spyOn(fs, "rename").mockImplementation(async (from, to) => {
-				attempted.push(`${String(from).includes(".staging-") ? "staging" : String(from).includes(".previous") ? "previous" : "agentDir"}->${String(to).includes(".previous") ? "previous" : "agentDir"}`);
-				if (String(from).includes(".staging-")) throw new Error("simulated rename failure");
+				attempted.push(
+					`${String(from).includes(".staging-") ? "staging" : String(from).includes(".previous") ? "previous" : "agentDir"}->${String(to).includes(".previous") ? "previous" : "agentDir"}`,
+				);
+				if (String(from).includes(".staging-"))
+					throw new Error("simulated rename failure");
 				return await realRename(from as string, to as string);
 			});
 

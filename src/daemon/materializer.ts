@@ -1,15 +1,16 @@
 /**
  * Purpose: Build the synthetic user root a worker process runs inside (§5.2).
- * Each spawn gets its own HOME + XDG_* tree whose OMP agent dir contains only
- * the worker's generated native definition and the definitions named by
- * `spawns:`, a config that pins `task.disabledAgents` to every discovered agent
- * outside that allowlist, and a `models.yml` routing every turn through the
- * per-worker inference gateway.
+ * Each spawn gets its own HOME + XDG_* tree, explicit agent dir, and blank
+ * host config/profile selectors. Its OMP agent dir contains only the worker's
+ * generated native definition and definitions named by `spawns:`, a config
+ * that pins `task.disabledAgents` to every discovered agent outside that
+ * allowlist, and a `models.yml` routing every turn through the per-worker
+ * inference gateway.
  *
  * Public API: `materializeWorker(options: MaterializeOptions): Promise<WorkerLayout>`.
  *
  * Upstream deps: `node:fs/promises`, `node:path`, `../shared/agent-definition`
- * (`PeerDefinition`, `fingerprintPeerDefinition`).
+ * (`PeerDefinition`, `fingerprintPeerDefinition`), `../shared/env-scrub`.
  *
  * Downstream consumers: the daemon's worker lifecycle — it materializes before
  * launching an RPC worker and re-materializes whenever the definition
@@ -20,7 +21,7 @@
  * happens before any destructive write, so a failed rebuild leaves the previous
  * materialization byte-identical.
  *
- * Performance: one staged tree write per spawn — bounded by the worker's own
+ * Performance: one staged tree write per spawn, bounded by the worker's own
  * definition plus its spawns closure, not by the user's full agent set.
  */
 import { cp, mkdir, rename, rm, writeFile } from "node:fs/promises";
@@ -28,6 +29,7 @@ import { join, resolve, sep } from "node:path";
 
 import type { PeerDefinition } from "../shared/agent-definition";
 import { fingerprintPeerDefinition } from "../shared/agent-definition";
+import { blankScrubbedEnvVars } from "../shared/env-scrub";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -86,7 +88,7 @@ export interface WorkerLayout {
 	/** Discovered agents denied to this worker, ascending. */
 	disabledAgents: string[];
 	definitionFingerprint: string;
-	/** Process env for the worker: synthetic roots + inference bearer only. */
+	/** Synthetic roots, blank host selectors, and inference bearer. */
 	env: Record<string, string>;
 }
 
@@ -117,15 +119,26 @@ function assertPlainName(kind: string, name: string): void {
 		name.includes("\0") ||
 		name.includes(sep)
 	) {
-		throw new MaterializationError(`Unsafe ${kind} name: ${JSON.stringify(name)}`);
+		throw new MaterializationError(
+			`Unsafe ${kind} name: ${JSON.stringify(name)}`,
+		);
 	}
 }
 
-function assertContained(root: string, candidate: string, description: string): void {
+function assertContained(
+	root: string,
+	candidate: string,
+	description: string,
+): void {
 	const resolvedRoot = resolve(root);
 	const resolvedCandidate = resolve(candidate);
-	if (resolvedCandidate !== resolvedRoot && !resolvedCandidate.startsWith(resolvedRoot + sep)) {
-		throw new MaterializationError(`${description} escapes ${resolvedRoot}: ${resolvedCandidate}`);
+	if (
+		resolvedCandidate !== resolvedRoot &&
+		!resolvedCandidate.startsWith(resolvedRoot + sep)
+	) {
+		throw new MaterializationError(
+			`${description} escapes ${resolvedRoot}: ${resolvedCandidate}`,
+		);
 	}
 }
 
@@ -140,10 +153,18 @@ function yamlString(value: string): string {
  * mcps, skills) stay in the daemon and never reach the worker's agent dir.
  */
 function renderNativeDefinition(peer: PeerDefinition): string {
-	const lines = [`name: ${yamlString(peer.name)}`, `description: ${yamlString(peer.description)}`];
+	const lines = [
+		`name: ${yamlString(peer.name)}`,
+		`description: ${yamlString(peer.description)}`,
+	];
 
-	const model = Array.isArray(peer.model) ? peer.model : peer.model ? [peer.model] : [];
-	if (model.length > 0) lines.push(`model: [${model.map(yamlString).join(", ")}]`);
+	const model = Array.isArray(peer.model)
+		? peer.model
+		: peer.model
+			? [peer.model]
+			: [];
+	if (model.length > 0)
+		lines.push(`model: [${model.map(yamlString).join(", ")}]`);
 	if (peer.tools && peer.tools.length > 0) {
 		lines.push(`tools: [${peer.tools.map(yamlString).join(", ")}]`);
 	}
@@ -206,7 +227,8 @@ function resolveWorkerModel(
 	peer: PeerDefinition,
 	override?: string,
 ): { provider: string; modelId: string } {
-	const selector = override ?? (Array.isArray(peer.model) ? peer.model[0] : peer.model);
+	const selector =
+		override ?? (Array.isArray(peer.model) ? peer.model[0] : peer.model);
 	if (typeof selector !== "string" || selector.trim().length === 0) {
 		throw new MaterializationError(
 			`Peer ${peer.name} declares no model; a worker needs an explicit provider/id to route through the gateway`,
@@ -234,7 +256,9 @@ function parseGatewayEndpoint(url: string): { host: string; port: number } {
 	try {
 		parsed = new URL(url);
 	} catch {
-		throw new MaterializationError(`Inference gateway url is not a URL: ${JSON.stringify(url)}`);
+		throw new MaterializationError(
+			`Inference gateway url is not a URL: ${JSON.stringify(url)}`,
+		);
 	}
 	const port = Number(parsed.port);
 	if (!parsed.port || !Number.isInteger(port) || port < 1 || port > 65535) {
@@ -255,8 +279,11 @@ function parseGatewayEndpoint(url: string): { host: string; port: number } {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export async function materializeWorker(options: MaterializeOptions): Promise<WorkerLayout> {
-	const { rootDir, parsedPeer, discoveredAgentNames, inferenceGateway } = options;
+export async function materializeWorker(
+	options: MaterializeOptions,
+): Promise<WorkerLayout> {
+	const { rootDir, parsedPeer, discoveredAgentNames, inferenceGateway } =
+		options;
 	const sourceSpawnAgents = options.sourceSpawnAgents ?? {};
 	const sourceMCPs = options.sourceMCPs ?? {};
 	const sourceSkillRoots = options.sourceSkillRoots ?? {};
@@ -275,7 +302,9 @@ export async function materializeWorker(options: MaterializeOptions): Promise<Wo
 		assertPlainName("agent", name);
 		const content = sourceSpawnAgents[name];
 		if (content === undefined) {
-			throw new MaterializationError(`No source definition for spawns entry: ${name}`);
+			throw new MaterializationError(
+				`No source definition for spawns entry: ${name}`,
+			);
 		}
 		spawnDocs.push({ name, content });
 	}
@@ -285,7 +314,8 @@ export async function materializeWorker(options: MaterializeOptions): Promise<Wo
 	for (const name of selectedMCPs) {
 		assertPlainName("mcp", name);
 		const spec = sourceMCPs[name];
-		if (spec === undefined) throw new MaterializationError(`Unknown mcp: ${name}`);
+		if (spec === undefined)
+			throw new MaterializationError(`Unknown mcp: ${name}`);
 		mcpServers[name] = spec;
 	}
 
@@ -294,7 +324,8 @@ export async function materializeWorker(options: MaterializeOptions): Promise<Wo
 	for (const name of selectedSkills) {
 		assertPlainName("skill", name);
 		const source = sourceSkillRoots[name];
-		if (source === undefined) throw new MaterializationError(`Unknown skill: ${name}`);
+		if (source === undefined)
+			throw new MaterializationError(`Unknown skill: ${name}`);
 		skills.push({ name, source });
 	}
 
@@ -302,24 +333,33 @@ export async function materializeWorker(options: MaterializeOptions): Promise<Wo
 	const { provider, modelId } = resolveWorkerModel(parsedPeer, options.model);
 	const gatewayEndpoint = parseGatewayEndpoint(inferenceGateway.url);
 
-	const allowed = new Set(parsedPeer.spawns === "*" ? discoveredAgentNames : spawnNames);
+	const allowed = new Set(
+		parsedPeer.spawns === "*" ? discoveredAgentNames : spawnNames,
+	);
 	const disabledAgents =
 		parsedPeer.spawns === "*"
 			? []
-			: [...new Set(discoveredAgentNames)].filter((name) => !allowed.has(name)).sort();
+			: [...new Set(discoveredAgentNames)]
+					.filter((name) => !allowed.has(name))
+					.sort();
 
 	// ── Stage the agent dir, then swap it in ──────────────────────────────────
-	const staging = join(root, `.staging-${process.pid.toString(36)}-${Date.now().toString(36)}`);
+	const staging = join(
+		root,
+		`.staging-${process.pid.toString(36)}-${Date.now().toString(36)}`,
+	);
 	const stagedAgents = join(staging, "agents");
 	const generatedAgentPath = join(agentDir, "agents", `${parsedPeer.name}.md`);
 	const configPath = join(agentDir, "config.yml");
 	const modelsPath = join(agentDir, "models.yml");
-	const mcpPath = selectedMCPs.length > 0 ? join(agentDir, "mcp.json") : undefined;
+	const mcpPath =
+		selectedMCPs.length > 0 ? join(agentDir, "mcp.json") : undefined;
 	const skillPaths = skills.map(({ name }) => join(agentDir, "skills", name));
 
 	assertContained(agentDir, generatedAgentPath, "generated definition");
 	if (mcpPath) assertContained(agentDir, mcpPath, "mcp config");
-	for (const path of skillPaths) assertContained(agentDir, path, "skill destination");
+	for (const path of skillPaths)
+		assertContained(agentDir, path, "skill destination");
 
 	await rm(staging, { recursive: true, force: true });
 	try {
@@ -335,7 +375,11 @@ export async function materializeWorker(options: MaterializeOptions): Promise<Wo
 			await writeFile(join(stagedAgents, `${name}.md`), content, "utf8");
 		}
 
-		await writeFile(join(staging, "config.yml"), renderConfig(disabledAgents), "utf8");
+		await writeFile(
+			join(staging, "config.yml"),
+			renderConfig(disabledAgents),
+			"utf8",
+		);
 		await writeFile(
 			join(staging, "models.yml"),
 			renderModels(inferenceGateway.url, provider),
@@ -405,6 +449,7 @@ export async function materializeWorker(options: MaterializeOptions): Promise<Wo
 		inferenceGateway: gatewayEndpoint,
 		definitionFingerprint: fingerprintPeerDefinition(parsedPeer),
 		env: {
+			...blankScrubbedEnvVars(),
 			HOME: home,
 			XDG_CONFIG_HOME: join(home, ".config"),
 			XDG_DATA_HOME: join(home, ".local", "share"),
