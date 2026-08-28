@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>oh-my-agent console</title>
+		<link rel="stylesheet" href="/style.css" />
+	</head>
+	<body>
+		<aside id="sidebar">
+			<h1>Channels</h1>
+			<ul id="channels"></ul>
+		</aside>
+		<main id="main">
+			<header id="current-channel"></header>
+			<div id="messages" aria-live="polite"></div>
+			<form id="composer">
+				<input
+					id="composer-input"
+					type="text"
+					placeholder="Message the channel"
+					autocomplete="off"
+				/>
+				<button id="composer-send" type="submit">Send</button>
+			</form>
+		</main>
+		<aside id="thread" hidden>
+			<header>
+				<span id="thread-title"></span>
+				<button id="thread-close" type="button">Close</button>
+			</header>
+			<div id="thread-messages"></div>
+			<form id="thread-composer">
+				<input
+					id="thread-composer-input"
+					type="text"
+					placeholder="Reply in thread"
+					autocomplete="off"
+				/>
+				<button id="thread-composer-send" type="submit">Reply</button>
+			</form>
+		</aside>
+		<script src="/app.js"></script>
+	</body>
+</html>
