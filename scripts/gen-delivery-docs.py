@@ -2606,7 +2606,7 @@ TASKS += [
     ),
     Task(
         id="T-902", slug="tui-manager", title="Full-screen agent manager",
-        epic="EP-09", sprint="SP-10", status="Ready",
+        epic="EP-09", sprint="SP-10", status="Done",
         goal="A full-screen overlay inside the OMP TUI is the operator's management surface for the agent tree.",
         read_first=[
             ("Extension factory", "src/extension/index.ts"),
@@ -2630,6 +2630,7 @@ TASKS += [
             "Every action goes through the daemon socket; the manager holds no state the daemon does not own.",
             "The state layer is covered by tests driving the real socket; the spike's risks are named in the report.",
         ],
+                evidence=[("Fullscreen overlay manager with the state/component split", "src/extension/manager.ts"), ("Manager state layer over the real socket, 41 extension tests", "tests/extension.test.ts")],
         depends_on=["T-901"],
         out_of_scope=["Editing flows themselves, which are T-903."],
     ),

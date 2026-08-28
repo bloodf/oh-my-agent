@@ -24,7 +24,7 @@ An operator edits an agent's definition and model in guided dialogs, and the cha
 | Path | Role | Note |
 |---|---|---|
 | [`src/extension/commands.ts`](../../../src/extension/commands.ts) | Edited | `/edit <name>` flows: definition via pre-filled editor, model via selection over configured roles. |
-| `src/extension/manager.ts` (to be created) | Edited | The manager's edit actions call the same flows. |
+| [`src/extension/manager.ts`](../../../src/extension/manager.ts) | Edited | The manager's edit actions call the same flows. |
 | [`tests/extension.test.ts`](../../../tests/extension.test.ts) | Edited | Edit round trips against the real socket: get → edit → update → staleness handoff. |
 
 ## Steps

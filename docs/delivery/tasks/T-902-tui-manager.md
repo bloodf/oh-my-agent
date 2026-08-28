@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-09](../epics/EP-09-tui-management.md) | [SP-10](../sprints/SP-10-tui-management.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-09](../epics/EP-09-tui-management.md) | [SP-10](../sprints/SP-10-tui-management.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -24,7 +24,7 @@ A full-screen overlay inside the OMP TUI is the operator's management surface fo
 
 | Path | Role | Note |
 |---|---|---|
-| `src/extension/manager.ts` (to be created) | New | The overlay component: tree browse, per-agent action menu, kill with cascade choice, logs, inject, membership editing. |
+| [`src/extension/manager.ts`](../../../src/extension/manager.ts) | New | The overlay component: tree browse, per-agent action menu, kill with cascade choice, logs, inject, membership editing. |
 | [`src/extension/index.ts`](../../../src/extension/index.ts) | Edited | Registers `/manage` and a shortcut; guards `ctx.hasUI`/`ctx.mode`. |
 | [`tests/extension.test.ts`](../../../tests/extension.test.ts) | Edited | Manager state logic against the real socket; the component is split so logic is testable without a TTY. |
 
@@ -37,9 +37,16 @@ A full-screen overlay inside the OMP TUI is the operator's management surface fo
 
 ## Acceptance
 
-- [ ] The overlay opens over the transcript, browses the tree by keyboard, and closes cleanly without disturbing the session.
-- [ ] Every action goes through the daemon socket; the manager holds no state the daemon does not own.
-- [ ] The state layer is covered by tests driving the real socket; the spike's risks are named in the report.
+- [x] The overlay opens over the transcript, browses the tree by keyboard, and closes cleanly without disturbing the session.
+- [x] Every action goes through the daemon socket; the manager holds no state the daemon does not own.
+- [x] The state layer is covered by tests driving the real socket; the spike's risks are named in the report.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Fullscreen overlay manager with the state/component split | [`src/extension/manager.ts`](../../../src/extension/manager.ts) |
+| Manager state layer over the real socket, 41 extension tests | [`tests/extension.test.ts`](../../../tests/extension.test.ts) |
 
 ## Out of scope
 

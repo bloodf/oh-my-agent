@@ -39,5 +39,5 @@ The hierarchy makes the flat `/agents` list a lie, and definitions today are edi
 | Task | Title | Status |
 |---|---|---|
 | [T-901](../tasks/T-901-tui-tree.md) | Hierarchy in /agents and the spawn flow | Done |
-| [T-902](../tasks/T-902-tui-manager.md) | Full-screen agent manager | Ready |
+| [T-902](../tasks/T-902-tui-manager.md) | Full-screen agent manager | Done |
 | [T-903](../tasks/T-903-tui-editing.md) | Definition and model editing flows | Ready |
