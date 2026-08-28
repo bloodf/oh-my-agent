@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -27,9 +27,9 @@ A human can see and steer running agents from inside the OMP TUI.
 | Path | Role | Note |
 |---|---|---|
 | [`src/extension/index.ts`](../../../src/extension/index.ts) | Edited | Currently a no-op factory. |
-| `src/extension/commands.ts` (to be created) | New | `/agents`, `/rooms`, `/schedule`, `/spawn`, `/logs`, `/inject`. |
-| `src/extension/widget.ts` (to be created) | New | Status line. |
-| `tests/extension.test.ts` (to be created) | New | Command output and no-daemon degradation. |
+| [`src/extension/commands.ts`](../../../src/extension/commands.ts) | New | `/agents`, `/rooms`, `/schedule`, `/spawn`, `/kill`. Steering verbs (`/logs`, `/inject`) are T-511, which owns the protocol additions they need. |
+| [`src/extension/widget.ts`](../../../src/extension/widget.ts) | New | Status line. |
+| [`tests/extension.test.ts`](../../../tests/extension.test.ts) | New | Command output and no-daemon degradation. |
 | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Read | The methods the commands call. |
 | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Read | Data source. |
 
@@ -39,19 +39,26 @@ A human can see and steer running agents from inside the OMP TUI.
 2. Show a shield only for peers actually running under an OS sandbox, never for `workspace:` scoping, because a shield on an unsandboxed agent is a false security claim.
 3. Implement `/rooms` to read a transcript and post as `@you`.
 4. Implement `/schedule` to list and arm schedules.
-5. Implement `/spawn` to start a peer from a definition, `/logs --tail` to follow a worker's output, and inject-instructions to push a directive into a running session. §1 and §4.5 promise all three; leaving them out would ship a TUI that observes but cannot steer, which is half the point of the surface.
+5. Implement `/spawn` to start a peer from a definition. Steering verbs (`/logs --tail`, inject-instructions) need protocol methods T-507 froze without them; T-511 owns the protocol additions and the verbs together.
 6. Add a status widget with running and parked counts plus unread totals.
 7. Use ask-dialogs for destructive actions: killing a worker, bumping a metered budget.
 8. Degrade to a clear message when no daemon is running, rather than throwing inside the TUI.
 
 ## Acceptance
 
-- [ ] `/agents` lists peers with live state from the daemon.
-- [ ] The shield appears only for sandboxed peers, verified against one sandboxed and one unsandboxed agent.
-- [ ] `/rooms` posts as `@you` and the message wakes a subscribed peer.
-- [ ] `/spawn` starts a peer that then appears in `/agents`; `/logs --tail` streams a running worker's output; injected instructions reach the live session's next turn.
-- [ ] Killing a worker asks for confirmation first.
-- [ ] With no daemon running, every command reports that clearly instead of raising.
+- [x] `/agents` lists peers with live state from the daemon.
+- [x] The shield appears only for sandboxed peers, verified against one sandboxed and one unsandboxed agent.
+- [x] `/rooms` posts as `@you` and the message wakes a subscribed peer.
+- [x] `/spawn` starts a peer that then appears in `/agents`. (Steering — `/logs --tail` and injected instructions reaching the live session's next turn — is T-511's acceptance, gated on its protocol additions.)
+- [x] Killing a worker asks for confirmation first.
+- [x] With no daemon running, every command reports that clearly instead of raising.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Command and widget surface | [`src/extension/commands.ts`](../../../src/extension/commands.ts) |
+| Extension suite, 16 tests over the real socket | [`tests/extension.test.ts`](../../../tests/extension.test.ts) |
 
 ## Out of scope
 
@@ -64,4 +71,4 @@ A human can see and steer running agents from inside the OMP TUI.
 
 ## Unblocks
 
-- Nothing.
+- T-511

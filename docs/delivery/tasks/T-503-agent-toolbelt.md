@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -24,8 +24,8 @@ A worker can talk to rooms and peers through tools injected into its own session
 
 | Path | Role | Note |
 |---|---|---|
-| `src/worker/toolbelt.ts` (to be created) | New | `chat_send`, `chat_read`, `chat_wait`, `agent_spawn`, `agent_status`, `task_handoff`. |
-| `tests/toolbelt.test.ts` (to be created) | New | Tool behavior against a running daemon socket. |
+| [`src/worker/toolbelt.ts`](../../../src/worker/toolbelt.ts) | New | `chat_send`, `chat_read`, `chat_wait`, `agent_spawn`, `agent_status`, `task_handoff`. |
+| [`tests/toolbelt.test.ts`](../../../tests/toolbelt.test.ts) | New | Tool behavior against a running daemon socket. |
 | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Read | The method set these tools call; do not invent a second one. |
 | [`src/rooms/store.ts`](../../../src/rooms/store.ts) | Read | Backing bus. |
 | [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) | Read | `classifyAgentSpawn` already exists; reuse it. |
@@ -41,11 +41,18 @@ A worker can talk to rooms and peers through tools injected into its own session
 
 ## Acceptance
 
-- [ ] `chat_send` posts and the message is visible to a subscribed peer.
-- [ ] `chat_wait` blocks and returns on a wake as T-509 defines it, and does not return on a post the peer would not be woken by.
-- [ ] `agent_spawn` with a coding-subtask payload is refused and names `task`.
-- [ ] A worker with the toolbelt still exposes native `task` in its effective tool list.
-- [ ] Every call goes over the socket: the suite fails if the toolbelt opens the room database itself.
+- [x] `chat_send` posts and the message is visible to a subscribed peer.
+- [x] `chat_wait` blocks and returns on a wake as T-509 defines it, and does not return on a post the peer would not be woken by.
+- [x] `agent_spawn` with a coding-subtask payload is refused and names `task`.
+- [x] A worker with the toolbelt still exposes native `task` in its effective tool list.
+- [x] Every call goes over the socket: the suite fails if the toolbelt opens the room database itself.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Toolbelt extension, six tools over the T-507 socket | [`src/worker/toolbelt.ts`](../../../src/worker/toolbelt.ts) |
+| Toolbelt suite incl. a real OMP child round trip | [`tests/toolbelt.test.ts`](../../../tests/toolbelt.test.ts) |
 
 ## Out of scope
 

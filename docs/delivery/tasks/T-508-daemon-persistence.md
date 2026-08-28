@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -24,9 +24,9 @@ Agents, runs, and schedules survive a daemon restart, and worker directories lef
 
 | Path | Role | Note |
 |---|---|---|
-| `src/daemon/db.ts` (to be created) | New | `agents`, `runs`, `schedules` tables and their accessors. |
+| [`src/daemon/db.ts`](../../../src/daemon/db.ts) | New | `agents`, `runs`, `schedules` tables and their accessors. |
 | [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | Opens the database and runs the sweep during boot. |
-| `tests/daemon-persistence.test.ts` (to be created) | New | Restart survival, run records, sweep. |
+| [`tests/daemon-persistence.test.ts`](../../../tests/daemon-persistence.test.ts) | New | Restart survival, run records, sweep. |
 | [`src/rooms/store.ts`](../../../src/rooms/store.ts) | Read | The existing SQLite conventions to follow, not a second style. |
 | [`src/daemon/materializer.ts`](../../../src/daemon/materializer.ts) | Read | Owns the `workers/` layout the sweep cleans up. |
 
@@ -40,11 +40,18 @@ Agents, runs, and schedules survive a daemon restart, and worker directories lef
 
 ## Acceptance
 
-- [ ] Agents, runs, and schedules reload after a daemon restart.
-- [ ] Every delivered turn leaves exactly one run record naming its trigger and outcome.
-- [ ] A `workers/` directory with no registry entry is removed at boot and reported.
-- [ ] A `workers/` directory that does have a registry entry is left alone.
-- [ ] The sweep is proven non-vacuous: with the sweep reverted, the orphan test fails.
+- [x] Agents, runs, and schedules reload after a daemon restart.
+- [x] Every delivered turn leaves exactly one run record naming its trigger and outcome.
+- [x] A `workers/` directory with no registry entry is removed at boot and reported.
+- [x] A `workers/` directory that does have a registry entry is left alone.
+- [x] The sweep is proven non-vacuous: with the sweep reverted, the orphan test fails.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Persistence store | [`src/daemon/db.ts`](../../../src/daemon/db.ts) |
+| Persistence suite, 15 tests incl. restart and interrupted-run cases | [`tests/daemon-persistence.test.ts`](../../../tests/daemon-persistence.test.ts) |
 
 ## Out of scope
 

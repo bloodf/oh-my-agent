@@ -24,8 +24,8 @@ An agent can mark a message with an emoji to signal what it is doing about it.
 
 | Path | Role | Note |
 |---|---|---|
-| `src/worker/toolbelt.ts` (to be created) | Edited | Adds `chat_react`. |
-| `tests/toolbelt.test.ts` (to be created) | Edited | Reaction cases beside T-503's chat cases. |
+| [`src/worker/toolbelt.ts`](../../../src/worker/toolbelt.ts) | Edited | Adds `chat_react`. |
+| [`tests/toolbelt.test.ts`](../../../tests/toolbelt.test.ts) | Edited | Reaction cases beside T-503's chat cases. |
 | [`src/rooms/store.ts`](../../../src/rooms/store.ts) | Read | `react` and `unreact` exist after T-601. |
 
 ## Steps
