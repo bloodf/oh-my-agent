@@ -26,7 +26,8 @@
  * Performance: one broker, one gateway, one SQLite handle, and one child process
  * per running peer.
  */
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { getAgentDir, postmortem } from "@oh-my-pi/pi-utils";
@@ -45,6 +46,8 @@ import type {
 import { startWorker } from "../worker/lifecycle";
 import { resolveBrokerHosting } from "./boot";
 import { startCredentialGateway } from "./credential-gateway";
+import type { RunTrigger } from "./db";
+import { DaemonDb } from "./db";
 import { materializeWorker } from "./materializer";
 import { createPeerStore, resolvePeerStoreRoots } from "./peer-store";
 import { nextCronTime, Scheduler } from "./scheduler";
@@ -71,6 +74,8 @@ export interface WorkerFactoryOptions {
 	inferenceGateway: { url: string; token: string };
 	/** Raw markdown for each agent the peer names in `spawns:`. */
 	sourceSpawnAgents: Record<string, string>;
+	/** Absolute path of the daemon control socket, exported to the worker env. */
+	socketPath: string;
 }
 
 /**
@@ -113,6 +118,22 @@ function accountIdFor(peer: PeerDefinition): string {
 }
 
 /**
+ * Where a peer definition was parsed from.
+ *
+ * `parsePeerDefinition` spreads OMP's own `AgentDefinition`, which carries
+ * `filePath`, but `PeerDefinition` omits that field from its declared shape.
+ * The value is there at runtime and is exactly what the persisted registry has
+ * to record, so it is narrowed back out here rather than by widening the shared
+ * type, which T-501 owns.
+ */
+function definitionPathFor(peer: PeerDefinition): string {
+	if ("filePath" in peer && typeof peer.filePath === "string") {
+		return peer.filePath;
+	}
+	return "";
+}
+
+/**
  * Claim the single-instance pidfile, or refuse. A pidfile naming a live process
  * is a running daemon; one naming a dead process is crash debris and is
  * replaced, because refusing forever after a crash would need manual cleanup.
@@ -152,6 +173,9 @@ const defaultWorkerFactory: WorkerFactory = async (options) => {
 		// `materializeWorker` refuses to build the root at all.
 		sourceSpawnAgents: options.sourceSpawnAgents,
 	});
+	// Point the toolbelt at the daemon explicitly; the path heuristic in
+	// src/worker/toolbelt.ts remains the fallback for non-standard layouts.
+	layout.env.OH_MY_AGENT_SOCKET = options.socketPath;
 	return await startWorker({ peer: options.peer, layout, cwd: options.cwd });
 };
 
@@ -191,7 +215,29 @@ export async function bootDaemon(
 		const rooms = await RoomStore.open(join(stateDir, "rooms.db"));
 		started.push(() => rooms.close());
 
-		const scheduler = new Scheduler();
+		const db = await DaemonDb.open(join(stateDir, "daemon.db"));
+		started.push(async () => db.close());
+
+		// Flipped off just before the handle closes: a turn released after
+		// shutdown has judged it must not reach a closed database.
+		let recording = true;
+
+		// The daemon's clock, not the scheduler's own: `armCron` computes a
+		// schedule's next fire from `now`, and a scheduler timing its timers off
+		// a different clock would arm them against a deadline nobody else agrees
+		// with.
+		const scheduler = new Scheduler({
+			now,
+			setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
+			clearTimer: (handle) => {
+				// The handle is whatever `setTimer` just returned — a Bun timer —
+				// but `TimerHandle` is declared `unknown`, so the compiler cannot
+				// carry that through and there is nothing to check at runtime.
+				const timer = handle as Timer;
+				clearTimeout(timer);
+			},
+			onError: (error, jobId) => log(`schedule ${jobId}: ${String(error)}`),
+		});
 		scheduler.start();
 		started.push(async () => scheduler.stop());
 
@@ -206,6 +252,15 @@ export async function bootDaemon(
 		const knownRooms = new Map<string, RoomInfo>();
 		const schedules = new Map<string, ScheduleRecord>();
 		const definitions = new Map<string, PeerDefinition>();
+
+		/**
+		 * Why the turn being delivered is happening. The supervisor decides who
+		 * to prompt, so the trigger is known only where that decision is made —
+		 * the cron handler, or a socket post. Carrying it through async context
+		 * is what lets the run recorder name it without the supervisor growing a
+		 * parameter for the daemon's bookkeeping.
+		 */
+		const triggerContext = new AsyncLocalStorage<RunTrigger>();
 
 		const ensureRoom = async (id: string): Promise<void> => {
 			if (knownRooms.has(id)) return;
@@ -226,6 +281,46 @@ export async function bootDaemon(
 			definitions.set(definition.name, definition);
 		}
 		const discoveredAgentNames = [...definitions.keys()];
+
+		/**
+		 * Wrap a worker so every delivered turn leaves exactly one run row.
+		 *
+		 * The supervisor is what decides to prompt, so this wrapper is the only
+		 * place a turn is observable start to finish. The row opens before the
+		 * prompt and closes after it, including when the turn throws: a failed
+		 * turn is the one an operator most needs to find, and the alternative to
+		 * recording it is a history that only ever shows successes.
+		 */
+		const recordRuns = (worker: SupervisedWorker): SupervisedWorker => ({
+			get name() {
+				return worker.name;
+			},
+			get state() {
+				return worker.state;
+			},
+			prompt: async (message) => {
+				if (!recording) return await worker.prompt(message);
+				const id = db.startRun({
+					agent: worker.name,
+					trigger: triggerContext.getStore() ?? "room",
+					startedAt: now(),
+				});
+				try {
+					await worker.prompt(message);
+					// The turn may have outlived the daemon: shutdown already closed
+					// this row as interrupted, and `finishRun` leaves it that way.
+					if (recording) db.finishRun({ id, outcome: "ok", endedAt: now() });
+				} catch (error) {
+					if (recording) {
+						db.finishRun({ id, outcome: "error", endedAt: now() });
+					}
+					throw error;
+				}
+			},
+			park: () => worker.park(),
+			resume: () => worker.resume(),
+			stop: () => worker.stop(),
+		});
 
 		/**
 		 * Raw markdown for each agent a peer names in `spawns:`.
@@ -279,23 +374,26 @@ export async function bootDaemon(
 			}
 
 			const accountId = accountIdFor(definition);
-			const worker = await workerFactory({
-				peer: definition,
-				cwd: projectDir,
-				rootDir: join(stateDir, "workers", name),
-				discoveredAgentNames,
-				inferenceGateway: {
-					url: gateway.url,
-					// Bound to no credential ids yet: the account-to-credential
-					// mapping is T-506's, and an unbound token sees nothing rather
-					// than everything.
-					token: gateway.issueWorkerToken({
-						workerId: name,
-						credentialIds: [],
-					}).token,
-				},
-				sourceSpawnAgents: await spawnSourcesFor(definition),
-			});
+			const worker = recordRuns(
+				await workerFactory({
+					peer: definition,
+					cwd: projectDir,
+					rootDir: join(stateDir, "workers", name),
+					discoveredAgentNames,
+					inferenceGateway: {
+						url: gateway.url,
+						// Bound to no credential ids yet: the account-to-credential
+						// mapping is T-506's, and an unbound token sees nothing rather
+						// than everything.
+						token: gateway.issueWorkerToken({
+							workerId: name,
+							credentialIds: [],
+						}).token,
+					},
+					sourceSpawnAgents: await spawnSourcesFor(definition),
+					socketPath,
+				}),
+			);
 
 			const peerRooms = definition.rooms ?? [];
 			for (const room of peerRooms) await ensureRoom(room);
@@ -319,6 +417,16 @@ export async function bootDaemon(
 					: definition.model,
 				rooms: peerRooms,
 			});
+			// Write-through: the live map above is what requests read, and this
+			// row is what a restart and the orphan sweep read instead of guessing.
+			db.upsertAgent({
+				name,
+				definitionPath: definitionPathFor(definition),
+				status: worker.state,
+				workerPid: null,
+				cwd: projectDir,
+				startedAt: now(),
+			});
 			return { name, state: worker.state };
 		};
 
@@ -339,22 +447,45 @@ export async function bootDaemon(
 				nextFireAt: nextCronTime(schedule.cron, now()),
 			};
 			schedules.set(id, record);
+			db.upsertSchedule({
+				id,
+				cron: schedule.cron,
+				action: schedule.prompt,
+				payload: room === undefined ? null : JSON.stringify({ room }),
+				nextFireAt: record.nextFireAt,
+				enabled: true,
+			});
 			scheduler.add(id, {
 				cron: schedule.cron,
 				handler: async () => {
 					record.nextFireAt = nextCronTime(schedule.cron, now());
+					db.setScheduleNextFire(id, record.nextFireAt);
 					if (room === undefined) return;
 					await ensureRoom(room);
 					// Posting through the supervisor is what wakes the peer; writing
-					// to the store directly would fire into an empty room.
-					await supervisor.post({
-						room,
-						author: HUMAN_AUTHOR,
-						body: schedule.prompt,
+					// to the store directly would fire into an empty room. The
+					// trigger rides along so the run this produces is recorded as
+					// the schedule firing rather than as somebody typing.
+					await triggerContext.run(`schedule:${id}` as RunTrigger, async () => {
+						await supervisor.post({
+							room,
+							author: HUMAN_AUTHOR,
+							body: schedule.prompt,
+						});
 					});
 				},
 			});
 		};
+
+		/**
+		 * Whether an operator disarmed a schedule before the last shutdown. The
+		 * definition on disk still declares it, so a boot that re-armed
+		 * everything it found would quietly undo that decision — this is the one
+		 * piece of schedule state no file carries.
+		 */
+		const persisted = new Map(
+			db.listSchedules().map((schedule) => [schedule.id, schedule]),
+		);
 
 		for (const definition of definitions.values()) {
 			try {
@@ -369,7 +500,22 @@ export async function bootDaemon(
 			const declaredSchedules = definition.schedules ?? [];
 			for (let index = 0; index < declaredSchedules.length; index++) {
 				const schedule = declaredSchedules[index];
-				if (schedule) armCron(definition, schedule, index);
+				if (!schedule) continue;
+				const id = `${definition.name}:schedule:${index}`;
+				if (persisted.get(id)?.enabled === false) {
+					// Restored as the operator left it: listed, but with no timer and
+					// no next fire, which is what disarmed means everywhere else.
+					schedules.set(id, {
+						id,
+						peer: definition.name,
+						cron: schedule.cron,
+						action: schedule.prompt,
+						enabled: false,
+						nextFireAt: null,
+					});
+					continue;
+				}
+				armCron(definition, schedule, index);
 			}
 
 			// An automation carries no clock, so nothing is scheduled: it is listed
@@ -379,13 +525,23 @@ export async function bootDaemon(
 				const automation = declaredAutomations[index];
 				if (!automation) continue;
 				const id = `${definition.name}:automation:${index}`;
+				const action = `${automation.event}: ${automation.prompt}`;
+				const enabled = persisted.get(id)?.enabled ?? true;
 				schedules.set(id, {
 					id,
 					peer: definition.name,
 					cron: null,
-					action: `${automation.event}: ${automation.prompt}`,
-					enabled: true,
+					action,
+					enabled,
 					nextFireAt: null,
+				});
+				db.upsertSchedule({
+					id,
+					cron: null,
+					action,
+					payload: null,
+					nextFireAt: null,
+					enabled,
 				});
 			}
 		}
@@ -408,8 +564,14 @@ export async function bootDaemon(
 				} else {
 					scheduler.remove(id);
 					record.nextFireAt = null;
+					db.setScheduleNextFire(id, null);
 				}
 			}
+
+			// The operator's decision is the one thing a restart cannot re-derive
+			// from the definition, so it is written through immediately rather
+			// than at shutdown, which a crash never reaches.
+			db.setScheduleEnabled(id, enabled);
 
 			return {
 				id: record.id,
@@ -439,6 +601,42 @@ export async function bootDaemon(
 				(name) => peers.get(name)?.worker.state === "running",
 			);
 		};
+
+		/**
+		 * Remove `workers/` directories belonging to no registered peer.
+		 *
+		 * The registry is the persisted one, not just the peers this boot
+		 * happened to start: a peer whose definition was moved away still owns
+		 * its materialized root, and a sweep that only knew about live peers
+		 * would delete it. Conservative and loud — each removal is reported,
+		 * because a silent deleter of directories is not something to debug at
+		 * 3am — and a failed removal is logged rather than aborting the boot.
+		 */
+		const sweepOrphanWorkers = async (): Promise<void> => {
+			const workersDir = join(stateDir, "workers");
+			let entries: string[];
+			try {
+				entries = await readdir(workersDir);
+			} catch (error) {
+				// No workers directory yet is the normal first boot, not a fault.
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+				throw error;
+			}
+
+			const known = new Set(db.listAgents().map((agent) => agent.name));
+			for (const entry of entries) {
+				if (known.has(entry)) continue;
+				const path = join(workersDir, entry);
+				try {
+					await rm(path, { recursive: true, force: true });
+					log(`swept orphaned worker directory: ${path}`);
+				} catch (error) {
+					log(`could not sweep ${path}: ${String(error)}`);
+				}
+			}
+		};
+
+		await sweepOrphanWorkers();
 
 		const context: DaemonContext = {
 			rooms,
@@ -478,6 +676,19 @@ export async function bootDaemon(
 					}
 				}
 				scheduler.stop();
+
+				// A turn still in flight belongs to a process about to stop
+				// existing. Closing its row as interrupted is the last write; after
+				// it, `recording` is off so a late completion cannot reopen the
+				// question — or touch a closed database.
+				const interrupted = db.interruptOpenRuns(now());
+				if (interrupted > 0) {
+					log(`closed ${interrupted} interrupted run(s) at shutdown`);
+				}
+				for (const name of peers.keys()) db.markAgentStatus(name, "stopped");
+				recording = false;
+				db.close();
+
 				await gateway.close();
 				await rooms.close();
 				await hosting.close();
