@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-08](../epics/EP-08-agent-hierarchy.md) | [SP-09](../sprints/SP-09-agent-hierarchy.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-08](../epics/EP-08-agent-hierarchy.md) | [SP-09](../sprints/SP-09-agent-hierarchy.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -37,9 +37,16 @@ The control protocol can create definitions, spawn children, and read and update
 
 ## Acceptance
 
-- [ ] Every new method and field validates on params and results, with the offending field named on refusal.
-- [ ] The exact method set in the contract suite matches the implementation.
-- [ ] Older clients remain wire-compatible: every added field is optional.
+- [x] Every new method and field validates on params and results, with the offending field named on refusal.
+- [x] The exact method set in the contract suite matches the implementation.
+- [x] Older clients remain wire-compatible: every added field is optional.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Twenty methods with hierarchy and authoring shapes | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) |
+| Contract suite: exact set plus per-method fixtures | [`tests/protocol.contract.test.ts`](../../../tests/protocol.contract.test.ts) |
 
 ## Out of scope
 

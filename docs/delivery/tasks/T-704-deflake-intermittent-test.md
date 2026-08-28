@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-07](../epics/EP-07-release-readiness.md) | [SP-08](../sprints/SP-08-release-readiness.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-07](../epics/EP-07-release-readiness.md) | [SP-08](../sprints/SP-08-release-readiness.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -31,9 +31,16 @@ The suite is deterministic: the failure seen once in twelve local runs is named,
 
 ## Acceptance
 
-- [ ] The failing test is identified from a captured full log.
-- [ ] Its fix is proven non-vacuous per the working rules.
-- [ ] Ten consecutive full-suite runs pass with the machine under normal load.
+- [x] The failing test is identified from a captured full log.
+- [x] Its fix is proven non-vacuous per the working rules.
+- [x] Ten consecutive full-suite runs pass with the machine under normal load.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Root cause: OMP's legacy-pi compat installs a process-global Bun.plugin onResolve hook that memo-corrupted import.meta.resolve for @oh-my-pi/* — deterministic ordering, not a race | [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) |
+| Ten consecutive full-suite runs green; resolver shared by both spawn paths and the tests (ADR-008) | [`tests/skills.test.ts`](../../../tests/skills.test.ts) |
 
 ## Out of scope
 

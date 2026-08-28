@@ -2394,7 +2394,7 @@ TASKS += [
     ),
     Task(
         id="T-704", slug="deflake-intermittent-test", title="Identify and fix the intermittent test failure",
-        epic="EP-07", sprint="SP-08", status="Blocked",
+        epic="EP-07", sprint="SP-08", status="Done",
         goal="The suite is deterministic: the failure seen once in twelve local runs is named, reproduced, and fixed.",
         read_first=[ARCH, ("Test harness", "tests/harness.test.ts")],
         files=["tests/"],
@@ -2411,6 +2411,10 @@ TASKS += [
             "Its fix is proven non-vacuous per the working rules.",
             "Ten consecutive full-suite runs pass with the machine under normal load.",
         ],
+        evidence=[
+            ("Root cause: OMP's legacy-pi compat installs a process-global Bun.plugin onResolve hook that memo-corrupted import.meta.resolve for @oh-my-pi/* — deterministic ordering, not a race", "src/worker/lifecycle.ts"),
+            ("Ten consecutive full-suite runs green; resolver shared by both spawn paths and the tests (ADR-008)", "tests/skills.test.ts"),
+        ],
         out_of_scope=[
             "Deleting or skipping the flaky test. A skipped test is an admission the behavior is unspecified.",
         ],
@@ -2421,7 +2425,7 @@ TASKS += [
     # ── EP-08: agent hierarchy and authoring ──────────────────────────────────
     Task(
         id="T-801", slug="hierarchy-protocol", title="Hierarchy and authoring protocol",
-        epic="EP-08", sprint="SP-09", status="Ready",
+        epic="EP-08", sprint="SP-09", status="Done",
         goal="The control protocol can create definitions, spawn children, and read and update definitions — additively, no version bump.",
         read_first=[
             ARCH,
@@ -2450,11 +2454,15 @@ TASKS += [
             "Older clients remain wire-compatible: every added field is optional.",
         ],
         depends_on=["T-507", "T-605"],
+        evidence=[
+            ("Twenty methods with hierarchy and authoring shapes", "src/shared/protocol.ts"),
+            ("Contract suite: exact set plus per-method fixtures", "tests/protocol.contract.test.ts"),
+        ],
         out_of_scope=["Serving any of it, which is T-802; TUI consumption, which is EP-09."],
     ),
     Task(
         id="T-802", slug="daemon-hierarchy", title="Daemon hierarchy: parented spawns, cascades, orphan refusal",
-        epic="EP-08", sprint="SP-09", status="Ready",
+        epic="EP-08", sprint="SP-09", status="Done",
         goal="The daemon records who deployed whom, enforces the hierarchy rules, and never leaves an orphan running.",
         read_first=[
             ARCH,
@@ -2489,6 +2497,10 @@ TASKS += [
             "A definition update that changes policy is followed by a rebuild on next delivery (T-505's path, exercised end to end).",
         ],
         depends_on=["T-801"],
+        evidence=[
+            ("Hierarchy state and rules in the daemon", "src/daemon/main.ts"),
+            ("Hierarchy suite, 30 tests with 18 revert-probes", "tests/daemon-hierarchy.test.ts"),
+        ],
         out_of_scope=["The toolbelt caller side (T-803) and the TUI tree (EP-09)."],
     ),
     Task(

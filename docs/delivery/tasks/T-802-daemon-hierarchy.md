@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-08](../epics/EP-08-agent-hierarchy.md) | [SP-09](../sprints/SP-09-agent-hierarchy.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-08](../epics/EP-08-agent-hierarchy.md) | [SP-09](../sprints/SP-09-agent-hierarchy.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -40,12 +40,19 @@ The daemon records who deployed whom, enforces the hierarchy rules, and never le
 
 ## Acceptance
 
-- [ ] A spawned child persists its parent across a daemon restart.
-- [ ] A cycle is rejected at spawn with the path named.
-- [ ] Killing a parent stops its children; keep-children reparents them to root.
-- [ ] An agent whose parent is gone is not woken at boot and is flagged orphaned.
-- [ ] A child inherits the parent's account and joins the family channel, not the parent's rooms.
-- [ ] A definition update that changes policy is followed by a rebuild on next delivery (T-505's path, exercised end to end).
+- [x] A spawned child persists its parent across a daemon restart.
+- [x] A cycle is rejected at spawn with the path named.
+- [x] Killing a parent stops its children; keep-children reparents them to root.
+- [x] An agent whose parent is gone is not woken at boot and is flagged orphaned.
+- [x] A child inherits the parent's account and joins the family channel, not the parent's rooms.
+- [x] A definition update that changes policy is followed by a rebuild on next delivery (T-505's path, exercised end to end).
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Hierarchy state and rules in the daemon | [`src/daemon/main.ts`](../../../src/daemon/main.ts) |
+| Hierarchy suite, 30 tests with 18 revert-probes | [`tests/daemon-hierarchy.test.ts`](../../../tests/daemon-hierarchy.test.ts) |
 
 ## Out of scope
 

@@ -1,6 +1,6 @@
 # EP-07 — Release readiness: CI, lint, and a README a stranger can act on
 
-**Status:** Blocked
+**Status:** Done
 
 *Derived from the tasks below.*
 
@@ -26,11 +26,11 @@ Everything else in this tree is verified by a suite somebody has to remember to 
 
 ## Acceptance
 
-- [ ] A push runs `tsc --noEmit` and `bun test` and fails the build on either.
-- [ ] A commit whose `docs/delivery/` differs from what the generator produces fails CI.
-- [ ] `bun run lint` reports the same result locally and in CI.
-- [ ] The root README explains what the plugin is, how to install it, and where the delivery tree lives.
-- [ ] `package.json` carries repository, homepage, bugs, keywords, an engines constraint, and the MIT license field matching `LICENSE` (ADR-010).
+- [x] A push runs `tsc --noEmit` and `bun test` and fails the build on either.
+- [x] A commit whose `docs/delivery/` differs from what the generator produces fails CI.
+- [x] `bun run lint` reports the same result locally and in CI.
+- [x] The root README explains what the plugin is, how to install it, and where the delivery tree lives.
+- [x] `package.json` carries repository, homepage, bugs, keywords, an engines constraint, and the MIT license field matching `LICENSE` (ADR-010).
 
 ## Decisions
 
@@ -43,4 +43,4 @@ Everything else in this tree is verified by a suite somebody has to remember to 
 | [T-701](../tasks/T-701-ci-workflow.md) | CI: typecheck, test, and delivery-doc drift | Done |
 | [T-702](../tasks/T-702-biome-lint.md) | Biome lint and format configuration | Done |
 | [T-703](../tasks/T-703-root-readme-and-metadata.md) | Root README and package metadata | Done |
-| [T-704](../tasks/T-704-deflake-intermittent-test.md) | Identify and fix the intermittent test failure | Blocked |
+| [T-704](../tasks/T-704-deflake-intermittent-test.md) | Identify and fix the intermittent test failure | Done |
