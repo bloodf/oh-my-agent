@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,16 +39,26 @@ afterEach(async () => {
 
 async function harness(): Promise<{
 	tools: Map<string, ToolDefinition>;
+	rooms: RoomStore;
+	supervisor: Supervisor;
 	spawnCalls: string[];
 	transportMethods: string[];
 	workerPrompts: string[];
 	socketPath: string;
 }> {
-	const agentDir = await mkdtemp(join(tmpdir(), "oma-toolbelt-"));
-	const stateDir = join(agentDir, "oh-my-agent");
-	const socketPath = join(stateDir, "daemon.sock");
-	const productionSocketPath = join(stateDir, "production.sock");
-	const rooms = await RoomStore.open(join(stateDir, "rooms.sqlite"));
+	const rootDir = await mkdtemp(join(tmpdir(), "oma-toolbelt-"));
+	const agentDir = join(
+		rootDir,
+		"workers",
+		"reviewer",
+		"home",
+		".omp",
+		"agent",
+	);
+	await mkdir(agentDir, { recursive: true });
+	const socketPath = join(rootDir, "daemon.sock");
+	const productionSocketPath = join(rootDir, "production.sock");
+	const rooms = await RoomStore.open(join(rootDir, "rooms.sqlite"));
 	await rooms.createRoom({ id: "#general", kind: "channel" });
 
 	const workerPrompts: string[] = [];
@@ -109,33 +119,81 @@ async function harness(): Promise<{
 		idleTimeout: 0,
 		fetch: async (request: Request) => {
 			const body = await request.text();
-			const frame: unknown = JSON.parse(body);
-			if (typeof frame === "object" && frame !== null && "method" in frame) {
-				transportMethods.push(String(frame.method));
+			const frame = JSON.parse(body) as {
+				id?: unknown;
+				method?: unknown;
+				params?: Record<string, unknown>;
+			};
+			const method = String(frame.method);
+			transportMethods.push(method);
+			if (method === "chat_react" || method === "chat_unreact") {
+				const messageId = Number(frame.params?.messageId);
+				const emoji = String(frame.params?.emoji);
+				const actor = frame.params?.actor;
+				if (typeof actor !== "string" || actor.length === 0) {
+					throw new Error("reaction actor is required");
+				}
+				if (method === "chat_react") await rooms.react(messageId, actor, emoji);
+				else await rooms.unreact(messageId, actor, emoji);
+				return Response.json({
+					jsonrpc: "2.0",
+					id: frame.id,
+					result: { messageId, emoji, reacted: method === "chat_react" },
+				});
 			}
-			return await fetch("http://localhost/rpc", {
+
+			const response = await fetch("http://localhost/rpc", {
 				unix: productionSocketPath,
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body,
 			});
+			if (method !== "chat_read" || !response.ok) return response;
+
+			// Production protocol intentionally lacks reactions. Enrich only this
+			// test observer after forwarding the unchanged read request.
+			const payload = (await response.json()) as {
+				result?: { messages?: Array<Record<string, unknown> & { id: number }> };
+			};
+			const stored = await rooms.listMessages(String(frame.params?.room), {
+				afterId: frame.params?.sinceId as number | undefined,
+				limit: frame.params?.limit as number | undefined,
+			});
+			const reactions = new Map(
+				stored.map((message) => [message.id, message.reactions]),
+			);
+			if (payload.result?.messages) {
+				payload.result.messages = payload.result.messages.map((message) => ({
+					...message,
+					reactions: reactions.get(message.id) ?? [],
+				}));
+			}
+			return Response.json(payload);
 		},
 	} as unknown as Bun.Serve.Options<undefined>);
 	cleanups.push(async () => {
 		proxy.stop(true);
 		await socket.close();
 		rooms.close();
-		await rm(agentDir, { recursive: true, force: true });
+		await rm(rootDir, { recursive: true, force: true });
 	});
 
 	process.env.PI_CODING_AGENT_DIR = agentDir;
-	process.env.OH_MY_AGENT_SOCKET = socketPath;
+	delete process.env.OH_MY_AGENT_SOCKET;
 	const tools = new Map<string, ToolDefinition>();
 	toolbeltExtension({
 		zod,
 		registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
 	} as unknown as ExtensionAPI);
-	return { tools, spawnCalls, transportMethods, workerPrompts, socketPath };
+	return {
+		tools,
+		rooms,
+		supervisor,
+		spawnCalls,
+		transportMethods,
+		workerPrompts,
+		socketPath,
+	};
 }
 
 async function invoke(
@@ -158,19 +216,42 @@ function text(result: ToolResult): string {
 	return result.content.map((part) => part.text ?? "").join("\n");
 }
 
+function messageId(result: ToolResult): number {
+	const details = result.details;
+	if (
+		typeof details !== "object" ||
+		details === null ||
+		!("messageId" in details) ||
+		typeof details.messageId !== "number"
+	) {
+		throw new Error("Expected numeric messageId");
+	}
+	return details.messageId;
+}
+
 describe("worker toolbelt", () => {
-	test("registers the six additive tools and states the native task contract", async () => {
+	test("registers eight additive tools and states their conventions", async () => {
 		const { tools } = await harness();
 		expect([...tools.keys()]).toEqual([
 			"chat_send",
 			"chat_read",
 			"chat_wait",
+			"chat_react",
+			"chat_unreact",
 			"agent_spawn",
 			"agent_status",
 			"task_handoff",
 		]);
 		expect(tools.get("agent_spawn")?.description).toContain("durable peer");
 		expect(tools.get("agent_spawn")?.description).toContain("native task");
+		const reactionDescription = tools.get("chat_react")?.description ?? "";
+		for (const convention of ["👀", "⏳", "✅", "❌"]) {
+			expect(reactionDescription).toContain(convention);
+		}
+		expect(reactionDescription).toContain("reading/picked-up");
+		expect(reactionDescription).toContain("in-progress");
+		expect(reactionDescription).toContain("done");
+		expect(reactionDescription).toContain("blocked/failed");
 	});
 
 	test("a real OMP child keeps native task while loading the toolbelt", async () => {
@@ -295,6 +376,177 @@ describe("worker toolbelt", () => {
 		expect(transportMethods).toEqual(["chat_wait", "chat_send"]);
 	});
 
+	test("a reaction is visible to readers and duplicate adds stay singular", async () => {
+		const { tools } = await harness();
+		const sent = await invoke(tools, "chat_send", {
+			room: "#general",
+			author: "coordinator",
+			body: "Take this task",
+		});
+		const id = messageId(sent);
+
+		await invoke(tools, "chat_react", { messageId: id, emoji: "👀" });
+		await invoke(tools, "chat_react", { messageId: id, emoji: "👀" });
+
+		for (let reader = 0; reader < 2; reader++) {
+			const read = await invoke(tools, "chat_read", { room: "#general" });
+			expect(read.details).toMatchObject({
+				messages: [
+					{
+						id,
+						reactions: [{ actor: "reviewer", emoji: "👀" }],
+					},
+				],
+			});
+		}
+	});
+
+	test("rejects invalid reaction message IDs before transport", async () => {
+		const { tools, transportMethods } = await harness();
+		for (const messageId of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+			const result = await invoke(tools, "chat_react", {
+				messageId,
+				emoji: "👀",
+			});
+			expect(result.isError).toBe(true);
+			expect(transportMethods).toEqual([]);
+		}
+
+		const sent = await invoke(tools, "chat_send", {
+			room: "#general",
+			author: "coordinator",
+			body: "React to this",
+		});
+		const id = messageId(sent);
+		transportMethods.length = 0;
+
+		await invoke(tools, "chat_react", { messageId: id, emoji: "👀" });
+		expect(transportMethods).toEqual(["chat_react"]);
+	});
+
+	test("rejects an unknown reaction emoji returned by the daemon", async () => {
+		const rootDir = await mkdtemp(join(tmpdir(), "oma-reaction-result-"));
+		const socketPath = join(rootDir, "daemon.sock");
+		const agentDir = join(
+			rootDir,
+			"workers",
+			"reviewer",
+			"home",
+			".omp",
+			"agent",
+		);
+		await mkdir(agentDir, { recursive: true });
+		const daemon = Bun.serve({
+			unix: socketPath,
+			fetch: async (request: Request) => {
+				const frame = (await request.json()) as { id: unknown };
+				return Response.json({
+					jsonrpc: "2.0",
+					id: frame.id,
+					result: { messageId: 1, emoji: "🎉", reacted: true },
+				});
+			},
+		} as unknown as Bun.Serve.Options<undefined>);
+		cleanups.push(async () => {
+			daemon.stop(true);
+			await rm(rootDir, { recursive: true, force: true });
+		});
+		process.env.OH_MY_AGENT_SOCKET = socketPath;
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		const tools = new Map<string, ToolDefinition>();
+		toolbeltExtension({
+			zod,
+			registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
+		} as unknown as ExtensionAPI);
+
+		const result = await invoke(tools, "chat_react", {
+			messageId: 1,
+			emoji: "👀",
+		});
+		expect(result.isError).toBe(true);
+		expect(text(result)).toContain("emoji");
+	});
+
+	test("rejects unknown reactions locally with a non-vacuous transport guard", async () => {
+		const { tools, transportMethods, socketPath } = await harness();
+		const sent = await invoke(tools, "chat_send", {
+			room: "#general",
+			author: "coordinator",
+			body: "Status this",
+		});
+		const id = messageId(sent);
+		transportMethods.length = 0;
+
+		// Negative control: the seam accepts any non-empty store reaction, so this
+		// invalid status reaches transport if the toolbelt omits its closed-set guard.
+		await fetch("http://localhost/rpc", {
+			unix: socketPath,
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: "negative-control",
+				method: "chat_react",
+				params: { messageId: id, actor: "reviewer", emoji: "🎉" },
+			}),
+		});
+		expect(transportMethods).toEqual(["chat_react"]);
+		transportMethods.length = 0;
+
+		const result = await invoke(tools, "chat_react", {
+			messageId: id,
+			emoji: "🎉",
+		});
+		expect(result.isError).toBe(true);
+		for (const allowed of ["👀", "⏳", "✅", "❌"]) {
+			expect(text(result)).toContain(allowed);
+		}
+		expect(transportMethods).toEqual([]);
+	});
+
+	test("a reaction neither marks unread nor changes wake delivery", async () => {
+		const { tools, rooms, supervisor, workerPrompts } = await harness();
+		const message = await rooms.post({
+			room: "#general",
+			author: "coordinator",
+			body: "Still wake reviewer",
+		});
+		expect(await rooms.unreadCount("reviewer", "#general")).toBe(1);
+
+		await invoke(tools, "chat_react", { messageId: message.id, emoji: "⏳" });
+		expect(await rooms.unreadCount("reviewer", "#general")).toBe(1);
+		expect(workerPrompts).toEqual([]);
+
+		expect(await supervisor.deliver("reviewer")).toBe(true);
+		expect(workerPrompts).toEqual([
+			"[#general] coordinator: Still wake reviewer",
+		]);
+		expect(await rooms.unreadCount("reviewer", "#general")).toBe(0);
+	});
+
+	test("chat_unreact removes a reaction and repeated removal is a no-op", async () => {
+		const { tools } = await harness();
+		const sent = await invoke(tools, "chat_send", {
+			room: "#general",
+			author: "coordinator",
+			body: "Clear status",
+		});
+		const id = messageId(sent);
+		await invoke(tools, "chat_react", { messageId: id, emoji: "✅" });
+
+		for (let removal = 0; removal < 2; removal++) {
+			const result = await invoke(tools, "chat_unreact", {
+				messageId: id,
+				emoji: "✅",
+			});
+			expect(result.isError).toBeUndefined();
+		}
+		const read = await invoke(tools, "chat_read", { room: "#general" });
+		expect(read.details).toMatchObject({
+			messages: [{ id, reactions: [] }],
+		});
+	});
+
 	test("refuses one-shot subtasks locally and proves the guard is non-vacuous", async () => {
 		const { tools, spawnCalls, socketPath } = await harness();
 
@@ -356,8 +608,10 @@ describe("worker toolbelt", () => {
 	});
 
 	test("rejects daemon results that violate the METHODS contract", async () => {
-		const agentDir = await mkdtemp(join(tmpdir(), "oma-toolbelt-invalid-"));
-		const socketPath = join(agentDir, "daemon.sock");
+		const rootDir = await mkdtemp(join(tmpdir(), "oma-toolbelt-invalid-"));
+		const agentDir = join(rootDir, "workers", "reviewer");
+		await mkdir(agentDir, { recursive: true });
+		const socketPath = join(rootDir, "daemon.sock");
 		const server = Bun.serve({
 			unix: socketPath,
 			fetch: () =>
@@ -365,9 +619,10 @@ describe("worker toolbelt", () => {
 		});
 		cleanups.push(async () => {
 			server.stop(true);
-			await rm(agentDir, { recursive: true, force: true });
+			await rm(rootDir, { recursive: true, force: true });
 		});
 		process.env.OH_MY_AGENT_SOCKET = socketPath;
+		process.env.PI_CODING_AGENT_DIR = agentDir;
 
 		const tools = new Map<string, ToolDefinition>();
 		toolbeltExtension({

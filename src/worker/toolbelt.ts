@@ -1,11 +1,12 @@
 /**
- * Purpose: Expose the worker's six daemon-backed collaboration tools without
+ * Purpose: Expose the worker's eight daemon-backed collaboration tools without
  *          giving worker processes direct access to daemon state or room data.
  *
  * Public API: default extension factory `(pi: ExtensionAPI): void`.
  *
  * Upstream deps: OMP ExtensionAPI and agent-dir resolution, the T-507 METHODS
- *                registry, Bun's unix-socket fetch, and classifyAgentSpawn.
+ *                registry, local reaction validation pending protocol support,
+ *                Bun's unix-socket fetch, and classifyAgentSpawn.
  *
  * Downstream consumers: materialized OMP worker sessions.
  *
@@ -22,7 +23,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 
 import type { AgentSpawnParams, MethodName } from "../shared/protocol";
-import { METHODS } from "../shared/protocol-schemas";
+import { METHODS, type Validation } from "../shared/protocol-schemas";
 import { classifyAgentSpawn } from "./lifecycle";
 
 const TOOL_NAMES = [
@@ -40,6 +41,92 @@ interface ToolResult {
 	isError?: boolean;
 }
 
+const REACTION_EMOJIS = ["👀", "⏳", "✅", "❌"] as const;
+type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
+type ReactionMethod = "chat_react" | "chat_unreact";
+
+interface ReactionParams {
+	messageId: number;
+	emoji: ReactionEmoji;
+}
+
+interface ReactionResult {
+	messageId: number;
+	emoji: ReactionEmoji;
+	reacted: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateReactionParams(value: unknown): Validation<ReactionParams> {
+	if (!isRecord(value)) {
+		return { ok: false, field: "params", message: "expected an object" };
+	}
+	if (
+		typeof value.messageId !== "number" ||
+		!Number.isSafeInteger(value.messageId) ||
+		value.messageId <= 0
+	) {
+		return {
+			ok: false,
+			field: "messageId",
+			message: "messageId must be a positive safe integer",
+		};
+	}
+	if (!REACTION_EMOJIS.includes(value.emoji as ReactionEmoji)) {
+		return {
+			ok: false,
+			field: "emoji",
+			message: `emoji must be one of ${REACTION_EMOJIS.join(", ")}`,
+		};
+	}
+	return {
+		ok: true,
+		value: { messageId: value.messageId, emoji: value.emoji as ReactionEmoji },
+	};
+}
+
+function validateReactionResult(value: unknown): Validation<ReactionResult> {
+	if (!isRecord(value)) {
+		return { ok: false, field: "result", message: "expected an object" };
+	}
+	if (
+		typeof value.messageId !== "number" ||
+		!Number.isSafeInteger(value.messageId) ||
+		value.messageId <= 0
+	) {
+		return {
+			ok: false,
+			field: "messageId",
+			message: "messageId must be a positive safe integer",
+		};
+	}
+	if (!REACTION_EMOJIS.includes(value.emoji as ReactionEmoji)) {
+		return {
+			ok: false,
+			field: "emoji",
+			message: `emoji must be one of ${REACTION_EMOJIS.join(", ")}`,
+		};
+	}
+	if (typeof value.reacted !== "boolean") {
+		return {
+			ok: false,
+			field: "reacted",
+			message: "reacted must be a boolean",
+		};
+	}
+	return {
+		ok: true,
+		value: {
+			messageId: value.messageId,
+			emoji: value.emoji as ReactionEmoji,
+			reacted: value.reacted,
+		},
+	};
+}
+
 const toolError = (message: string): ToolResult => ({
 	content: [{ type: "text", text: message }],
 	isError: true,
@@ -47,20 +134,28 @@ const toolError = (message: string): ToolResult => ({
 
 export default function toolbeltExtension(pi: ExtensionAPI): void {
 	const agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir();
+	const materializedWorker =
+		basename(dirname(agentDir)) === ".omp" &&
+		basename(dirname(dirname(dirname(dirname(agentDir))))) === "workers";
+	const actor = materializedWorker
+		? basename(resolve(agentDir, "../../.."))
+		: undefined;
 	const socketPath =
 		process.env.OH_MY_AGENT_SOCKET ??
-		(basename(dirname(agentDir)) === ".omp" &&
-		basename(dirname(dirname(dirname(dirname(agentDir))))) === "workers"
+		(materializedWorker
 			? resolve(agentDir, "../../../../../daemon.sock")
 			: join(agentDir, "oh-my-agent", "daemon.sock"));
 	let requestId = 0;
 
-	const call = async (
-		method: (typeof TOOL_NAMES)[number],
+	const callValidated = async <TParams, TResult>(
+		method: string,
 		params: unknown,
+		validateParams: (value: unknown) => Validation<TParams>,
+		validateResult: (value: unknown) => Validation<TResult>,
 		signal?: AbortSignal,
+		mapParams?: (value: TParams) => unknown,
 	): Promise<ToolResult> => {
-		const input = METHODS[method].validateParams(params);
+		const input = validateParams(params);
 		if (!input.ok) {
 			return toolError(`${input.field}: ${input.message}`);
 		}
@@ -75,7 +170,7 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 					jsonrpc: "2.0",
 					id: ++requestId,
 					method,
-					params: input.value,
+					params: mapParams ? mapParams(input.value) : input.value,
 				}),
 				signal,
 			});
@@ -102,7 +197,7 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 		if (!("result" in frame)) {
 			return toolError("oh-my-agent daemon returned an invalid response");
 		}
-		const output = METHODS[method].validateResult(frame.result);
+		const output = validateResult(frame.result);
 		if (!output.ok) {
 			return toolError(
 				`${method} result violates protocol at ${output.field}: ${output.message}`,
@@ -112,6 +207,43 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 			content: [{ type: "text", text: JSON.stringify(output.value) }],
 			details: output.value,
 		};
+	};
+
+	const call = async (
+		method: (typeof TOOL_NAMES)[number],
+		params: unknown,
+		signal?: AbortSignal,
+	): Promise<ToolResult> =>
+		await callValidated(
+			method,
+			params,
+			METHODS[method].validateParams,
+			METHODS[method].validateResult,
+			signal,
+		);
+
+	const callReaction = async (
+		method: ReactionMethod,
+		params: unknown,
+		signal?: AbortSignal,
+	): Promise<ToolResult> => {
+		const input = validateReactionParams(params);
+		if (!input.ok) {
+			return toolError(`${input.field}: ${input.message}`);
+		}
+		if (actor === undefined) {
+			return toolError(
+				"reaction actor unavailable outside a materialized worker",
+			);
+		}
+		return await callValidated(
+			method,
+			input.value,
+			() => input,
+			validateReactionResult,
+			signal,
+			(value) => ({ ...value, actor }),
+		);
 	};
 
 	const z = pi.zod;
@@ -159,6 +291,35 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 		approval: "read",
 		execute: async (_id, params, signal) =>
 			await call("chat_wait", params, signal),
+	});
+
+	const reactionDescription =
+		"Use reactions to communicate status without chat noise: 👀 reading/picked-up, ⏳ in-progress, ✅ done, ❌ blocked/failed.";
+	const reactionParameters = z.object({
+		messageId: z.number().describe("Message id"),
+		emoji: z.string().describe("One of 👀, ⏳, ✅, ❌"),
+	});
+
+	pi.registerTool({
+		name: "chat_react",
+		label: "Add chat reaction",
+		description: reactionDescription,
+		loadMode: "essential",
+		parameters: reactionParameters,
+		approval: "write",
+		execute: async (_id, params, signal) =>
+			await callReaction("chat_react", params, signal),
+	});
+
+	pi.registerTool({
+		name: "chat_unreact",
+		label: "Remove chat reaction",
+		description: reactionDescription,
+		loadMode: "essential",
+		parameters: reactionParameters,
+		approval: "write",
+		execute: async (_id, params, signal) =>
+			await callReaction("chat_unreact", params, signal),
 	});
 
 	pi.registerTool({
