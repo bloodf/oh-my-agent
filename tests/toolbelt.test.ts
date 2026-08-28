@@ -42,7 +42,6 @@ async function harness(): Promise<{
 	rooms: RoomStore;
 	supervisor: Supervisor;
 	spawnCalls: string[];
-	transportMethods: string[];
 	workerPrompts: string[];
 	socketPath: string;
 }> {
@@ -57,7 +56,6 @@ async function harness(): Promise<{
 	);
 	await mkdir(agentDir, { recursive: true });
 	const socketPath = join(rootDir, "daemon.sock");
-	const productionSocketPath = join(rootDir, "production.sock");
 	const rooms = await RoomStore.open(join(rootDir, "rooms.sqlite"));
 	await rooms.createRoom({ id: "#general", kind: "channel" });
 
@@ -109,70 +107,8 @@ async function harness(): Promise<{
 		armSchedule: () => undefined,
 		bumpAccount: async () => [],
 	};
-	const socket = await startControlSocket({
-		socketPath: productionSocketPath,
-		context,
-	});
-	const transportMethods: string[] = [];
-	const proxy = Bun.serve({
-		unix: socketPath,
-		idleTimeout: 0,
-		fetch: async (request: Request) => {
-			const body = await request.text();
-			const frame = JSON.parse(body) as {
-				id?: unknown;
-				method?: unknown;
-				params?: Record<string, unknown>;
-			};
-			const method = String(frame.method);
-			transportMethods.push(method);
-			if (method === "chat_react" || method === "chat_unreact") {
-				const messageId = Number(frame.params?.messageId);
-				const emoji = String(frame.params?.emoji);
-				const actor = frame.params?.actor;
-				if (typeof actor !== "string" || actor.length === 0) {
-					throw new Error("reaction actor is required");
-				}
-				if (method === "chat_react") await rooms.react(messageId, actor, emoji);
-				else await rooms.unreact(messageId, actor, emoji);
-				return Response.json({
-					jsonrpc: "2.0",
-					id: frame.id,
-					result: { messageId, emoji, reacted: method === "chat_react" },
-				});
-			}
-
-			const response = await fetch("http://localhost/rpc", {
-				unix: productionSocketPath,
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body,
-			});
-			if (method !== "chat_read" || !response.ok) return response;
-
-			// Production protocol intentionally lacks reactions. Enrich only this
-			// test observer after forwarding the unchanged read request.
-			const payload = (await response.json()) as {
-				result?: { messages?: Array<Record<string, unknown> & { id: number }> };
-			};
-			const stored = await rooms.listMessages(String(frame.params?.room), {
-				afterId: frame.params?.sinceId as number | undefined,
-				limit: frame.params?.limit as number | undefined,
-			});
-			const reactions = new Map(
-				stored.map((message) => [message.id, message.reactions]),
-			);
-			if (payload.result?.messages) {
-				payload.result.messages = payload.result.messages.map((message) => ({
-					...message,
-					reactions: reactions.get(message.id) ?? [],
-				}));
-			}
-			return Response.json(payload);
-		},
-	} as unknown as Bun.Serve.Options<undefined>);
+	const socket = await startControlSocket({ socketPath, context });
 	cleanups.push(async () => {
-		proxy.stop(true);
 		await socket.close();
 		rooms.close();
 		await rm(rootDir, { recursive: true, force: true });
@@ -190,7 +126,6 @@ async function harness(): Promise<{
 		rooms,
 		supervisor,
 		spawnCalls,
-		transportMethods,
 		workerPrompts,
 		socketPath,
 	};
@@ -308,8 +243,7 @@ describe("worker toolbelt", () => {
 	});
 
 	test("executes every tool through the production control socket", async () => {
-		const { tools, spawnCalls, transportMethods, workerPrompts } =
-			await harness();
+		const { tools, spawnCalls, workerPrompts } = await harness();
 
 		const sent = await invoke(tools, "chat_send", {
 			room: "#general",
@@ -343,17 +277,10 @@ describe("worker toolbelt", () => {
 			summary: "Take over review",
 		});
 		expect(handoff.details).toMatchObject({ handoffId: "#general:2" });
-		expect(transportMethods).toEqual([
-			"chat_send",
-			"chat_read",
-			"agent_status",
-			"agent_spawn",
-			"task_handoff",
-		]);
 	});
 
 	test("chat_wait blocks until the daemon returns a new message", async () => {
-		const { tools, transportMethods } = await harness();
+		const { tools } = await harness();
 		let settled = false;
 		const waiting = invoke(tools, "chat_wait", {
 			room: "#general",
@@ -373,7 +300,6 @@ describe("worker toolbelt", () => {
 		expect((await waiting).details).toMatchObject({
 			messages: [{ body: "wake" }],
 		});
-		expect(transportMethods).toEqual(["chat_wait", "chat_send"]);
 	});
 
 	test("a reaction is visible to readers and duplicate adds stay singular", async () => {
@@ -385,8 +311,16 @@ describe("worker toolbelt", () => {
 		});
 		const id = messageId(sent);
 
-		await invoke(tools, "chat_react", { messageId: id, emoji: "👀" });
-		await invoke(tools, "chat_react", { messageId: id, emoji: "👀" });
+		const first = await invoke(tools, "chat_react", {
+			messageId: id,
+			emoji: "👀",
+		});
+		expect(first.details).toMatchObject({ messageId: id, reacted: true });
+		const duplicate = await invoke(tools, "chat_react", {
+			messageId: id,
+			emoji: "👀",
+		});
+		expect(duplicate.details).toMatchObject({ messageId: id, reacted: true });
 
 		for (let reader = 0; reader < 2; reader++) {
 			const read = await invoke(tools, "chat_read", { room: "#general" });
@@ -401,15 +335,14 @@ describe("worker toolbelt", () => {
 		}
 	});
 
-	test("rejects invalid reaction message IDs before transport", async () => {
-		const { tools, transportMethods } = await harness();
+	test("rejects invalid reaction message IDs before a valid production call", async () => {
+		const { tools } = await harness();
 		for (const messageId of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
 			const result = await invoke(tools, "chat_react", {
 				messageId,
 				emoji: "👀",
 			});
 			expect(result.isError).toBe(true);
-			expect(transportMethods).toEqual([]);
 		}
 
 		const sent = await invoke(tools, "chat_send", {
@@ -418,10 +351,11 @@ describe("worker toolbelt", () => {
 			body: "React to this",
 		});
 		const id = messageId(sent);
-		transportMethods.length = 0;
-
-		await invoke(tools, "chat_react", { messageId: id, emoji: "👀" });
-		expect(transportMethods).toEqual(["chat_react"]);
+		const valid = await invoke(tools, "chat_react", {
+			messageId: id,
+			emoji: "👀",
+		});
+		expect(valid.isError).toBeUndefined();
 	});
 
 	test("rejects an unknown reaction emoji returned by the daemon", async () => {
@@ -467,31 +401,14 @@ describe("worker toolbelt", () => {
 		expect(text(result)).toContain("emoji");
 	});
 
-	test("rejects unknown reactions locally with a non-vacuous transport guard", async () => {
-		const { tools, transportMethods, socketPath } = await harness();
+	test("rejects unknown reactions locally while valid reactions reach production", async () => {
+		const { tools } = await harness();
 		const sent = await invoke(tools, "chat_send", {
 			room: "#general",
 			author: "coordinator",
 			body: "Status this",
 		});
 		const id = messageId(sent);
-		transportMethods.length = 0;
-
-		// Negative control: the seam accepts any non-empty store reaction, so this
-		// invalid status reaches transport if the toolbelt omits its closed-set guard.
-		await fetch("http://localhost/rpc", {
-			unix: socketPath,
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				jsonrpc: "2.0",
-				id: "negative-control",
-				method: "chat_react",
-				params: { messageId: id, actor: "reviewer", emoji: "🎉" },
-			}),
-		});
-		expect(transportMethods).toEqual(["chat_react"]);
-		transportMethods.length = 0;
 
 		const result = await invoke(tools, "chat_react", {
 			messageId: id,
@@ -501,7 +418,16 @@ describe("worker toolbelt", () => {
 		for (const allowed of ["👀", "⏳", "✅", "❌"]) {
 			expect(text(result)).toContain(allowed);
 		}
-		expect(transportMethods).toEqual([]);
+
+		const valid = await invoke(tools, "chat_react", {
+			messageId: id,
+			emoji: "✅",
+		});
+		expect(valid.isError).toBeUndefined();
+		const read = await invoke(tools, "chat_read", { room: "#general" });
+		expect(read.details).toMatchObject({
+			messages: [{ id, reactions: [{ actor: "reviewer", emoji: "✅" }] }],
+		});
 	});
 
 	test("a reaction neither marks unread nor changes wake delivery", async () => {

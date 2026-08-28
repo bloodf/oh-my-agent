@@ -30,6 +30,8 @@ export const METHOD_NAMES = [
 	"chat_send",
 	"chat_read",
 	"chat_wait",
+	"chat_react",
+	"chat_unreact",
 	"agent_spawn",
 	"agent_status",
 	"task_handoff",
@@ -61,6 +63,10 @@ export interface RoomMessage {
 	author: string;
 	body: string;
 	createdAt: number;
+	parentId?: number | null;
+	threadRootId?: number | null;
+	replyCount?: number;
+	reactions?: Array<{ actor: string; emoji: string }>;
 }
 
 export interface RoomInfo {
@@ -112,6 +118,18 @@ export interface ChatWaitParams {
 }
 export interface ChatWaitResult {
 	messages: RoomMessage[];
+}
+
+export interface ChatReactionParams {
+	messageId: number;
+	actor: string;
+	emoji: string;
+}
+export interface ChatReactResult extends ChatReactionParams {
+	added: boolean;
+}
+export interface ChatUnreactResult extends ChatReactionParams {
+	removed: boolean;
 }
 
 export interface AgentSpawnParams {

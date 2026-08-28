@@ -30,10 +30,13 @@ import type {
 	AgentStatusResult,
 	BumpParams,
 	BumpResult,
+	ChatReactionParams,
+	ChatReactResult,
 	ChatReadParams,
 	ChatReadResult,
 	ChatSendParams,
 	ChatSendResult,
+	ChatUnreactResult,
 	ChatWaitParams,
 	ChatWaitResult,
 	KillParams,
@@ -113,6 +116,29 @@ function explainRoomMessage(value: unknown): string | null {
 	if (typeof value.author !== "string") return "author";
 	if (typeof value.body !== "string") return "body";
 	if (!isFiniteNumber(value.createdAt)) return "createdAt";
+	if (
+		value.parentId !== undefined &&
+		value.parentId !== null &&
+		!isFiniteNumber(value.parentId)
+	)
+		return "parentId";
+	if (
+		value.threadRootId !== undefined &&
+		value.threadRootId !== null &&
+		!isFiniteNumber(value.threadRootId)
+	)
+		return "threadRootId";
+	if (value.replyCount !== undefined && !isFiniteNumber(value.replyCount))
+		return "replyCount";
+	if (value.reactions !== undefined) {
+		if (!Array.isArray(value.reactions)) return "reactions";
+		for (let i = 0; i < value.reactions.length; i++) {
+			const reaction = value.reactions[i];
+			if (!isRecord(reaction)) return `reactions[${i}]`;
+			if (!isNonEmptyString(reaction.actor)) return `reactions[${i}].actor`;
+			if (!isNonEmptyString(reaction.emoji)) return `reactions[${i}].emoji`;
+		}
+	}
 	return null;
 }
 
@@ -172,6 +198,16 @@ function requireNumber(
 	return isFiniteNumber(record[field])
 		? null
 		: { field, message: `${field} must be a finite number` };
+}
+
+function requirePositiveSafeInteger(
+	record: Record<string, unknown>,
+	field: string,
+): FieldCheck {
+	const value = record[field];
+	return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+		? null
+		: { field, message: `${field} must be a positive safe integer` };
 }
 
 function requireBoolean(
@@ -269,6 +305,34 @@ function validateMessagesResult(
 	return ok(value as { messages: RoomMessage[] });
 }
 
+function validateReactionParams(
+	value: unknown,
+): Validation<ChatReactionParams> {
+	return fromFields(
+		value,
+		checkFields(value, [
+			(r) => requirePositiveSafeInteger(r, "messageId"),
+			(r) => requireString(r, "actor"),
+			(r) => requireString(r, "emoji"),
+		]),
+	);
+}
+
+function validateReactionResult<T>(
+	value: unknown,
+	outcome: "added" | "removed",
+): Validation<T> {
+	return fromFields(
+		value,
+		checkFields(value, [
+			(r) => requireNumber(r, "messageId"),
+			(r) => requireString(r, "actor"),
+			(r) => requireString(r, "emoji"),
+			(r) => requireBoolean(r, outcome),
+		]),
+	);
+}
+
 function validateAgentsResult(
 	value: unknown,
 ): Validation<{ agents: AgentStatus[] }> {
@@ -329,6 +393,16 @@ export const METHODS: Record<MethodName, MethodContract> = {
 			),
 		validateResult: (v): Validation<ChatWaitResult> =>
 			validateMessagesResult(v),
+	},
+	chat_react: {
+		validateParams: validateReactionParams,
+		validateResult: (v): Validation<ChatReactResult> =>
+			validateReactionResult(v, "added"),
+	},
+	chat_unreact: {
+		validateParams: validateReactionParams,
+		validateResult: (v): Validation<ChatUnreactResult> =>
+			validateReactionResult(v, "removed"),
 	},
 	agent_spawn: {
 		validateParams: (v): Validation<AgentSpawnParams> =>

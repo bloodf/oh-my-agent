@@ -20,8 +20,9 @@
  * carry `protocolVersion`. A handler that throws answers an internal error
  * rather than killing the server.
  *
- * Performance: one dispatch per request. `chat_wait` parks on a polling loop
- * whose sleeps are woken by `close()`, so shutdown never waits out a long poll.
+ * Performance: one dispatch per request. `chat_wait` parks on a polling loop;
+ * reaction state checks scan public message listings across known rooms.
+ * `close()` wakes polling sleeps so shutdown never waits out a long poll.
  */
 import type { RoomStore, RoomMessage as StoredMessage } from "../rooms/store";
 import type {
@@ -32,10 +33,13 @@ import type {
 	AgentStatusResult,
 	BumpParams,
 	BumpResult,
+	ChatReactionParams,
+	ChatReactResult,
 	ChatReadParams,
 	ChatReadResult,
 	ChatSendParams,
 	ChatSendResult,
+	ChatUnreactResult,
 	ChatWaitParams,
 	ChatWaitResult,
 	JsonRpcFailure,
@@ -153,6 +157,8 @@ interface ParamsByMethod {
 	chat_send: ChatSendParams;
 	chat_read: ChatReadParams;
 	chat_wait: ChatWaitParams;
+	chat_react: ChatReactionParams;
+	chat_unreact: ChatReactionParams;
 	agent_spawn: AgentSpawnParams;
 	agent_status: AgentStatusParams;
 	task_handoff: TaskHandoffParams;
@@ -168,7 +174,7 @@ type Handlers = {
 	[K in MethodName]: (params: ParamsByMethod[K]) => Promise<unknown>;
 };
 
-/** Strip the store's threading and reaction fields down to the wire shape. */
+/** Preserve additive threading and reaction metadata on the wire. */
 function toWireMessage(message: StoredMessage): RoomMessage {
 	return {
 		id: message.id,
@@ -176,6 +182,10 @@ function toWireMessage(message: StoredMessage): RoomMessage {
 		author: message.author,
 		body: message.body,
 		createdAt: message.createdAt,
+		parentId: message.parentId,
+		threadRootId: message.threadRootId,
+		replyCount: message.replyCount,
+		reactions: message.reactions,
 	};
 }
 
@@ -225,6 +235,31 @@ export async function startControlSocket(
 			for (const message of messages) collected.push(toWireMessage(message));
 		}
 		return collected.sort((left, right) => left.id - right.id);
+	};
+
+	const hasReaction = async (params: ChatReactionParams): Promise<boolean> => {
+		for (const room of context.knownRooms.keys()) {
+			const message = (await context.rooms.listMessages(room, {})).find(
+				(candidate) => candidate.id === params.messageId,
+			);
+			if (message) {
+				return message.reactions.some(
+					(reaction) =>
+						reaction.actor === params.actor && reaction.emoji === params.emoji,
+				);
+			}
+		}
+		return false;
+	};
+
+	let reactionQueue = Promise.resolve();
+	const serializeReaction = <T>(operation: () => Promise<T>): Promise<T> => {
+		const result = reactionQueue.then(operation);
+		reactionQueue = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
 	};
 
 	/**
@@ -288,6 +323,40 @@ export async function startControlSocket(
 			}
 			return { messages: [] };
 		},
+
+		chat_react: async (params): Promise<ChatReactResult & { reacted: true }> =>
+			await serializeReaction(async () => {
+				const added = !(await hasReaction(params));
+				try {
+					await context.rooms.react(
+						params.messageId,
+						params.actor,
+						params.emoji,
+					);
+				} catch (error) {
+					if (error instanceof Error && error.message === "MESSAGE_NOT_FOUND") {
+						throw new InvalidParamsError(
+							"messageId",
+							`Unknown message: ${params.messageId}`,
+						);
+					}
+					throw error;
+				}
+				return { ...params, added, reacted: true };
+			}),
+
+		chat_unreact: async (
+			params,
+		): Promise<ChatUnreactResult & { reacted: false }> =>
+			await serializeReaction(async () => {
+				const removed = await hasReaction(params);
+				await context.rooms.unreact(
+					params.messageId,
+					params.actor,
+					params.emoji,
+				);
+				return { ...params, removed, reacted: false };
+			}),
 
 		rooms_list: async (): Promise<RoomsListResult> => ({
 			rooms: [...context.knownRooms.values()],

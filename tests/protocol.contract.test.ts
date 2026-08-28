@@ -29,6 +29,8 @@ const VALID_PARAMS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 	chat_send: { room: "#reviews", body: "looks good", author: "@you" },
 	chat_read: { room: "#reviews", sinceId: 41, limit: 50 },
 	chat_wait: { room: "#reviews", sinceId: 41, timeoutMs: 5000 },
+	chat_react: { messageId: 42, actor: "reviewer", emoji: "👀" },
+	chat_unreact: { messageId: 42, actor: "reviewer", emoji: "👀" },
 	agent_spawn: { name: "researcher", rooms: ["#research"], cwd: "/tmp/proj" },
 	agent_status: { name: "researcher" },
 	task_handoff: {
@@ -48,8 +50,29 @@ const VALID_PARAMS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 	status: { protocolVersion: PROTOCOL_VERSION, agents: [], uptimeMs: 12 },
 	chat_send: { messageId: 42, createdAt: 1750000000000 },
-	chat_read: { messages: [] },
+	chat_read: {
+		messages: [
+			{
+				id: 42,
+				room: "#reviews",
+				author: "reviewer",
+				body: "looks good",
+				createdAt: 1750000000000,
+				parentId: null,
+				threadRootId: null,
+				replyCount: 0,
+				reactions: [{ actor: "reviewer", emoji: "👀" }],
+			},
+		],
+	},
 	chat_wait: { messages: [] },
+	chat_react: { messageId: 42, actor: "reviewer", emoji: "👀", added: true },
+	chat_unreact: {
+		messageId: 42,
+		actor: "reviewer",
+		emoji: "👀",
+		removed: true,
+	},
 	agent_spawn: { name: "researcher", state: "running" },
 	agent_status: {
 		agents: [{ name: "researcher", state: "parked", account: "acct-1" }],
@@ -88,14 +111,16 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 // ---------------------------------------------------------------------------
 
 describe("declared method set", () => {
-	test("is exactly the thirteen contracted methods", () => {
+	test("is exactly the fifteen contracted methods", () => {
 		expect(([...METHOD_NAMES] as string[]).sort()).toEqual(
 			[
 				"agent_spawn",
 				"agent_status",
 				"bump",
+				"chat_react",
 				"chat_read",
 				"chat_send",
+				"chat_unreact",
 				"chat_wait",
 				"kill",
 				"rooms_list",
@@ -163,6 +188,37 @@ describe("params validation", () => {
 		if (!result.ok) expect(result.field).toBe("limit");
 	});
 
+	test("reaction params require messageId, actor, and emoji", () => {
+		for (const method of ["chat_react", "chat_unreact"] as const) {
+			for (const [field, params] of [
+				["messageId", { actor: "reviewer", emoji: "👀" }],
+				["messageId", { messageId: "42", actor: "reviewer", emoji: "👀" }],
+				["actor", { messageId: 42, emoji: "👀" }],
+				["actor", { messageId: 42, actor: "", emoji: "👀" }],
+				["emoji", { messageId: 42, actor: "reviewer" }],
+				["emoji", { messageId: 42, actor: "reviewer", emoji: "" }],
+			] as const) {
+				const result = METHODS[method].validateParams(params);
+				expect(result.ok).toBe(false);
+				if (!result.ok) expect(result.field).toBe(field);
+			}
+		}
+	});
+
+	test("reaction params require a positive safe integer messageId", () => {
+		for (const method of ["chat_react", "chat_unreact"] as const) {
+			for (const messageId of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+				const result = METHODS[method].validateParams({
+					messageId,
+					actor: "reviewer",
+					emoji: "👀",
+				});
+				expect(result.ok).toBe(false);
+				if (!result.ok) expect(result.field).toBe("messageId");
+			}
+		}
+	});
+
 	test("no-params methods reject unexpected keys, naming the params side", () => {
 		for (const name of ["status", "rooms_list", "schedules_list"] as const) {
 			const result = METHODS[name].validateParams({ verbose: true });
@@ -203,6 +259,60 @@ describe("result validation", () => {
 		});
 		expect(result.ok).toBe(false);
 		if (!result.ok) expect(result.field).toContain("id");
+	});
+
+	test("reaction results require actor and the method-specific outcome", () => {
+		const missingActor = METHODS.chat_react.validateResult({
+			messageId: 42,
+			emoji: "👀",
+			added: true,
+		});
+		expect(missingActor.ok).toBe(false);
+		if (!missingActor.ok) expect(missingActor.field).toBe("actor");
+
+		const wrongAdded = METHODS.chat_react.validateResult({
+			messageId: 42,
+			actor: "reviewer",
+			emoji: "👀",
+			added: "yes",
+		});
+		expect(wrongAdded.ok).toBe(false);
+		if (!wrongAdded.ok) expect(wrongAdded.field).toBe("added");
+
+		const wrongRemoved = METHODS.chat_unreact.validateResult({
+			messageId: 42,
+			actor: "reviewer",
+			emoji: "👀",
+			removed: "yes",
+		});
+		expect(wrongRemoved.ok).toBe(false);
+		if (!wrongRemoved.ok) expect(wrongRemoved.field).toBe("removed");
+	});
+
+	test("optional RoomMessage metadata is additive and validated when present", () => {
+		const legacy = {
+			id: 1,
+			room: "#a",
+			author: "reviewer",
+			body: "done",
+			createdAt: 1,
+		};
+		expect(METHODS.chat_read.validateResult({ messages: [legacy] }).ok).toBe(
+			true,
+		);
+
+		for (const [field, value] of [
+			["parentId", "1"],
+			["threadRootId", "1"],
+			["replyCount", "0"],
+			["reactions", [{ actor: "reviewer", emoji: 1 }]],
+		] as const) {
+			const result = METHODS.chat_wait.validateResult({
+				messages: [{ ...legacy, [field]: value }],
+			});
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.field).toContain(field);
+		}
 	});
 });
 
