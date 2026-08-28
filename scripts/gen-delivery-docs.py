@@ -991,6 +991,39 @@ EPICS = [
         ],
         adrs=["ADR-011"],
     ),
+    Epic(
+        id="EP-10",
+        slug="production-wiring",
+        title="Production wiring: serving, usage, and deferred hardening",
+        outcome=(
+            "The console is reachable for real — the daemon serves the API and the client "
+            "behind an operator token — and budgets are fed by actual usage. The deferred "
+            "hardening (connection identity, credential-env scoping, in-process workers) is "
+            "specified with its trigger so the deferral is a decision, not an oversight."
+        ),
+        why=(
+            "Three subsystems were built and tested without a production seam: the console "
+            "API is never mounted by the daemon, the meter is never fed, and the worker pid "
+            "is never recorded. Each is small, each is load-bearing for actually operating "
+            "the system, and each was out of scope for the epic that built its subsystem."
+        ),
+        scope=[
+            "Mounting the console API at boot with the operator-token lifecycle and static client serving.",
+            "Account-to-credential binding and gateway-usage polling into the meter.",
+            "Worker pid from the lifecycle onto the wire and into the registry.",
+            "Specified-but-parked hardening: connection identity, credential-env scoping, in-process workers.",
+        ],
+        non_goals=[
+            "Any new UI surface; this epic is backend seams for the surfaces that exist.",
+            "Non-loopback exposure of the console (that is what triggers T-1004).",
+        ],
+        acceptance=[
+            "A browser reaches the console served by the daemon itself, with the token flow documented in docs/web-console.md.",
+            "A metered account's meter moves with real usage, and the 80%/park/bump path fires on it.",
+            "Status and the registry report a real pid for a running worker.",
+        ],
+        adrs=["ADR-011"],
+    ),
 ]
 
 EPIC_FILE = {e.id: f"{e.id}-{e.slug}.md" for e in EPICS}
@@ -1024,6 +1057,9 @@ SPRINTS = [
     Sprint(id="SP-10", slug="tui-management", title="TUI management",
            theme="The full-screen manager: browse the tree, edit definitions and models, "
                  "steer agents without leaving the TUI."),
+    Sprint(id="SP-11", slug="production-wiring", title="Production wiring",
+           theme="The console served for real, budgets fed by real usage, and the "
+                 "hardening deferred to a named trigger."),
 ]
 
 SPRINT_FILE = {s.id: f"{s.id}-{s.slug}.md" for s in SPRINTS}
@@ -2661,6 +2697,227 @@ TASKS += [
                 evidence=[("Guided edit flows with refusal-preserving editor", "src/extension/commands.ts"), ("Round-trip, refusal, and rebuild surfacing in the extension suite", "tests/extension.test.ts")],
         depends_on=["T-801", "T-901"],
         out_of_scope=["Spawning new agents from the editor, which `/spawn` and T-901 cover."],
+    ),
+]
+
+TASKS += [
+    # ── EP-10: production wiring ─────────────────────────────────────────────
+    Task(
+        id="T-1001", slug="console-mounted-at-boot", title="Serve the console from the daemon",
+        epic="EP-10", sprint="SP-11", status="Ready",
+        goal="The daemon itself serves the console API and the client, behind an operator token — the browser UI has a backend to reach.",
+        read_first=[
+            ARCH,
+            ("Console API", "src/daemon/console-api.ts"),
+            ("Console guide", "docs/web-console.md"),
+            ("Daemon entry point", "src/daemon/main.ts"),
+        ],
+        files=[
+            "src/daemon/main.ts",
+            "src/daemon/console-api.ts",
+            "tests/daemon-console-mount.test.ts",
+            "docs/web-console.md",
+        ],
+        assets=[
+            ("src/daemon/main.ts", "Edited", "Boots the console server beside the control socket; token generation and storage; shutdown order."),
+            ("src/daemon/console-api.ts", "Edited", "Serves the client statics from `src/console/` on the same listener; the API routes are unchanged."),
+            ("tests/daemon-console-mount.test.ts", "New", "Boot → fetch the shell and the API with the token; restart reuses the stored token; shutdown releases the port."),
+            ("docs/web-console.md", "Edited", "The 'Running it' section stops describing the future."),
+            ("src/console/", "Read", "The client being served."),
+        ],
+        steps=[
+            "Generate the operator token at first boot (crypto random), store it mode-0600 under the state dir, and print the console URL once at startup. A stored token is reused on restart; rotating is deleting the file.",
+            "Mount `startConsoleApi` in `bootDaemon` on loopback with a configurable port (env override, default 0 = ephemeral and printed), and close it in the reverse-order shutdown before the store closes.",
+            "Serve `src/console/` statics at `/` on the same listener: index.html, app.js, style.css, with correct content types and no path traversal (resolve-and-contain, same standard as the peer-store write).",
+            "Everything off by default is wrong for the surface's purpose — but an env kill-switch (e.g. OMA_CONSOLE=0) keeps a daemon headless when wanted.",
+        ],
+        acceptance=[
+            "Booting the daemon serves the client at `/` and the API at `/api/*` on one loopback listener.",
+            "The printed URL works in a browser; a request without the token is 401.",
+            "A restart keeps the same token; the token file is mode 0600.",
+            "Shutdown frees the port and a second boot binds cleanly.",
+        ],
+        depends_on=["T-602", "T-603"],
+        out_of_scope=["Binding beyond loopback, which is what T-1004 is for."],
+    ),
+    Task(
+        id="T-1002", slug="usage-feeds-the-meter", title="Usage feeds the meter",
+        epic="EP-10", sprint="SP-11", status="Ready",
+        goal="A metered account's meter moves with real usage, so the 80% warning and 100% park (T-506) fire on reality.",
+        read_first=[
+            ARCH,
+            ("Credential gateway usage routes", "src/daemon/credential-gateway.ts"),
+            ("Account registry", "src/daemon/account-registry.ts"),
+            ("Supervisor budget flow", "src/daemon/supervisor.ts"),
+        ],
+        files=[
+            "src/daemon/main.ts",
+            "src/daemon/account-registry.ts",
+            "src/shared/agent-definition.ts",
+            "tests/usage-meter.test.ts",
+        ],
+        assets=[
+            ("src/daemon/main.ts", "Edited", "The account→credential binding at spawn (worker tokens stop being bound to zero credentials) and the usage polling loop."),
+            ("src/daemon/account-registry.ts", "Edited", "updateMeter is driven with a dollars-burned fraction computed from usage."),
+            ("src/shared/agent-definition.ts", "Edited", "An account/credential field on the definition, if the binding is declared there — decide and document."),
+            ("tests/usage-meter.test.ts", "New", "Usage moves the meter; the 80% warning posts; the park fires at the cap; no usage means no movement."),
+        ],
+        steps=[
+            "Bind worker tokens to the account's credentials instead of an empty list (the current `credentialIds: []` placeholder in main.ts is the gap — an unbound token sees nothing).",
+            "Poll the gateway's usage routes on an interval and convert dollars to the 0..1 meter per metered account (`budgetUsd` is the denominator).",
+            "Drive `registry.updateMeter`; the T-506 warn/park/bump flow does the rest, unchanged.",
+            "Stop polling when nothing is running; an unattended daemon does not burn gateway calls.",
+        ],
+        acceptance=[
+            "Reported usage moves the meter, and crossing 80% posts the warning naming the account and budget.",
+            "Reaching the cap parks the account's runs; a bump resumes them (T-506's tests keep passing).",
+            "A subscription account's meter never moves.",
+        ],
+        depends_on=["T-301", "T-506"],
+        out_of_scope=["Usage display in the TUI/console (read models exist; presenting them is a future UI task)."],
+    ),
+    Task(
+        id="T-1003", slug="worker-pid-on-the-wire", title="Worker pid in status and the registry",
+        epic="EP-10", sprint="SP-11", status="Ready",
+        goal="A running worker's OS pid is visible in status and recorded in the agents table, so an operator can find the process.",
+        read_first=[
+            ("Lifecycle", "src/worker/lifecycle.ts"),
+            ("Daemon db", "src/daemon/db.ts"),
+            ("Protocol", "src/shared/protocol.ts"),
+        ],
+        files=[
+            "src/worker/lifecycle.ts",
+            "src/daemon/main.ts",
+            "src/shared/protocol.ts",
+            "src/shared/protocol-schemas.ts",
+            "tests/worker-lifecycle.test.ts",
+            "tests/daemon-main.test.ts",
+        ],
+        assets=[
+            ("src/worker/lifecycle.ts", "Edited", "`WorkerHandle.pid` from the spawned child (undefined while parked)."),
+            ("src/daemon/main.ts", "Edited", "Records the pid in the agents table at spawn/respawn, clears it at stop."),
+            ("src/shared/protocol.ts", "Edited", "`AgentStatus.pid?: number` — optional, additive."),
+            ("src/shared/protocol-schemas.ts", "Edited", "Accept the optional field."),
+            ("tests/worker-lifecycle.test.ts", "Edited", "A real child's pid is reported and dead after stop."),
+            ("tests/daemon-main.test.ts", "Edited", "Status carries the pid of a running peer."),
+        ],
+        steps=[
+            "Expose the child pid on WorkerHandle (the RPC client's process) — undefined while parked, since a parked peer has no process.",
+            "Record it in the agents table at spawn and respawn; clear it when the worker stops; the row never shows a dead pid after a clean shutdown.",
+            "Add the optional field to the wire status and validators; the TUI manager may show it, but that is not required here.",
+        ],
+        acceptance=[
+            "A real child's pid is exposed and the process is gone after stop.",
+            "Status over the socket carries the pid for a running peer and none for a parked one.",
+            "The agents row's worker_pid matches the live process while running.",
+        ],
+        depends_on=["T-401"],
+        out_of_scope=["Killing by pid from the operator surfaces (kill stays logical, by name)."],
+    ),
+    Task(
+        id="T-1004", slug="control-socket-identity", title="Connection identity on the control socket",
+        epic="EP-10", sprint="SP-11", status="Planned",
+        goal="When the control socket ever needs to distinguish callers, each client presents a credential and the daemon can enforce per-identity rules — including making agent hierarchy authoritative instead of cooperative.",
+        read_first=[
+            ARCH,
+            ("ADR-011: agent hierarchy", "docs/delivery/adr/ADR-011-agent-hierarchy.md"),
+            ("Socket server", "src/daemon/socket.ts"),
+        ],
+        files=[
+            "src/daemon/socket.ts",
+            "src/daemon/main.ts",
+            "src/worker/toolbelt.ts",
+            "src/extension/widget.ts",
+            "src/shared/protocol.ts",
+            "tests/socket-identity.test.ts",
+        ],
+        assets=[
+            ("src/daemon/socket.ts", "Edited", "Per-connection bearer: workers get their scoped token, the TUI/console the operator token."),
+            ("src/daemon/main.ts", "Edited", "Issues and stores the credentials; the pidfile dir already protects the socket path."),
+            ("src/worker/toolbelt.ts", "Edited", "Presents the worker's token from its env."),
+            ("src/extension/widget.ts", "Edited", "Reads the operator token from the state file."),
+            ("src/shared/protocol.ts", "Edited", "The auth failure shape."),
+            ("tests/socket-identity.test.ts", "New", "Unauthenticated calls refused; a worker's kill of a peer it does not own is refused."),
+        ],
+        steps=[
+            "Pick this up WHEN: the console or socket binds beyond loopback, or parentage needs to be authoritative (ADR-011's stated precondition).",
+            "Issue per-identity bearer tokens at boot (worker tokens exist at the gateway; this is the control socket's own layer).",
+            "Enforce: unauthenticated → unauthorized; a worker's parent claims must equal its identity; kill/bump/inject are operator-only.",
+            "Keep loopback trust as the documented default for the local single-operator case; identity is the hardening layer, not a tax on it.",
+        ],
+        acceptance=[
+            "An unauthenticated socket call is refused with the declared error shape.",
+            "A worker token cannot kill or inject into a peer it does not own.",
+            "The operator token path keeps today's TUI/console flows working unchanged.",
+        ],
+        depends_on=["T-502"],
+        out_of_scope=["Replacing loopback as the default trust model; this task exists so the trigger is named, not to add ceremony today."],
+    ),
+    Task(
+        id="T-1005", slug="worker-env-allowlist", title="Allowlist the worker environment",
+        epic="EP-10", sprint="SP-11", status="Planned",
+        goal="A worker's process env contains only what its layout declares — provider keys and other host secrets in the daemon's environment never reach a child.",
+        read_first=[
+            ("Env scrub", "src/shared/env-scrub.ts"),
+            ("Materializer env", "src/daemon/materializer.ts"),
+            ("ADR-002: materialized roots", "docs/delivery/adr/ADR-002-private-store-materialized-roots.md"),
+        ],
+        files=[
+            "src/daemon/materializer.ts",
+            "src/worker/lifecycle.ts",
+            "src/shared/env-scrub.ts",
+            "tests/materializer.test.ts",
+        ],
+        assets=[
+            ("src/daemon/materializer.ts", "Edited", "The worker env becomes an allowlist, not a blanklist."),
+            ("src/worker/lifecycle.ts", "Edited", "The spawn env is exactly the layout's env plus declared passthroughs."),
+            ("src/shared/env-scrub.ts", "Edited", "The canonical list gains the allowlist side."),
+            ("tests/materializer.test.ts", "Edited", "A poisoned host env (OPENAI_API_KEY etc.) reaches the worker only when declared."),
+        ],
+        steps=[
+            "Pick this up WHEN workers run definitions from authors you do not fully trust, or the daemon host env carries provider keys (it usually does). T-205 scrubbed the config-root selectors; this is the rest of the host env.",
+            "Invert the scrub: the spawned env is the layout's declared map plus an explicit passthrough list (PATH, HOME-shape basics, locale), never `...Bun.env` of the host.",
+            "Prove with a poisoned host env that nothing undeclared reaches the child, including through the sandbox-gate launch path.",
+        ],
+        acceptance=[
+            "A host exporting provider keys produces a worker env without them.",
+            "The declared passthroughs keep the child functional (the real-child suites stay green).",
+            "The sandbox launch path is covered by the same assertions.",
+        ],
+        depends_on=["T-205"],
+        out_of_scope=["OS sandboxing itself (EP-02, shipped) and network egress policy (sandbox-bridge territory)."],
+    ),
+    Task(
+        id="T-1006", slug="in-process-worker-path", title="In-process worker path for cheap agents",
+        epic="EP-10", sprint="SP-11", status="Planned",
+        goal="Short-lived or cheap agents run in-process via the SDK behind the same worker interface, when process-per-agent proves heavy in practice.",
+        read_first=[
+            ARCH,
+            ("Worker lifecycle", "src/worker/lifecycle.ts"),
+            ("ADR-001: RPC subprocess workers", "docs/delivery/adr/ADR-001-rpc-subprocess-workers.md"),
+        ],
+        files=[
+            "src/worker/lifecycle.ts",
+            "src/daemon/main.ts",
+            "tests/worker-inprocess.test.ts",
+        ],
+        assets=[
+            ("src/worker/lifecycle.ts", "Edited", "An in-process backend satisfying SupervisedWorker behind the existing interface."),
+            ("src/daemon/main.ts", "Edited", "The spawn path selects the backend from the definition or a daemon flag."),
+            ("tests/worker-inprocess.test.ts", "New", "The same supervisor contract suite drives both backends."),
+        ],
+        steps=[
+            "Pick this up WHEN the RPC-per-agent cost is measured to matter (memory, startup latency at many peers) — not before; ADR-001 chose crash isolation first.",
+            "Implement the in-process session behind SupervisedWorker; no sandbox applies to it, so it is for trusted cheap agents only and `/agents` must never show a shield for one.",
+            "The supervisor contract suite runs against both backends, so the optimization cannot fork behavior.",
+        ],
+        acceptance=[
+            "Both backends pass the same supervisor contract suite.",
+            "An in-process worker never shows the sandbox shield.",
+            "The default stays RPC subprocess.",
+        ],
+        depends_on=["T-401"],
+        out_of_scope=["Sandboxing in-process workers — impossible; the shield rules make that visible rather than implied."],
     ),
 ]
 

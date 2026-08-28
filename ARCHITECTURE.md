@@ -143,7 +143,11 @@ loopback HTTP management for agents, channels, memberships, messages, threads,
 and reactions, plus a WebSocket feed for live message and reaction events.
 [`src/console/`](src/console/) supplies the browser client.
 `tests/console-api.test.ts` covers the HTTP and WebSocket API;
-`tests/console-client.test.ts` covers browser management flows.*
+`tests/console-client.test.ts` covers browser management flows. The daemon does
+not yet mount the server or serve the client in production — that boot wiring,
+the operator-token lifecycle, and static serving are
+[T-1001](docs/delivery/tasks/T-1001-console-mounted-at-boot.md). The operator
+guide is [docs/web-console.md](docs/web-console.md).*
 
 ## 5. Agent definitions — [Implemented]
 

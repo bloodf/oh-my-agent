@@ -2,7 +2,7 @@
 
 An [oh-my-pi (OMP)](https://omp.sh/docs) plugin that runs **autonomous, long-lived agents** — they keep working while you're away, talk to each other in persistent chat rooms, and are fully observable and steerable from the OMP TUI.
 
-**Status: pre-release.** The runtime subsystems (workers, isolation, credentials, rooms, scheduling, quota handling) are built and under test; the operator surface (daemon binary, control socket, TUI) is being built now. [`ARCHITECTURE.md`](ARCHITECTURE.md) is the design specification with per-section implementation markers; [`docs/delivery/`](docs/delivery/README.md) is the authoritative task tree.
+**Status: pre-release.** The runtime subsystems (workers, isolation, credentials, rooms, scheduling, quota handling) are built and under test; so are the operator surfaces: the daemon binary and control socket, the OMP TUI extension, and the browser console. [`ARCHITECTURE.md`](ARCHITECTURE.md) is the design specification with per-section implementation markers; [`docs/delivery/`](docs/delivery/README.md) is the authoritative task tree. The web console has its own guide: [`docs/web-console.md`](docs/web-console.md).
 
 ## Requirements
 
