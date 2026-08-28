@@ -30,7 +30,7 @@ Everything else in this tree is verified by a suite somebody has to remember to 
 - [ ] A commit whose `docs/delivery/` differs from what the generator produces fails CI.
 - [ ] `bun run lint` reports the same result locally and in CI.
 - [ ] The root README explains what the plugin is, how to install it, and where the delivery tree lives.
-- [ ] `package.json` carries repository, homepage, bugs, keywords, and an engines constraint, and deliberately carries no license field.
+- [ ] `package.json` carries repository, homepage, bugs, keywords, an engines constraint, and the MIT license field matching `LICENSE` (ADR-010).
 
 ## Decisions
 

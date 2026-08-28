@@ -605,6 +605,53 @@ ADRS = [
             ("Package license field", "./package.json"),
         ],
     ),
+    ADR(
+        id="ADR-011",
+        slug="agent-hierarchy",
+        title="Persistent child agents are spawn-time state; kill cascades",
+        status="Accepted",
+        context=(
+            "A peer must be able to deploy persistent child peers (a CEO standing up a "
+            "CTO, staff engineers, QA) that live under it in a tree, survive restarts, and "
+            "stay distinct from native `task` subagents, which are temporary and in-run. "
+            "The design had to answer where parentage lives, how the daemon learns the "
+            "spawner's identity over an unauthenticated shared socket, whether spawn "
+            "carries an inline definition, what children inherit, and what happens to "
+            "children when a parent dies."
+        ),
+        decision=(
+            "Parentage is daemon spawn-time state (an `agents.parent` column), never "
+            "frontmatter — the same definition deploys under different parents and the "
+            "strict parser stays untouched. The spawning worker self-asserts its name in "
+            "`agent_spawn`'s optional `parent` param; the socket trusts every caller "
+            "equally today, so parentage is cooperative metadata and nothing (budget, kill "
+            "authority, room ACLs) may ever be enforced off it until real connection "
+            "identity exists. Creation is two calls: `agent_create` writes a "
+            "parse-validated definition to the peer store, then `agent_spawn` starts it — "
+            "an LLM caller gets a validation checkpoint before anything runs. Children "
+            "inherit only the parent's account and an auto-created family channel "
+            "`#<parent>-team`; rooms and budget are explicit, because a shared budget lets "
+            "one runaway child starve its siblings invisibly. `kill` cascades to the "
+            "subtree by default (with an explicit keep-children reparent), and at boot an "
+            "agent whose parent is gone is refused and flagged orphaned rather than "
+            "silently resumed."
+        ),
+        consequences=[
+            "The frozen protocol grows additively under the no-bump policy: agent_create, definition_get, definition_update, a parent field on spawn, and parent/children on status.",
+            "A misbehaving peer can claim any parent — documented as cosmetic metadata, so no enforcement may ever be built on it without a connection-identity task first.",
+            "Orphanhood is an impossible steady state: cascades and the boot refusal remove the cleanup chore.",
+            "Native `task` remains the only temporary-subagent path; hierarchy never competes with it (ADR-007 stands).",
+        ],
+        alternatives=[
+            ("Parent in the definition frontmatter", "Freezes topology at parse, breaks definition portability across installs, and forces the strict parser to grow a runtime-only key."),
+            ("Inline definition in agent_spawn params", "An LLM caller would emit full frontmatter inside JSON; the strict parser turns every hallucinated key into a mid-spawn throw with no validation checkpoint."),
+            ("Children inherit rooms and budget", "Room inheritance leaks operator-facing channels to every child; budget inheritance lets one runaway child starve siblings without a trace."),
+            ("Orphan cleanup sweep", "A sweeper runs after the failure; refusing the wake and cascading kills make the state impossible instead."),
+        ],
+        evidence=[
+            ("Hierarchy design in the tree", "docs/delivery/tasks/T-802-daemon-hierarchy.md"),
+        ],
+    ),
 ]
 
 ADR_FILE = {a.id: f"{a.id}-{a.slug}.md" for a in ADRS}
@@ -873,9 +920,76 @@ EPICS = [
             "A commit whose `docs/delivery/` differs from what the generator produces fails CI.",
             "`bun run lint` reports the same result locally and in CI.",
             "The root README explains what the plugin is, how to install it, and where the delivery tree lives.",
-            "`package.json` carries repository, homepage, bugs, keywords, and an engines constraint, and deliberately carries no license field.",
+            "`package.json` carries repository, homepage, bugs, keywords, an engines constraint, and the MIT license field matching `LICENSE` (ADR-010).",
         ],
         adrs=["ADR-010"],
+    ),
+    Epic(
+        id="EP-08",
+        slug="agent-hierarchy",
+        title="Agent hierarchy and authoring",
+        outcome=(
+            "A peer can deploy persistent child peers under itself — a CEO standing up a "
+            "CTO and staff — with the tree visible to the operator, children surviving "
+            "restarts, and creation guided by shipped skills instead of code archaeology."
+        ),
+        why=(
+            "The native `task` tool is a temporary subagent: its transcript folds into the "
+            "parent run and it is gone. Standing teams need durable peers with their own "
+            "lifecycle, rooms, and budget, parented so the operator can see who deployed "
+            "whom — and without a kill cascade, a dead parent leaves children spending and "
+            "messaging forever with no owner."
+        ),
+        scope=[
+            "Protocol additions: `agent_create`, `definition_get`, `definition_update`, a `parent` field on `agent_spawn`, and `parent`/`children` on status (additive, no version bump).",
+            "Daemon hierarchy state: `agents.parent`, cycle rejection, kill cascade, orphan refusal at boot, family channel, account-only inheritance.",
+            "Toolbelt authoring tools with child-vs-task selection guidance.",
+            "Shipped skills for agent and subagent authoring, discovered by OMP and materialized into workers.",
+        ],
+        non_goals=[
+            "Enforcing anything off parentage — it is cooperative metadata until the socket has connection identity (ADR-011).",
+            "Any change to native `task` recursion or spawn policy.",
+        ],
+        acceptance=[
+            "A worker creates and spawns a child through the toolbelt, and the child appears under it in status output and the TUI.",
+            "Killing a parent stops its subtree; a boot refuses to wake an agent whose parent is gone.",
+            "A cycle (`A` under `B` under `A`) is rejected at spawn.",
+            "A child never inherits its parent's rooms or budget by default.",
+            "The shipped skills are discovered by OMP's real `loadSkills` and a worker selecting them receives them in its materialized root.",
+        ],
+        adrs=["ADR-011", "ADR-007"],
+    ),
+    Epic(
+        id="EP-09",
+        slug="tui-management",
+        title="Full TUI management surface",
+        outcome=(
+            "From inside the OMP TUI, an operator browses the agent tree in a full-screen "
+            "manager and edits agents, their models, and their definitions without leaving "
+            "the session or hand-editing files."
+        ),
+        why=(
+            "The hierarchy makes the flat `/agents` list a lie, and definitions today are "
+            "edited by writing markdown by hand. OMP's extension surface supports a real "
+            "full-screen overlay plus editor and selection dialogs, so management belongs "
+            "inside the TUI the operator already lives in."
+        ),
+        scope=[
+            "Tree rendering of the agent hierarchy in `/agents` and the spawn flow's parent picker.",
+            "A full-screen manager (custom overlay component): browse, inspect, edit, kill with cascade choice, logs, inject.",
+            "Definition and model editing through editor dialogs, persisting through the daemon's write path.",
+        ],
+        non_goals=[
+            "RPC/print-mode parity — the manager is TUI-only by design and degrades to the existing commands.",
+            "Editing schedules or accounts (existing commands already cover those).",
+        ],
+        acceptance=[
+            "The tree renders parented agents nested under their parents.",
+            "A definition edited in the manager persists, reparses cleanly, and triggers the staleness rebuild on next delivery.",
+            "A model change takes effect on the worker's next session.",
+            "The manager never throws into the TUI when the daemon is absent.",
+        ],
+        adrs=["ADR-011"],
     ),
 ]
 
@@ -904,6 +1018,12 @@ SPRINTS = [
     Sprint(id="SP-08", slug="release-readiness", title="Release readiness",
            theme="The things that make the repository checkable by a machine and "
                  "explicable to a stranger: CI, lint, and a README."),
+    Sprint(id="SP-09", slug="agent-hierarchy", title="Agent hierarchy",
+           theme="Persistent child peers under a parent: spawn-time parentage, cascades, "
+                 "and the authoring protocol and skills behind them."),
+    Sprint(id="SP-10", slug="tui-management", title="TUI management",
+           theme="The full-screen manager: browse the tree, edit definitions and models, "
+                 "steer agents without leaving the TUI."),
 ]
 
 SPRINT_FILE = {s.id: f"{s.id}-{s.slug}.md" for s in SPRINTS}
@@ -2294,6 +2414,233 @@ TASKS += [
         out_of_scope=[
             "Deleting or skipping the flaky test. A skipped test is an admission the behavior is unspecified.",
         ],
+    ),
+]
+
+TASKS += [
+    # ── EP-08: agent hierarchy and authoring ──────────────────────────────────
+    Task(
+        id="T-801", slug="hierarchy-protocol", title="Hierarchy and authoring protocol",
+        epic="EP-08", sprint="SP-09", status="Ready",
+        goal="The control protocol can create definitions, spawn children, and read and update definitions — additively, no version bump.",
+        read_first=[
+            ARCH,
+            ("Protocol", "src/shared/protocol.ts"),
+            ("ADR-011: agent hierarchy", "docs/delivery/adr/ADR-011-agent-hierarchy.md"),
+        ],
+        files=[
+            "src/shared/protocol.ts",
+            "src/shared/protocol-schemas.ts",
+            "tests/protocol.contract.test.ts",
+        ],
+        assets=[
+            ("src/shared/protocol.ts", "Edited", "New methods `agent_create`, `definition_get`, `definition_update`; `agent_spawn` gains optional `parent`; `AgentStatus` gains optional `parent` and `children`."),
+            ("src/shared/protocol-schemas.ts", "Edited", "Validators for every new and widened shape."),
+            ("tests/protocol.contract.test.ts", "Edited", "The exact method set grows; fixtures for each addition."),
+        ],
+        steps=[
+            "Add `agent_create` params mirroring the peer-store write fields (`name`, `description`, `model?`, `rooms?`, `wake?`, `autonomy?`, `spawns?`, `body`), result `{name, created: boolean}` — `created:false` when the definition already existed unchanged.",
+            "Add `definition_get` `{name}` → the parsed definition plus its source path; `definition_update` `{name, changes}` → `{name, rebuildRequired: boolean}` so a caller learns whether a live worker will rebuild.",
+            "Widen `agent_spawn` with optional `parent` (a peer name) and `AgentStatus` with optional `parent?: string` and `children?: string[]`.",
+            "Update the contract suite's exact-set test and add valid/invalid fixtures per new shape; the no-bump policy note in the protocol header stays accurate.",
+        ],
+        acceptance=[
+            "Every new method and field validates on params and results, with the offending field named on refusal.",
+            "The exact method set in the contract suite matches the implementation.",
+            "Older clients remain wire-compatible: every added field is optional.",
+        ],
+        depends_on=["T-507", "T-605"],
+        out_of_scope=["Serving any of it, which is T-802; TUI consumption, which is EP-09."],
+    ),
+    Task(
+        id="T-802", slug="daemon-hierarchy", title="Daemon hierarchy: parented spawns, cascades, orphan refusal",
+        epic="EP-08", sprint="SP-09", status="Ready",
+        goal="The daemon records who deployed whom, enforces the hierarchy rules, and never leaves an orphan running.",
+        read_first=[
+            ARCH,
+            ("ADR-011: agent hierarchy", "docs/delivery/adr/ADR-011-agent-hierarchy.md"),
+            ("Daemon entry point", "src/daemon/main.ts"),
+            ("Persistence", "src/daemon/db.ts"),
+        ],
+        files=[
+            "src/daemon/db.ts",
+            "src/daemon/main.ts",
+            "src/daemon/socket.ts",
+            "tests/daemon-hierarchy.test.ts",
+        ],
+        assets=[
+            ("src/daemon/db.ts", "Edited", "`agents.parent` column (recreate per the pre-release precedent), tree reads, orphan listing."),
+            ("src/daemon/main.ts", "Edited", "Spawn with parent: cycle rejection, account inheritance, family channel; kill cascades with an explicit keep-children reparent; boot refuses orphaned agents and reports them."),
+            ("src/daemon/socket.ts", "Edited", "Serves T-801's new methods against the store and registry; status carries parent/children."),
+            ("tests/daemon-hierarchy.test.ts", "New", "Tree, cascade, orphan, and cycle cases over the real socket."),
+        ],
+        steps=[
+            "Persist `parent` on the agents table at spawn and expose tree reads (children of, ancestors of).",
+            "On `agent_spawn` with `parent`: reject when the parent is unknown, when the walk from parent reaches the child (cycle), or when the parent is stopped; inherit the parent's account; create and join `#<parent>-team` in place of the parent's rooms.",
+            "`agent_create` delegates to the peer-store write path (parse-validated, atomic); `definition_get`/`definition_update` read and rewrite definitions through the store, and an update that changes policy is answered by T-505's rebuild on next delivery — assert that handoff.",
+            "`kill` stops the whole subtree by default; `keep_children: true` reparents children to root. Boot: an agent whose parent is absent from the registry is not started and is flagged `orphaned` in status.",
+        ],
+        acceptance=[
+            "A spawned child persists its parent across a daemon restart.",
+            "A cycle is rejected at spawn with the path named.",
+            "Killing a parent stops its children; keep-children reparents them to root.",
+            "An agent whose parent is gone is not woken at boot and is flagged orphaned.",
+            "A child inherits the parent's account and joins the family channel, not the parent's rooms.",
+            "A definition update that changes policy is followed by a rebuild on next delivery (T-505's path, exercised end to end).",
+        ],
+        depends_on=["T-801"],
+        out_of_scope=["The toolbelt caller side (T-803) and the TUI tree (EP-09)."],
+    ),
+    Task(
+        id="T-803", slug="toolbelt-authoring", title="Toolbelt: create and parent agents",
+        epic="EP-08", sprint="SP-09", status="Ready",
+        goal="A worker can author and deploy a child peer without leaving its run, and knows when not to.",
+        read_first=[
+            ("Toolbelt", "src/worker/toolbelt.ts"),
+            ("ADR-007: native task delegation", "docs/delivery/adr/ADR-007-native-task-delegation.md"),
+            ("ADR-011: agent hierarchy", "docs/delivery/adr/ADR-011-agent-hierarchy.md"),
+        ],
+        files=["src/worker/toolbelt.ts", "tests/toolbelt.test.ts"],
+        assets=[
+            ("src/worker/toolbelt.ts", "Edited", "`agent_create` tool; `agent_spawn` passes `parent` as the calling worker's own name."),
+            ("tests/toolbelt.test.ts", "Edited", "Authoring flows over the real socket."),
+        ],
+        steps=[
+            "Add the `agent_create` tool: validates fields, calls the socket method, reports the parser's errors verbatim so the model can fix and retry.",
+            "Teach `agent_spawn` to send `parent` as the worker's own name when it wants a child; the tool description states the cooperative-metadata rule (ADR-011) plainly.",
+            "Extend the tool descriptions' selection guidance: native `task` for temporary in-run subagents, child peers for durable teammates, `agent_spawn` without parent for top-level peers. The ADR-007 subtask refusal stays.",
+        ],
+        acceptance=[
+            "A worker creates then spawns a child in one run, over the real socket, with the parent recorded.",
+            "A definition the parser rejects comes back as a tool error carrying the parser's message and no half-written file.",
+            "The child-vs-task guidance is asserted in the tool descriptions so it cannot silently drift.",
+        ],
+        depends_on=["T-802"],
+        out_of_scope=["Connection identity for spawner proof; ADR-011 records why the param is cooperative."],
+    ),
+    Task(
+        id="T-804", slug="authoring-skills", title="Shipped skills for agent and subagent authoring",
+        epic="EP-08", sprint="SP-09", status="Ready",
+        goal="Creating an agent or subagent is a guided skill, not a search through the codebase.",
+        read_first=[
+            ("Skill discovery in OMP", "node_modules/@oh-my-pi/pi-coding-agent/src/extensibility/skills.ts"),
+            ("Materializer skill wiring", "src/daemon/materializer.ts"),
+            ("ADR-011: agent hierarchy", "docs/delivery/adr/ADR-011-agent-hierarchy.md"),
+        ],
+        files=[
+            "skills/omp-agent-authoring/SKILL.md",
+            "skills/omp-subagent-authoring/SKILL.md",
+            "skills/omp-orchestration/SKILL.md",
+            "tests/skills.test.ts",
+            "package.json",
+        ],
+        assets=[
+            ("skills/omp-agent-authoring/SKILL.md", "New", "Authoring a peer definition: format, rooms, wake, autonomy, sandbox, spawns — with the strict parser's error codes."),
+            ("skills/omp-subagent-authoring/SKILL.md", "New", "Authoring native `task` subagents: when temporary is right, spawns policy, output contract."),
+            ("skills/omp-orchestration/SKILL.md", "New", "The selection guide: task vs child peer vs top-level peer vs room message."),
+            ("tests/skills.test.ts", "New", "OMP's real `loadSkills` discovers all three from the package root; frontmatter parses with required fields."),
+            ("package.json", "Edited", "Ships `skills/` in `files` if the manifest does not already cover them."),
+        ],
+        steps=[
+            "Write the three skills in OMP's SKILL.md format (`name` + `description` required), each with the exact frontmatter shape, a worked example, and the failure modes a first-timer hits.",
+            "Prove discovery with OMP's real `loadSkills`/`discoverSkills` against the package root, so an OMP upgrade that breaks the plugins provider fails our suite, not the user.",
+            "Wire the materializer: a peer definition's `skills:` key selects these by name and they land in the worker root (the mechanism exists; prove it with a materialization test).",
+        ],
+        acceptance=[
+            "All three skills are discovered by OMP's real loader from the installed package layout.",
+            "Each skill's frontmatter parses and carries the required fields.",
+            "A worker whose definition selects a skill receives it in the materialized root.",
+        ],
+        depends_on=["T-501"],
+        out_of_scope=["Auto-learning skills from sessions (OMP's managed-skills feature is not ours to drive)."],
+    ),
+]
+
+TASKS += [
+    # ── EP-09: full TUI management surface ────────────────────────────────────
+    Task(
+        id="T-901", slug="tui-tree", title="Hierarchy in /agents and the spawn flow",
+        epic="EP-09", sprint="SP-10", status="Ready",
+        goal="`/agents` renders the agent tree, and `/spawn` can parent a new peer.",
+        read_first=[
+            ("Commands", "src/extension/commands.ts"),
+            ("Widget", "src/extension/widget.ts"),
+            ("ADR-011: agent hierarchy", "docs/delivery/adr/ADR-011-agent-hierarchy.md"),
+        ],
+        files=["src/extension/commands.ts", "src/extension/widget.ts", "tests/extension.test.ts"],
+        assets=[
+            ("src/extension/commands.ts", "Edited", "Tree rendering in `/agents`; parent picker in `/spawn`; orphan flag visible."),
+            ("src/extension/widget.ts", "Edited", "Widget counts stay flat (roots + children); the tree belongs to the command and the manager."),
+            ("tests/extension.test.ts", "Edited", "Tree shape assertions over the real socket."),
+        ],
+        steps=[
+            "Render `/agents` as an indented tree from the status payload's parent/children fields, with the shield and the orphaned marker.",
+            "`/spawn` gains an optional parent selection (a `select` dialog over live peers; root when declined).",
+            "Keep the string-array widget as-is — it caps at ten lines and the tree does not belong there.",
+        ],
+        acceptance=[
+            "A child renders nested under its parent; an orphaned peer is flagged.",
+            "Spawning with a chosen parent lands the child under it, visible on the next `/agents`.",
+            "Every flow degrades cleanly when the daemon is absent.",
+        ],
+        depends_on=["T-802"],
+        out_of_scope=["The full-screen manager, which is T-902."],
+    ),
+    Task(
+        id="T-902", slug="tui-manager", title="Full-screen agent manager",
+        epic="EP-09", sprint="SP-10", status="Ready",
+        goal="A full-screen overlay inside the OMP TUI is the operator's management surface for the agent tree.",
+        read_first=[
+            ("Extension factory", "src/extension/index.ts"),
+            ("OMP custom-surface API", "node_modules/@oh-my-pi/pi-coding-agent/dist/types/extensibility/extensions/types.d.ts"),
+            ("ADR-011: agent hierarchy", "docs/delivery/adr/ADR-011-agent-hierarchy.md"),
+        ],
+        files=["src/extension/manager.ts", "src/extension/index.ts", "tests/extension.test.ts"],
+        assets=[
+            ("src/extension/manager.ts", "New", "The overlay component: tree browse, per-agent action menu, kill with cascade choice, logs, inject, membership editing."),
+            ("src/extension/index.ts", "Edited", "Registers `/manage` and a shortcut; guards `ctx.hasUI`/`ctx.mode`."),
+            ("tests/extension.test.ts", "Edited", "Manager state logic against the real socket; the component is split so logic is testable without a TTY."),
+        ],
+        steps=[
+            "SPIKE FIRST and timebox it: a minimal full-screen overlay rendering the tree and dismissing on Esc, proven in a real OMP TUI session by hand before building further — `ctx.ui.custom` with `overlay: true, fullscreen: true` is the least-documented surface in play.",
+            "Split the manager into a pure state layer (tree model, selected node, pending action) and the component factory, so the suite drives the state layer against the real socket without a TTY.",
+            "Actions per agent: edit definition/model (T-903's flows), logs, inject, kill — with the cascade choice presented explicitly (`kill subtree` vs `keep children`).",
+            "Degrade: without a TUI the command reports that the manager needs one; without a daemon it says so and offers nothing broken.",
+        ],
+        acceptance=[
+            "The overlay opens over the transcript, browses the tree by keyboard, and closes cleanly without disturbing the session.",
+            "Every action goes through the daemon socket; the manager holds no state the daemon does not own.",
+            "The state layer is covered by tests driving the real socket; the spike's risks are named in the report.",
+        ],
+        depends_on=["T-901"],
+        out_of_scope=["Editing flows themselves, which are T-903."],
+    ),
+    Task(
+        id="T-903", slug="tui-editing", title="Definition and model editing flows",
+        epic="EP-09", sprint="SP-10", status="Ready",
+        goal="An operator edits an agent's definition and model in guided dialogs, and the change persists and takes effect.",
+        read_first=[
+            ("Commands", "src/extension/commands.ts"),
+            ("OMP editor/select dialog API", "node_modules/@oh-my-pi/pi-coding-agent/dist/types/extensibility/extensions/types.d.ts"),
+        ],
+        files=["src/extension/commands.ts", "src/extension/manager.ts", "tests/extension.test.ts"],
+        assets=[
+            ("src/extension/commands.ts", "Edited", "`/edit <name>` flows: definition via pre-filled editor, model via selection over configured roles."),
+            ("src/extension/manager.ts", "Edited", "The manager's edit actions call the same flows."),
+            ("tests/extension.test.ts", "Edited", "Edit round trips against the real socket: get → edit → update → staleness handoff."),
+        ],
+        steps=[
+            "`definition_get` → `ctx.ui.editor` with the current document pre-filled → `definition_update` on submit; a parser refusal redisplays the editor with the error, because losing an operator's edit to a validation throw is how dialogs get hated.",
+            "Model editing is a `select` over the configured model roles plus free input; the change persists through `definition_update` and takes effect via the T-505 rebuild on next delivery.",
+            "Assert the handoff: an edited definition reports `rebuildRequired` and the next delivery rebuilds (the daemon suite's T-505 path, driven from the extension suite).",
+        ],
+        acceptance=[
+            "An edited definition persists to the store and reparses; a refused edit loses no input.",
+            "A model change is reflected in the worker's next session without a daemon restart.",
+            "Both flows are reachable from `/edit` and from the manager.",
+        ],
+        depends_on=["T-801", "T-901"],
+        out_of_scope=["Spawning new agents from the editor, which `/spawn` and T-901 cover."],
     ),
 ]
 
