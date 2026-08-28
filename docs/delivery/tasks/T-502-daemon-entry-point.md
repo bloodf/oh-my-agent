@@ -30,7 +30,7 @@
 | `src/daemon/main.ts` (to be created) | New | Composition root. |
 | `src/daemon/socket.ts` (to be created) | New | Serves the T-507 protocol over a unix socket. |
 | `tests/daemon-main.test.ts` (to be created) | New | Boot, socket, single-instance, shutdown. |
-| `src/shared/protocol.ts` (to be created) | Read | The method set and version this server implements. |
+| [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Read | The method set and version this server implements. |
 | [`src/daemon/boot.ts`](../../../src/daemon/boot.ts) | Read | `resolveBrokerHosting` already exists. |
 | [`src/daemon/credential-gateway.ts`](../../../src/daemon/credential-gateway.ts) | Read | Started here. |
 | [`src/daemon/supervisor.ts`](../../../src/daemon/supervisor.ts) | Read | Started here. |

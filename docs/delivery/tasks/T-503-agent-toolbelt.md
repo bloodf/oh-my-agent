@@ -26,7 +26,7 @@ A worker can talk to rooms and peers through tools injected into its own session
 |---|---|---|
 | `src/worker/toolbelt.ts` (to be created) | New | `chat_send`, `chat_read`, `chat_wait`, `agent_spawn`, `agent_status`, `task_handoff`. |
 | `tests/toolbelt.test.ts` (to be created) | New | Tool behavior against a running daemon socket. |
-| `src/shared/protocol.ts` (to be created) | Read | The method set these tools call; do not invent a second one. |
+| [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Read | The method set these tools call; do not invent a second one. |
 | [`src/rooms/store.ts`](../../../src/rooms/store.ts) | Read | Backing bus. |
 | [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) | Read | `classifyAgentSpawn` already exists; reuse it. |
 | `src/daemon/socket.ts` (to be created) | Read | Transport to the daemon. |

@@ -30,7 +30,7 @@ A human can see and steer running agents from inside the OMP TUI.
 | `src/extension/commands.ts` (to be created) | New | `/agents`, `/rooms`, `/schedule`, `/spawn`, `/logs`, `/inject`. |
 | `src/extension/widget.ts` (to be created) | New | Status line. |
 | `tests/extension.test.ts` (to be created) | New | Command output and no-daemon degradation. |
-| `src/shared/protocol.ts` (to be created) | Read | The methods the commands call. |
+| [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Read | The methods the commands call. |
 | `src/daemon/socket.ts` (to be created) | Read | Data source. |
 
 ## Steps

@@ -1496,7 +1496,7 @@ TASKS += [
     ),
     Task(
         id="T-507", slug="control-socket-protocol", title="Control-socket protocol",
-        epic="EP-05", sprint="SP-05", status="Ready",
+        epic="EP-05", sprint="SP-05", status="Done",
         goal="The daemon's JSON-RPC-over-unix-socket contract exists as one typed, versioned artifact that every client and the server share.",
         read_first=[ARCH, ("Test harness", "tests/harness.test.ts"), ("ADR-001: RPC subprocess workers", "docs/delivery/adr/ADR-001-rpc-subprocess-workers.md")],
         files=["src/shared/protocol.ts", "src/shared/protocol-schemas.ts", "tests/protocol.contract.test.ts"],
@@ -1520,6 +1520,11 @@ TASKS += [
             "Changing a method's shape fails the contract suite rather than surfacing as a runtime mismatch in T-502 or T-503.",
         ],
         depends_on=["T-002"],
+        evidence=[
+            ("Versioned contract artifact", "src/shared/protocol.ts"),
+            ("Hand-rolled boundary validation", "src/shared/protocol-schemas.ts"),
+            ("Contract suite, 14 tests", "tests/protocol.contract.test.ts"),
+        ],
         out_of_scope=[
             "Serving the protocol, which is T-502.",
             "Consuming it from a worker, which is T-503.",
@@ -1527,7 +1532,7 @@ TASKS += [
     ),
     Task(
         id="T-501", slug="peer-store", title="Peer store: load definitions from the private paths",
-        epic="EP-05", sprint="SP-05", status="Ready",
+        epic="EP-05", sprint="SP-05", status="Done",
         goal="The daemon can enumerate peer definitions from the user and project private stores.",
         read_first=[ARCH, ("Parser", "src/shared/agent-definition.ts"), ("Discovery contract", "tests/contracts/discovery.contract.test.ts")],
         files=["src/daemon/peer-store.ts", "tests/peer-store.test.ts", "agents/example-researcher.md", "agents/example-reviewer.md"],
@@ -1556,6 +1561,11 @@ TASKS += [
             "Lookup by name returns the shadowing definition.",
         ],
         depends_on=["T-101"],
+        evidence=[
+            ("Peer store with shadowing and error reporting", "src/daemon/peer-store.ts"),
+            ("Peer-store suite, 7 tests incl. mutation-proven shadowing", "tests/peer-store.test.ts"),
+            ("Shipped examples that parse in the suite", "agents/example-reviewer.md"),
+        ],
         out_of_scope=["Materialization, which T-201 already owns."],
     ),
     Task(

@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -25,10 +25,10 @@ The daemon can enumerate peer definitions from the user and project private stor
 
 | Path | Role | Note |
 |---|---|---|
-| `src/daemon/peer-store.ts` (to be created) | New | Enumerates and parses definitions. |
-| `tests/peer-store.test.ts` (to be created) | New | Shadowing, malformed files, empty store. |
-| `agents/example-researcher.md` (to be created) | New | Shipped example definition; §8 promises this directory exists. |
-| `agents/example-reviewer.md` (to be created) | New | Second example, showing `spawns:` and room subscriptions. |
+| [`src/daemon/peer-store.ts`](../../../src/daemon/peer-store.ts) | New | Enumerates and parses definitions. |
+| [`tests/peer-store.test.ts`](../../../tests/peer-store.test.ts) | New | Shadowing, malformed files, empty store. |
+| [`agents/example-researcher.md`](../../../agents/example-researcher.md) | New | Shipped example definition; §8 promises this directory exists. |
+| [`agents/example-reviewer.md`](../../../agents/example-reviewer.md) | New | Second example, showing `spawns:` and room subscriptions. |
 | [`src/shared/agent-definition.ts`](../../../src/shared/agent-definition.ts) | Read | `parsePeerDefinition` already exists; do not reimplement parsing. |
 | [`src/daemon/materializer.ts`](../../../src/daemon/materializer.ts) | Read only, not edited by this task | Consumes the loaded definitions. |
 
@@ -43,12 +43,20 @@ The daemon can enumerate peer definitions from the user and project private stor
 
 ## Acceptance
 
-- [ ] Definitions load from both stores, with project shadowing user.
-- [ ] Neither path is an OMP discovery root, re-asserted here so a future refactor cannot quietly relocate the store into one.
-- [ ] A malformed definition reports its file path and does not abort the whole listing.
-- [ ] A missing or empty store directory yields an empty listing, not an error.
-- [ ] Both shipped examples parse through `parsePeerDefinition` in the suite, so a schema change cannot leave the documentation lying.
-- [ ] Lookup by name returns the shadowing definition.
+- [x] Definitions load from both stores, with project shadowing user.
+- [x] Neither path is an OMP discovery root, re-asserted here so a future refactor cannot quietly relocate the store into one.
+- [x] A malformed definition reports its file path and does not abort the whole listing.
+- [x] A missing or empty store directory yields an empty listing, not an error.
+- [x] Both shipped examples parse through `parsePeerDefinition` in the suite, so a schema change cannot leave the documentation lying.
+- [x] Lookup by name returns the shadowing definition.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Peer store with shadowing and error reporting | [`src/daemon/peer-store.ts`](../../../src/daemon/peer-store.ts) |
+| Peer-store suite, 7 tests incl. mutation-proven shadowing | [`tests/peer-store.test.ts`](../../../tests/peer-store.test.ts) |
+| Shipped examples that parse in the suite | [`agents/example-reviewer.md`](../../../agents/example-reviewer.md) |
 
 ## Out of scope
 

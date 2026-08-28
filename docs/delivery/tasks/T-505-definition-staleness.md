@@ -27,7 +27,7 @@ A parked worker whose definition changed is rebuilt before it is reused.
 |---|---|---|
 | [`src/daemon/supervisor.ts`](../../../src/daemon/supervisor.ts) | Edited | Fingerprint check and rebuild before wake. |
 | [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) | Edited | Replace a parked worker's layout after re-materialization. |
-| `src/daemon/peer-store.ts` (to be created) | Edited | Re-read the definition so the comparison uses current disk state. |
+| [`src/daemon/peer-store.ts`](../../../src/daemon/peer-store.ts) | Edited | Re-read the definition so the comparison uses current disk state. |
 | [`tests/supervisor.test.ts`](../../../tests/supervisor.test.ts) | Edited | Staleness cases; T-405 owns the file. |
 | [`src/shared/agent-definition.ts`](../../../src/shared/agent-definition.ts) | Read | `fingerprintPeerDefinition` already exists. |
 | [`src/daemon/materializer.ts`](../../../src/daemon/materializer.ts) | Read | Performs the rebuild; T-201 owns it. |

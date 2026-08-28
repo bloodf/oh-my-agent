@@ -46,8 +46,8 @@ Every runtime subsystem is built and tested, but nothing a user can launch or lo
 | Task | Title | Status |
 |---|---|---|
 | [T-510](../tasks/T-510-broker-hosting-resolution.md) | Broker hosting resolution at boot | Done |
-| [T-507](../tasks/T-507-control-socket-protocol.md) | Control-socket protocol | Ready |
-| [T-501](../tasks/T-501-peer-store.md) | Peer store: load definitions from the private paths | Ready |
+| [T-507](../tasks/T-507-control-socket-protocol.md) | Control-socket protocol | Done |
+| [T-501](../tasks/T-501-peer-store.md) | Peer store: load definitions from the private paths | Done |
 | [T-502](../tasks/T-502-daemon-entry-point.md) | Daemon entry point | Ready |
 | [T-508](../tasks/T-508-daemon-persistence.md) | Daemon persistence and orphan sweep | Ready |
 | [T-503](../tasks/T-503-agent-toolbelt.md) | Worker toolbelt extension | Ready |

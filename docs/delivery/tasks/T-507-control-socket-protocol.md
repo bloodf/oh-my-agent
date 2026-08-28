@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-05](../epics/EP-05-operator-surface.md) | [SP-05](../sprints/SP-05-operator-surface.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -24,9 +24,9 @@ The daemon's JSON-RPC-over-unix-socket contract exists as one typed, versioned a
 
 | Path | Role | Note |
 |---|---|---|
-| `src/shared/protocol.ts` (to be created) | New | Method names, request and response types, protocol version. |
-| `src/shared/protocol-schemas.ts` (to be created) | New | Runtime validation for every method's params and result. |
-| `tests/protocol.contract.test.ts` (to be created) | New | Pins the wire shape and the version field. |
+| [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | New | Method names, request and response types, protocol version. |
+| [`src/shared/protocol-schemas.ts`](../../../src/shared/protocol-schemas.ts) | New | Runtime validation for every method's params and result. |
+| [`tests/protocol.contract.test.ts`](../../../tests/protocol.contract.test.ts) | New | Pins the wire shape and the version field. |
 
 ## Steps
 
@@ -38,11 +38,19 @@ The daemon's JSON-RPC-over-unix-socket contract exists as one typed, versioned a
 
 ## Acceptance
 
-- [ ] Every declared method has a typed request, a typed response, and runtime validation on both.
-- [ ] An unknown method produces the declared method-not-found error carrying the protocol version.
-- [ ] A malformed params payload is refused at the boundary with the offending field named.
-- [ ] The contract module imports no transport and no daemon state.
-- [ ] Changing a method's shape fails the contract suite rather than surfacing as a runtime mismatch in T-502 or T-503.
+- [x] Every declared method has a typed request, a typed response, and runtime validation on both.
+- [x] An unknown method produces the declared method-not-found error carrying the protocol version.
+- [x] A malformed params payload is refused at the boundary with the offending field named.
+- [x] The contract module imports no transport and no daemon state.
+- [x] Changing a method's shape fails the contract suite rather than surfacing as a runtime mismatch in T-502 or T-503.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Versioned contract artifact | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) |
+| Hand-rolled boundary validation | [`src/shared/protocol-schemas.ts`](../../../src/shared/protocol-schemas.ts) |
+| Contract suite, 14 tests | [`tests/protocol.contract.test.ts`](../../../tests/protocol.contract.test.ts) |
 
 ## Out of scope
 
