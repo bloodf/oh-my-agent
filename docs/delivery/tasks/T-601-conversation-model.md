@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-06](../epics/EP-06-web-console.md) | [SP-06](../sprints/SP-06-conversation-model.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-06](../epics/EP-06-web-console.md) | [SP-06](../sprints/SP-06-conversation-model.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -38,11 +38,19 @@ A message can reply to another, threads have roots, and any participant can reac
 
 ## Acceptance
 
-- [ ] A reply carries its parent, and its thread root resolves to the top of the chain.
-- [ ] Reacting twice with the same emoji leaves one reaction.
-- [ ] Removing a reaction that was never added is a no-op, not an error.
-- [ ] `listMessages` returns reply counts and reactions without a second query.
-- [ ] Existing wake and unread behavior is unchanged, proven by the current room suite passing untouched.
+- [x] A reply carries its parent, and its thread root resolves to the top of the chain.
+- [x] Reacting twice with the same emoji leaves one reaction.
+- [x] Removing a reaction that was never added is a no-op, not an error.
+- [x] `listMessages` returns reply counts and reactions without a second query.
+- [x] Existing wake and unread behavior is unchanged, proven by the current room suite passing untouched.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Threaded store with derived roots and aggregated reactions | [`src/rooms/store.ts`](../../../src/rooms/store.ts) |
+| Room suite with non-vacuous conversation coverage | [`tests/rooms.test.ts`](../../../tests/rooms.test.ts) |
+| Commit | `2563a0e` |
 
 ## Out of scope
 

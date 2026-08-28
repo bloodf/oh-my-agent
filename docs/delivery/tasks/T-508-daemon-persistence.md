@@ -25,7 +25,7 @@ Agents, runs, and schedules survive a daemon restart, and worker directories lef
 | Path | Role | Note |
 |---|---|---|
 | `src/daemon/db.ts` (to be created) | New | `agents`, `runs`, `schedules` tables and their accessors. |
-| `src/daemon/main.ts` (to be created) | Edited | Opens the database and runs the sweep during boot. |
+| [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | Opens the database and runs the sweep during boot. |
 | `tests/daemon-persistence.test.ts` (to be created) | New | Restart survival, run records, sweep. |
 | [`src/rooms/store.ts`](../../../src/rooms/store.ts) | Read | The existing SQLite conventions to follow, not a second style. |
 | [`src/daemon/materializer.ts`](../../../src/daemon/materializer.ts) | Read | Owns the `workers/` layout the sweep cleans up. |

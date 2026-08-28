@@ -29,7 +29,7 @@ A worker can talk to rooms and peers through tools injected into its own session
 | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Read | The method set these tools call; do not invent a second one. |
 | [`src/rooms/store.ts`](../../../src/rooms/store.ts) | Read | Backing bus. |
 | [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) | Read | `classifyAgentSpawn` already exists; reuse it. |
-| `src/daemon/socket.ts` (to be created) | Read | Transport to the daemon. |
+| [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Read | Transport to the daemon. |
 
 ## Steps
 

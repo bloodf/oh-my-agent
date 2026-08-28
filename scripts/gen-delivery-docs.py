@@ -1822,7 +1822,7 @@ TASKS += [
     # ── EP-06: web console ───────────────────────────────────────────────────
     Task(
         id="T-601", slug="conversation-model", title="Threads, replies, and reactions in the store",
-        epic="EP-06", sprint="SP-06", status="Ready",
+        epic="EP-06", sprint="SP-06", status="Done",
         goal="A message can reply to another, threads have roots, and any participant can react to a message.",
         read_first=[ARCH, ("Room store", "src/rooms/store.ts"), ("Room suite", "tests/rooms.test.ts")],
         files=["src/rooms/store.ts", "tests/rooms.test.ts"],
@@ -1849,6 +1849,11 @@ TASKS += [
         out_of_scope=[
             "Any HTTP surface; T-602 owns that.",
             "Schema migration for existing room databases. Nothing is deployed yet, so a migration path would be maintenance for a population of zero; the store is recreated instead.",
+        ],
+        evidence=[
+            ("Threaded store with derived roots and aggregated reactions", "src/rooms/store.ts"),
+            ("Room suite with non-vacuous conversation coverage", "tests/rooms.test.ts"),
+            ("Commit", "2563a0e"),
         ],
     ),
     Task(
