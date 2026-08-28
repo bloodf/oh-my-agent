@@ -1957,7 +1957,7 @@ TASKS += [
     ),
     Task(
         id="T-602", slug="console-api", title="Daemon HTTP and WebSocket API",
-        epic="EP-06", sprint="SP-07", status="Blocked",
+        epic="EP-06", sprint="SP-07", status="Done",
         goal="A browser can read and change agents, channels, and messages over HTTP, and receive live updates.",
         read_first=[ARCH, ("Daemon entry point", "docs/delivery/tasks/T-502-daemon-entry-point.md"), ("Conversation model", "docs/delivery/tasks/T-601-conversation-model.md")],
         files=["src/daemon/console-api.ts", "tests/console-api.test.ts"],
@@ -1982,6 +1982,10 @@ TASKS += [
             "The server binds loopback and refuses a request with no operator token.",
         ],
         out_of_scope=["The browser client; T-603 owns it."],
+        evidence=[
+            ("Token-gated console server with live feed", "src/daemon/console-api.ts"),
+            ("Console API suite, 22 tests with a ten-mutation non-vacuity matrix", "tests/console-api.test.ts"),
+        ],
         depends_on=["T-502", "T-601"],
     ),
     Task(

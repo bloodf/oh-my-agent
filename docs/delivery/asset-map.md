@@ -21,7 +21,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `src/console/style.css` | not yet | [T-603](tasks/T-603-console-client.md) | — |
 | `src/daemon/account-registry.ts` | yes | [T-404](tasks/T-404-account-registry.md) | [T-405](tasks/T-405-supervisor.md), [T-506](tasks/T-506-metered-budget-wiring.md) |
 | `src/daemon/boot.ts` | yes | [T-510](tasks/T-510-broker-hosting-resolution.md) | [T-502](tasks/T-502-daemon-entry-point.md) |
-| `src/daemon/console-api.ts` | not yet | [T-602](tasks/T-602-console-api.md), [T-605](tasks/T-605-console-management.md) | [T-603](tasks/T-603-console-client.md) |
+| `src/daemon/console-api.ts` | yes | [T-602](tasks/T-602-console-api.md), [T-605](tasks/T-605-console-management.md) | [T-603](tasks/T-603-console-client.md) |
 | `src/daemon/credential-gateway.ts` | yes | [T-301](tasks/T-301-credential-gateway.md), [T-302](tasks/T-302-shared-disable-recovery.md), [T-303](tasks/T-303-client-integration.md) | [T-004](tasks/T-004-broker-contract.md), [T-510](tasks/T-510-broker-hosting-resolution.md), [T-502](tasks/T-502-daemon-entry-point.md) |
 | `src/daemon/db.ts` | yes | [T-508](tasks/T-508-daemon-persistence.md) | — |
 | `src/daemon/main.ts` | yes | [T-502](tasks/T-502-daemon-entry-point.md), [T-508](tasks/T-508-daemon-persistence.md) | — |
@@ -46,7 +46,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/` | yes | [T-704](tasks/T-704-deflake-intermittent-test.md) | — |
 | `tests/account-registry.test.ts` | yes | [T-404](tasks/T-404-account-registry.md) | — |
 | `tests/agent-definition.test.ts` | yes | [T-101](tasks/T-101-peer-definition-parser.md) | — |
-| `tests/console-api.test.ts` | not yet | [T-602](tasks/T-602-console-api.md) | — |
+| `tests/console-api.test.ts` | yes | [T-602](tasks/T-602-console-api.md) | — |
 | `tests/contracts/broker.contract.test.ts` | yes | [T-004](tasks/T-004-broker-contract.md) | — |
 | `tests/contracts/discovery.contract.test.ts` | yes | [T-003](tasks/T-003-discovery-contract.md), [T-007](tasks/T-007-hermetic-child-environments.md) | — |
 | `tests/contracts/spawn-policy.contract.test.ts` | yes | [T-005](tasks/T-005-spawn-policy-contract.md) | — |

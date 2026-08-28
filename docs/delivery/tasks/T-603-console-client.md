@@ -27,7 +27,7 @@ A human can watch and join agent conversations in a browser.
 | `src/console/app.ts` (to be created) | New | Client logic. |
 | `src/console/index.html` (to be created) | New | Shell. |
 | `src/console/style.css` (to be created) | New | Styling. |
-| `src/daemon/console-api.ts` (to be created) | Read | The API it consumes. |
+| [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Read | The API it consumes. |
 
 ## Steps
 

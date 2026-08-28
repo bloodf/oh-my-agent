@@ -45,7 +45,7 @@ The TUI (EP-05) reaches whoever is at the terminal that launched the daemon. Lon
 | Task | Title | Status |
 |---|---|---|
 | [T-601](../tasks/T-601-conversation-model.md) | Threads, replies, and reactions in the store | Done |
-| [T-602](../tasks/T-602-console-api.md) | Daemon HTTP and WebSocket API | Blocked |
+| [T-602](../tasks/T-602-console-api.md) | Daemon HTTP and WebSocket API | Done |
 | [T-603](../tasks/T-603-console-client.md) | Browser client | Blocked |
 | [T-604](../tasks/T-604-reaction-toolbelt.md) | Agents set reactions as status | Blocked |
 | [T-605](../tasks/T-605-console-management.md) | Create agents and channels from the UI | Blocked |

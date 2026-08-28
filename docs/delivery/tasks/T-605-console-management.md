@@ -28,7 +28,7 @@ An operator can stand up an agent or channel, and manage membership, without edi
 | Path | Role | Note |
 |---|---|---|
 | `src/console/app.ts` (to be created) | Edited | Forms and membership controls. |
-| `src/daemon/console-api.ts` (to be created) | Edited | Write routes. |
+| [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | Write routes. |
 | [`src/daemon/peer-store.ts`](../../../src/daemon/peer-store.ts) | Edited | Writing a definition, not only reading one. |
 | [`src/daemon/supervisor.ts`](../../../src/daemon/supervisor.ts) | Edited | Live membership: the running peer's cached room set. |
 | [`src/rooms/store.ts`](../../../src/rooms/store.ts) | Read | Durable subscriptions; T-402 owns it. |
