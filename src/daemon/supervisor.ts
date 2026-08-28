@@ -49,6 +49,8 @@ export interface RegisterPeerOptions {
 	/** Account whose quota governs this peer. */
 	accountId: string;
 	mode: AccountMode;
+	/** Configured dollar ceiling for a metered account. */
+	budgetUsd?: number;
 	/** Rooms the peer subscribes to, from its `rooms:` frontmatter. */
 	rooms: string[];
 	wake?: {
@@ -68,25 +70,44 @@ interface Peer {
 export class Supervisor {
 	readonly registry: AccountRegistry;
 	#peers = new Map<string, Peer>();
+	#accountConfigs = new Map<
+		string,
+		{ mode: AccountMode; budgetUsd: number | undefined }
+	>();
+	#heldNotifications = new Map<string, string[]>();
 	/** In-flight resume work, so callers can await the autonomous path. */
 	#inFlight = new Set<Promise<void>>();
 	/** Serialize each peer's prompt and acknowledgement cycle. */
 	#deliveries = new Map<string, Promise<boolean>>();
+	/** Serialize held notification flushes per account. */
+	#notificationFlushes = new Map<string, Promise<void>>();
 
 	constructor(private deps: SupervisorDeps) {
 		this.registry = new AccountRegistry({
 			scheduler: deps.scheduler,
 			now: deps.now,
-			onPark: (_accountId, runIds) => {
+			onPark: (accountId, runIds) => {
 				for (const runId of runIds) this.#track(this.#parkPeer(runId));
+				const budget = this.#accountConfigs.get(accountId)?.budgetUsd;
+				if (budget !== undefined) {
+					this.#queueAccountNotification(
+						accountId,
+						`Metered account ${accountId} exhausted its $${budget} budget; a budget bump is required.`,
+					);
+				}
 			},
-			onResume: (_accountId, runIds) => {
-				// Resuming must also deliver: nobody is watching, so a restarted
-				// worker with a full room backlog would otherwise sit idle.
-				for (const runId of runIds) this.#track(this.#resumePeer(runId));
+			onResume: (accountId, runIds) => {
+				this.#track(this.#resumeAccount(accountId, runIds));
 			},
-			onWarning: () => {},
-			// Waking is what the registry gates; delivery is this module's job.
+			onWarning: (accountId) => {
+				const budget = this.#accountConfigs.get(accountId)?.budgetUsd;
+				if (budget !== undefined) {
+					this.#queueAccountNotification(
+						accountId,
+						`Metered account ${accountId} reached 80% of its $${budget} budget.`,
+					);
+				}
+			},
 			onWake: () => {},
 		});
 	}
@@ -115,28 +136,43 @@ export class Supervisor {
 		}
 	}
 
-	async #resumePeer(runId: string): Promise<void> {
+	async #resumePeer(runId: string): Promise<boolean> {
 		const peer = this.#peers.get(runId);
-		if (!peer) return;
+		if (!peer) return false;
 		try {
 			await peer.worker.resume();
-			await this.deliver(runId);
+			return true;
 		} catch (error) {
-			// A failed resume must not strand the daemon; surface and move on.
 			this.deps.onError?.(error, runId);
+			return false;
+		}
+	}
+
+	async #resumeAccount(accountId: string, runIds: string[]): Promise<void> {
+		const resumed: string[] = [];
+		for (const runId of runIds) {
+			if (await this.#resumePeer(runId)) resumed.push(runId);
+		}
+
+		if (this.#accountConfigs.get(accountId)?.budgetUsd !== undefined) {
+			await this.#postAccountNotification(
+				accountId,
+				`Metered account ${accountId} resumed after its budget bump.`,
+			);
+		}
+
+		for (const runId of resumed) {
+			try {
+				await this.deliver(runId);
+			} catch (error) {
+				this.deps.onError?.(error, runId);
+			}
 		}
 	}
 
 	async register(options: RegisterPeerOptions): Promise<void> {
-		const { worker, accountId, mode, rooms, wake = {} } = options;
-		this.registry.register(accountId, mode);
-		this.registry.addRun(accountId, worker.name);
-		this.#peers.set(worker.name, {
-			worker,
-			accountId,
-			rooms: new Set(rooms),
-			wake,
-		});
+		const { worker, accountId, mode, rooms, wake = {}, budgetUsd } = options;
+		this.#validateAccountConfig(accountId, mode, budgetUsd);
 
 		for (const room of rooms) {
 			// The daemon owns room existence: a peer declaring a room in its
@@ -146,6 +182,101 @@ export class Supervisor {
 				kind: room.startsWith("@") ? "dm" : "channel",
 			});
 			await this.deps.rooms.subscribe(worker.name, room);
+		}
+
+		const existing = this.#validateAccountConfig(accountId, mode, budgetUsd);
+		if (!existing) this.#accountConfigs.set(accountId, { mode, budgetUsd });
+		this.registry.register(accountId, mode);
+		this.registry.addRun(accountId, worker.name);
+		this.#peers.set(worker.name, {
+			worker,
+			accountId,
+			rooms: new Set(rooms),
+			wake,
+		});
+		try {
+			await this.#flushAccountNotifications(accountId);
+		} catch (error) {
+			this.deps.onError?.(error, accountId);
+		}
+	}
+
+	#validateAccountConfig(
+		accountId: string,
+		mode: AccountMode,
+		budgetUsd: number | undefined,
+	): { mode: AccountMode; budgetUsd: number | undefined } | undefined {
+		if (mode === "metered" && budgetUsd === undefined) {
+			// A metered account with no ceiling warns and parks against nothing;
+			// refuse the incoherent state rather than silently never notifying.
+			throw new Error(`Metered account without a budget: ${accountId}`);
+		}
+		const existing = this.#accountConfigs.get(accountId);
+		if (
+			existing &&
+			(existing.mode !== mode || existing.budgetUsd !== budgetUsd)
+		) {
+			throw new Error(`Conflicting account configuration: ${accountId}`);
+		}
+		return existing;
+	}
+
+	#accountRoom(accountId: string): string | undefined {
+		const rooms = new Set<string>();
+		for (const peer of this.#peers.values()) {
+			if (peer.accountId !== accountId) continue;
+			for (const room of peer.rooms) rooms.add(room);
+		}
+		return [...rooms].sort()[0];
+	}
+
+	#queueAccountNotification(accountId: string, body: string): void {
+		this.#track(
+			this.#postAccountNotification(accountId, body).catch((error) => {
+				this.deps.onError?.(error, accountId);
+			}),
+		);
+	}
+
+	async #postAccountNotification(
+		accountId: string,
+		body: string,
+	): Promise<void> {
+		const room = this.#accountRoom(accountId);
+		if (!room) {
+			const held = this.#heldNotifications.get(accountId) ?? [];
+			held.push(body);
+			this.#heldNotifications.set(accountId, held);
+			this.deps.onError?.(
+				new Error(`No subscribed room for account notification: ${accountId}`),
+				accountId,
+			);
+			return;
+		}
+		await this.post({ room, author: "@system", body });
+	}
+
+	async #flushAccountNotifications(accountId: string): Promise<void> {
+		const previous =
+			this.#notificationFlushes.get(accountId) ?? Promise.resolve();
+		const flush = previous
+			.catch(() => {})
+			.then(async () => {
+				const held = this.#heldNotifications.get(accountId);
+				if (!held || !this.#accountRoom(accountId)) return;
+				while (held.length > 0) {
+					await this.#postAccountNotification(accountId, held[0]);
+					held.shift();
+				}
+				this.#heldNotifications.delete(accountId);
+			});
+		this.#notificationFlushes.set(accountId, flush);
+		try {
+			await flush;
+		} finally {
+			if (this.#notificationFlushes.get(accountId) === flush) {
+				this.#notificationFlushes.delete(accountId);
+			}
 		}
 	}
 
@@ -249,6 +380,17 @@ export class Supervisor {
 			mentionPending.map((message) => message.id),
 		);
 		return true;
+	}
+
+	/** Update a metered account's configured ceiling, then reset its latch. */
+	bumpBudget(accountId: string, budgetUsd: number, meter = 0): void {
+		const config = this.#accountConfigs.get(accountId);
+		if (!config) throw new Error(`Unknown account: ${accountId}`);
+		if (config.mode !== "metered") {
+			throw new Error(`Cannot bump subscription account: ${accountId}`);
+		}
+		this.registry.bumpBudget(accountId, meter);
+		this.#accountConfigs.set(accountId, { ...config, budgetUsd });
 	}
 
 	/** Record a quota block; parking and the resume timer follow from it. */

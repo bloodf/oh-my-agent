@@ -79,6 +79,7 @@ async function harness() {
 
 	let now = 1_000_000;
 	const timers: { delayMs: number; callback: () => void }[] = [];
+	const errors: { error: unknown; peerName: string }[] = [];
 	const scheduler = new Scheduler({
 		now: () => now,
 		setTimer: (callback, delayMs) => {
@@ -90,13 +91,19 @@ async function harness() {
 	scheduler.start();
 
 	const stub = stubWorker();
-	const supervisor = new Supervisor({ rooms, scheduler, now: () => now });
+	const supervisor = new Supervisor({
+		rooms,
+		scheduler,
+		now: () => now,
+		onError: (error, peerName) => errors.push({ error, peerName }),
+	});
 
 	return {
 		rooms,
 		scheduler,
 		supervisor,
 		stub,
+		errors,
 		timers,
 		advanceTo: (ms: number) => {
 			now = ms;
@@ -249,7 +256,8 @@ describe("room message delivery", () => {
 		});
 
 		expect(woken).toEqual(["reviewer"]);
-		expect(h.stub.prompts[0]).toContain("Please review.");
+		expect(h.stub.prompts).toEqual(["[#reviews] @you: Please review."]);
+		expect(await h.rooms.unreadCount("reviewer", "#reviews")).toBe(0);
 	});
 });
 
@@ -335,6 +343,350 @@ describe("quota park and auto-resume", () => {
 		// And nothing is left pending afterwards.
 		expect(await h.supervisor.deliver("reviewer")).toBe(false);
 	});
+});
+
+// ── Metered budget notifications (T-506) ────────────────────────────────────
+
+describe("metered budget notifications", () => {
+	test("80% posts one warning with account and budget to one deterministic room", async () => {
+		const h = await harness();
+		const second = stubWorker("second");
+		await h.supervisor.register({
+			worker: h.stub.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: ["#z-budget"],
+		});
+		await h.supervisor.register({
+			worker: second.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: ["#a-budget"],
+		});
+
+		h.supervisor.registry.updateMeter("acct-metered", 0.8);
+		h.supervisor.registry.updateMeter("acct-metered", 0.9);
+		await h.supervisor.settled();
+
+		const selected = await h.rooms.listMessages("#a-budget", {});
+		expect(selected.map((message) => message.body)).toEqual([
+			"Metered account acct-metered reached 80% of its $10 budget.",
+		]);
+		expect(await h.rooms.listMessages("#z-budget", {})).toEqual([]);
+		expect(
+			second.prompts.filter((prompt) => prompt.includes("reached 80%")),
+		).toHaveLength(1);
+		expect(
+			h.stub.prompts.filter((prompt) => prompt.includes("reached 80%")),
+		).toHaveLength(0);
+	});
+
+	test("100% parks runs and posts a bump-required message", async () => {
+		const h = await harness();
+		await h.supervisor.register({
+			worker: h.stub.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 12.5,
+			rooms: ["#budget"],
+		});
+
+		h.supervisor.registry.updateMeter("acct-metered", 1);
+		await h.supervisor.settled();
+
+		expect(h.stub.state).toBe("parked");
+		const messages = await h.rooms.listMessages("#budget", {});
+		expect(messages.map((message) => message.body)).toEqual([
+			"Metered account acct-metered exhausted its $12.5 budget; a budget bump is required.",
+		]);
+	});
+
+	test("a bump posts resume state and delivers the pre-existing backlog", async () => {
+		const h = await harness();
+		await h.supervisor.register({
+			worker: h.stub.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: ["#budget"],
+		});
+		h.supervisor.registry.updateMeter("acct-metered", 1);
+		await h.supervisor.settled();
+		await h.rooms.post({ room: "#budget", author: "@you", body: "Backlog." });
+
+		h.supervisor.bumpBudget("acct-metered", 20, 0);
+		await h.supervisor.settled();
+
+		expect(h.stub.state).toBe("running");
+		expect(h.stub.prompts.join("\n")).toContain("Backlog.");
+		expect(h.stub.prompts.join("\n")).toContain(
+			"Metered account acct-metered resumed after its budget bump.",
+		);
+		expect(await h.supervisor.deliver("reviewer")).toBe(false);
+	});
+
+	test("a fresh 80% crossing after a bump warns again", async () => {
+		const h = await harness();
+		await h.supervisor.register({
+			worker: h.stub.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: ["#budget"],
+		});
+
+		h.supervisor.registry.updateMeter("acct-metered", 0.8);
+		await h.supervisor.settled();
+		h.supervisor.registry.updateMeter("acct-metered", 1);
+		await h.supervisor.settled();
+		h.supervisor.bumpBudget("acct-metered", 20, 0);
+		await h.supervisor.settled();
+		h.supervisor.registry.updateMeter("acct-metered", 0.8);
+		await h.supervisor.settled();
+
+		const messages = await h.rooms.listMessages("#budget", {});
+		expect(
+			messages
+				.filter((message) => message.body.includes("reached 80%"))
+				.map((message) => message.body),
+		).toEqual([
+			"Metered account acct-metered reached 80% of its $10 budget.",
+			"Metered account acct-metered reached 80% of its $20 budget.",
+		]);
+	});
+
+	test("failed room setup publishes no peer, run, or account config", async () => {
+		const h = await harness();
+		const originalSubscribe = h.rooms.subscribe.bind(h.rooms);
+		h.rooms.subscribe = async (agent, room) => {
+			if (room === "#broken") throw new Error("subscribe failed");
+			await originalSubscribe(agent, room);
+		};
+
+		await expect(
+			h.supervisor.register({
+				worker: h.stub.worker,
+				accountId: "acct-setup",
+				mode: "metered",
+				budgetUsd: 10,
+				rooms: ["#durable", "#broken"],
+			}),
+		).rejects.toThrow("subscribe failed");
+
+		expect(() => h.supervisor.registry.updateMeter("acct-setup", 0.8)).toThrow(
+			"Unknown account: acct-setup",
+		);
+		await h.supervisor.post({
+			room: "#durable",
+			author: "@you",
+			body: "Must not reach failed peer.",
+		});
+		expect(h.stub.prompts).toEqual([]);
+
+		h.rooms.subscribe = originalSubscribe;
+		const later = stubWorker("later");
+		await h.supervisor.register({
+			worker: later.worker,
+			accountId: "acct-setup",
+			mode: "subscription",
+			rooms: ["#later"],
+		});
+		await h.supervisor.applyBlock("acct-setup", block());
+		await h.supervisor.settled();
+		expect(later.state).toBe("parked");
+	});
+
+	test("no-room warning is held, logged, then flushed when a room appears", async () => {
+		const h = await harness();
+		await h.supervisor.register({
+			worker: h.stub.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: [],
+		});
+
+		expect(() =>
+			h.supervisor.registry.updateMeter("acct-metered", 0.8),
+		).not.toThrow();
+		await h.supervisor.settled();
+		expect(h.errors).toHaveLength(1);
+		expect(h.errors[0].peerName).toBe("acct-metered");
+
+		const later = stubWorker("later");
+		await h.supervisor.register({
+			worker: later.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: ["#later"],
+		});
+
+		const messages = await h.rooms.listMessages("#later", {});
+		expect(messages.map((message) => message.body)).toEqual([
+			"Metered account acct-metered reached 80% of its $10 budget.",
+		]);
+	});
+
+	test("held notification survives a failed flush and retries later", async () => {
+		const h = await harness();
+		await h.supervisor.register({
+			worker: h.stub.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: [],
+		});
+		h.supervisor.registry.updateMeter("acct-metered", 0.8);
+		await h.supervisor.settled();
+
+		const originalPost = h.rooms.post.bind(h.rooms);
+		h.rooms.post = async () => {
+			throw new Error("post failed");
+		};
+		const later = stubWorker("later");
+		await expect(
+			h.supervisor.register({
+				worker: later.worker,
+				accountId: "acct-metered",
+				mode: "metered",
+				budgetUsd: 10,
+				rooms: ["#later"],
+			}),
+		).resolves.toBeUndefined();
+		expect(h.errors).toHaveLength(2);
+		expect(h.errors[1].peerName).toBe("acct-metered");
+		expect(h.errors[1].error).toEqual(new Error("post failed"));
+
+		h.rooms.post = originalPost;
+		const retry = stubWorker("retry");
+		await h.supervisor.register({
+			worker: retry.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: ["#later"],
+		});
+
+		const messages = await h.rooms.listMessages("#later", {});
+		expect(messages.map((message) => message.body)).toEqual([
+			"Metered account acct-metered reached 80% of its $10 budget.",
+		]);
+	});
+
+	test("concurrent registrations flush one held warning exactly once", async () => {
+		const h = await harness();
+		await h.supervisor.register({
+			worker: h.stub.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: [],
+		});
+		h.supervisor.registry.updateMeter("acct-metered", 0.8);
+		await h.supervisor.settled();
+
+		const firstPost = Promise.withResolvers<void>();
+		const releasePost = Promise.withResolvers<void>();
+		const secondSubscribed = Promise.withResolvers<void>();
+		const originalPost = h.rooms.post.bind(h.rooms);
+		const originalSubscribe = h.rooms.subscribe.bind(h.rooms);
+		h.rooms.post = async (input) => {
+			firstPost.resolve();
+			await releasePost.promise;
+			return originalPost(input);
+		};
+		h.rooms.subscribe = async (agent, room) => {
+			await originalSubscribe(agent, room);
+			if (agent === "second") secondSubscribed.resolve();
+		};
+
+		const first = stubWorker("first");
+		const firstRegistration = h.supervisor.register({
+			worker: first.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: ["#a-warning"],
+		});
+		await firstPost.promise;
+		const second = stubWorker("second");
+		const secondRegistration = h.supervisor.register({
+			worker: second.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: ["#z-warning"],
+		});
+		await secondSubscribed.promise;
+		await Bun.sleep(0);
+		releasePost.resolve();
+		await Promise.all([firstRegistration, secondRegistration]);
+
+		const messages = [
+			...(await h.rooms.listMessages("#a-warning", {})),
+			...(await h.rooms.listMessages("#z-warning", {})),
+		];
+		expect(
+			messages.filter((message) => message.body.includes("reached 80%")),
+		).toHaveLength(1);
+		expect(
+			[...first.prompts, ...second.prompts].filter((prompt) =>
+				prompt.includes("reached 80%"),
+			),
+		).toHaveLength(1);
+	});
+
+	test("invalid bump meter preserves the configured budget", async () => {
+		const h = await harness();
+		await h.supervisor.register({
+			worker: h.stub.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: ["#budget"],
+		});
+
+		expect(() => h.supervisor.bumpBudget("acct-metered", 20, 2)).toThrow(
+			"Meter must be between 0 and 1",
+		);
+		h.supervisor.registry.updateMeter("acct-metered", 0.8);
+		await h.supervisor.settled();
+
+		const messages = await h.rooms.listMessages("#budget", {});
+		expect(messages.map((message) => message.body)).toEqual([
+			"Metered account acct-metered reached 80% of its $10 budget.",
+		]);
+	});
+
+	test.each([
+		{ label: "mode", mode: "subscription" as const, budgetUsd: 10 },
+		{ label: "budget", mode: "metered" as const, budgetUsd: 11 },
+	])(
+		"conflicting $label registration is rejected",
+		async ({ mode, budgetUsd }) => {
+			const h = await harness();
+			await h.supervisor.register({
+				worker: h.stub.worker,
+				accountId: "acct-metered",
+				mode: "metered",
+				budgetUsd: 10,
+				rooms: [],
+			});
+
+			await expect(
+				h.supervisor.register({
+					worker: stubWorker("conflict").worker,
+					accountId: "acct-metered",
+					mode,
+					budgetUsd,
+					rooms: [],
+				}),
+			).rejects.toThrow("Conflicting account configuration: acct-metered");
+		},
+	);
 });
 
 // ── Registry wiring ──────────────────────────────────────────────────────────

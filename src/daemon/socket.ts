@@ -118,8 +118,8 @@ export interface DaemonContext {
 	spawnPeer(name: string): Promise<AgentSpawnResult>;
 	/** Enable or disable an armed schedule. Returns undefined when unknown. */
 	armSchedule(id: string, enabled: boolean): ScheduleInfo | undefined;
-	/** Clear an account's park state. Returns the peers the bump resumed. */
-	bumpAccount(accountId: string): Promise<string[]>;
+	/** Raise a metered account's ceiling and resume it. Returns the peers the bump resumed. */
+	bumpAccount(accountId: string, budgetUsd: number): Promise<string[]>;
 }
 
 export interface ControlSocket {
@@ -377,9 +377,10 @@ export async function startControlSocket(
 		},
 
 		bump: async (params): Promise<BumpResult> => {
-			const resumed = await context.bumpAccount(params.account);
-			// The registry tracks a 0..1 meter, not dollars, so the new ceiling is
-			// echoed rather than stored: T-506 owns metered budget accounting.
+			const resumed = await context.bumpAccount(
+				params.account,
+				params.budgetUsd,
+			);
 			return {
 				account: params.account,
 				budgetUsd: params.budgetUsd,

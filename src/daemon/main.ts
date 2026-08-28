@@ -419,6 +419,9 @@ export async function bootDaemon(
 				// Parsed wake filters govern delivery; absent means
 				// subscription-scoped only (T-509).
 				wake: definition.wake,
+				// The cap itself: without it a metered account's warnings and
+				// parks can never fire (T-506).
+				budgetUsd: definition.autonomy?.budgetUsd,
 			});
 
 			peers.set(name, {
@@ -594,7 +597,10 @@ export async function bootDaemon(
 			};
 		};
 
-		const bumpAccount = async (accountId: string): Promise<string[]> => {
+		const bumpAccount = async (
+			accountId: string,
+			budgetUsd: number,
+		): Promise<string[]> => {
 			const parkedBefore = [...peers]
 				.filter(
 					([, record]) =>
@@ -602,11 +608,10 @@ export async function bootDaemon(
 				)
 				.map(([name]) => name);
 
-			// The registry takes a 0..1 meter, so a raised ceiling means spend is
-			// now a smaller fraction of it — zero is the only value a bump can
-			// assert without knowing the dollars already burned (T-506 owns those).
-			supervisor.registry.register(accountId, "metered");
-			supervisor.registry.bumpBudget(accountId, 0);
+			// The supervisor's bump raises the ceiling, resets the meter latch,
+			// posts the resume, and delivers the backlog; the registry's raw
+			// bump alone would leave the old ceiling in the room message.
+			supervisor.bumpBudget(accountId, budgetUsd);
 			await supervisor.settled();
 
 			return parkedBefore.filter(
