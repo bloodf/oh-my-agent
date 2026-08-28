@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -534,6 +535,552 @@ describe("RoomStore persistence", () => {
 				} finally {
 					await store.close();
 				}
+			}
+		});
+	});
+});
+
+// ── T-601: Threading ──────────────────────────────────────────────────────────
+
+describe("RoomStore threading — parentId and threadRootId", () => {
+	test("direct reply sets parentId and threadRootId to parent", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const root = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "root",
+				});
+				const reply = await store.post({
+					room: "gen",
+					author: "bob",
+					body: "reply",
+					parentId: root.id,
+				});
+				expect(reply.parentId).toBe(root.id);
+				expect(reply.threadRootId).toBe(root.id);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("reply-to-reply derives threadRootId from top ancestor", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const root = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "root",
+				});
+				const child = await store.post({
+					room: "gen",
+					author: "bob",
+					body: "child",
+					parentId: root.id,
+				});
+				const grandchild = await store.post({
+					room: "gen",
+					author: "carol",
+					body: "grandchild",
+					parentId: child.id,
+				});
+				expect(grandchild.parentId).toBe(child.id);
+				expect(grandchild.threadRootId).toBe(root.id);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("top-level message has parentId null and threadRootId null", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const msg = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "standalone",
+				});
+				expect(msg.parentId).toBeNull();
+				expect(msg.threadRootId).toBeNull();
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("cross-room parent is rejected", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "roomA", kind: "channel" });
+				await store.createRoom({ id: "roomB", kind: "channel" });
+				const inA = await store.post({
+					room: "roomA",
+					author: "alice",
+					body: "in A",
+				});
+				await expect(
+					store.post({
+						room: "roomB",
+						author: "bob",
+						body: "cross-room reply",
+						parentId: inA.id,
+					}),
+				).rejects.toThrow();
+			} finally {
+				await store.close();
+			}
+		});
+	});
+});
+
+// ── T-601: replyCount aggregation in listMessages ─────────────────────────────
+
+describe("RoomStore.listMessages — replyCount and reactions fields", () => {
+	test("each listed message has replyCount field", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const root = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "root",
+				});
+				await store.post({
+					room: "gen",
+					author: "bob",
+					body: "reply",
+					parentId: root.id,
+				});
+				const msgs = await store.listMessages("gen", {});
+				for (const m of msgs) {
+					expect(typeof m.replyCount).toBe("number");
+				}
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("root replyCount equals number of direct replies", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const root = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "root",
+				});
+				await store.post({
+					room: "gen",
+					author: "bob",
+					body: "r1",
+					parentId: root.id,
+				});
+				await store.post({
+					room: "gen",
+					author: "carol",
+					body: "r2",
+					parentId: root.id,
+				});
+				const msgs = await store.listMessages("gen", {});
+				const rootMsg = msgs.find((m) => m.id === root.id);
+				expect(rootMsg?.replyCount).toBe(2);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("grandchild reply does not inflate root replyCount", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const root = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "root",
+				});
+				const child = await store.post({
+					room: "gen",
+					author: "bob",
+					body: "child",
+					parentId: root.id,
+				});
+				await store.post({
+					room: "gen",
+					author: "carol",
+					body: "grand",
+					parentId: child.id,
+				});
+				const msgs = await store.listMessages("gen", {});
+				const rootMsg = msgs.find((m) => m.id === root.id);
+				expect(rootMsg?.replyCount).toBe(1);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("each listed message has reactions array", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				await store.post({ room: "gen", author: "alice", body: "msg" });
+				const msgs = await store.listMessages("gen", {});
+				for (const m of msgs) {
+					expect(Array.isArray(m.reactions)).toBe(true);
+				}
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("reactions include actor and emoji fields", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const msg = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "msg",
+				});
+				await store.react(msg.id, "bob", "👍");
+				const msgs = await store.listMessages("gen", {});
+				const listed = msgs.find((m) => m.id === msg.id);
+				expect(listed?.reactions).toHaveLength(1);
+				expect(listed?.reactions[0].actor).toBe("bob");
+				expect(listed?.reactions[0].emoji).toBe("👍");
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("loads populated conversation metadata with exactly one SQLite read", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const root = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "root",
+				});
+				await store.post({
+					room: "gen",
+					author: "bob",
+					body: "reply",
+					parentId: root.id,
+				});
+				await store.react(root.id, "carol", "👍");
+
+				const prepareSpy = spyOn(Database.prototype, "prepare");
+				try {
+					const messages = await store.listMessages("gen", {});
+
+					expect(messages).toHaveLength(2);
+					expect(prepareSpy).toHaveBeenCalledTimes(1);
+				} finally {
+					prepareSpy.mockRestore();
+				}
+			} finally {
+				await store.close();
+			}
+		});
+	});
+});
+
+// ── T-601: RoomStore.react ────────────────────────────────────────────────────
+
+describe("RoomStore.react", () => {
+	test("react adds a reaction entry visible in listMessages", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const msg = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "hello",
+				});
+				await store.react(msg.id, "bob", "❤️");
+				const msgs = await store.listMessages("gen", {});
+				const listed = msgs.find((m) => m.id === msg.id);
+				expect(
+					listed?.reactions.some((r) => r.actor === "bob" && r.emoji === "❤️"),
+				).toBe(true);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("duplicate react (same message+actor+emoji) remains one row", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const msg = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "hello",
+				});
+				await store.react(msg.id, "bob", "👍");
+				await store.react(msg.id, "bob", "👍");
+				const msgs = await store.listMessages("gen", {});
+				const listed = msgs.find((m) => m.id === msg.id);
+				const count =
+					listed?.reactions.filter((r) => r.actor === "bob" && r.emoji === "👍")
+						.length ?? 0;
+				expect(count).toBe(1);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("multiple actors on same message all appear", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const msg = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "hello",
+				});
+				await store.react(msg.id, "bob", "👍");
+				await store.react(msg.id, "carol", "👍");
+				const msgs = await store.listMessages("gen", {});
+				const listed = msgs.find((m) => m.id === msg.id);
+				const actors = listed?.reactions.map((r) => r.actor).sort() ?? [];
+				expect(actors).toEqual(["bob", "carol"]);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("same actor different emojis both appear", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const msg = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "hello",
+				});
+				await store.react(msg.id, "bob", "👍");
+				await store.react(msg.id, "bob", "❤️");
+				const msgs = await store.listMessages("gen", {});
+				const listed = msgs.find((m) => m.id === msg.id);
+				const emojis =
+					listed?.reactions
+						.filter((r) => r.actor === "bob")
+						.map((r) => r.emoji)
+						.sort() ?? [];
+				expect(emojis).toEqual(["❤️", "👍"].sort());
+			} finally {
+				await store.close();
+			}
+		});
+	});
+});
+
+// ── T-601: RoomStore.unreact ──────────────────────────────────────────────────
+
+describe("RoomStore.unreact", () => {
+	test("unreact removes existing reaction", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const msg = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "hello",
+				});
+				await store.react(msg.id, "bob", "👍");
+				await store.unreact(msg.id, "bob", "👍");
+				const msgs = await store.listMessages("gen", {});
+				const listed = msgs.find((m) => m.id === msg.id);
+				expect(
+					listed?.reactions.some((r) => r.actor === "bob" && r.emoji === "👍"),
+				).toBe(false);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("unreact on never-added reaction is a no-op", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const msg = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "hello",
+				});
+				await expect(
+					store.unreact(msg.id, "bob", "👍"),
+				).resolves.toBeUndefined();
+				const msgs = await store.listMessages("gen", {});
+				const listed = msgs.find((m) => m.id === msg.id);
+				expect(listed?.reactions).toHaveLength(0);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("unreact only removes the matched emoji, others remain", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				const msg = await store.post({
+					room: "gen",
+					author: "alice",
+					body: "hello",
+				});
+				await store.react(msg.id, "bob", "👍");
+				await store.react(msg.id, "bob", "❤️");
+				await store.unreact(msg.id, "bob", "👍");
+				const msgs = await store.listMessages("gen", {});
+				const listed = msgs.find((m) => m.id === msg.id);
+				expect(listed?.reactions).toHaveLength(1);
+				expect(listed?.reactions[0].emoji).toBe("❤️");
+			} finally {
+				await store.close();
+			}
+		});
+	});
+});
+
+// ── T-601: reactions do not affect unread count ───────────────────────────────
+
+describe("reactions do not affect unread count", () => {
+	test("reacting to a message does not increase unreadCount", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				await store.subscribe("alice", "gen");
+				const msg = await store.post({
+					room: "gen",
+					author: "bob",
+					body: "hello",
+				});
+				await store.markRead("alice", "gen", msg.id);
+				const before = await store.unreadCount("alice", "gen");
+				await store.react(msg.id, "carol", "👍");
+				const after = await store.unreadCount("alice", "gen");
+				expect(after).toBe(before);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+});
+
+// ── T-601: threaded replies in pendingForAgent ────────────────────────────────
+
+describe("pendingForAgent with threaded messages", () => {
+	test("threaded reply appears in pendingForAgent with parentId and threadRootId", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				await store.subscribe("alice", "gen");
+				const root = await store.post({
+					room: "gen",
+					author: "bob",
+					body: "root",
+				});
+				const reply = await store.post({
+					room: "gen",
+					author: "carol",
+					body: "reply",
+					parentId: root.id,
+				});
+				const pending = await store.pendingForAgent("alice");
+				const batch = pending.find((p) => p.room === "gen");
+				const pendingReply = batch?.messages.find((m) => m.id === reply.id);
+				expect(pendingReply?.parentId).toBe(root.id);
+				expect(pendingReply?.threadRootId).toBe(root.id);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("pendingForAgent delivers both root and reply as unread messages", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				await store.subscribe("alice", "gen");
+				const root = await store.post({
+					room: "gen",
+					author: "bob",
+					body: "root",
+				});
+				await store.post({
+					room: "gen",
+					author: "carol",
+					body: "reply",
+					parentId: root.id,
+				});
+				const pending = await store.pendingForAgent("alice");
+				const batch = pending.find((p) => p.room === "gen");
+				expect(batch?.messages.length).toBe(2);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("pendingForAgent messages include reactions array", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "gen", kind: "channel" });
+				await store.subscribe("alice", "gen");
+				const msg = await store.post({
+					room: "gen",
+					author: "bob",
+					body: "hello",
+				});
+				await store.react(msg.id, "carol", "👍");
+				const pending = await store.pendingForAgent("alice");
+				const batch = pending.find((p) => p.room === "gen");
+				const pendingMsg = batch?.messages.find((m) => m.id === msg.id);
+				expect(Array.isArray(pendingMsg?.reactions)).toBe(true);
+				expect(
+					pendingMsg?.reactions.some(
+						(r: { actor: string; emoji: string }) =>
+							r.actor === "carol" && r.emoji === "👍",
+					),
+				).toBe(true);
+			} finally {
+				await store.close();
 			}
 		});
 	});

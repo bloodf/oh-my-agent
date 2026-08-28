@@ -1,12 +1,16 @@
 /**
- * @oh-my-agent/rooms — bun:sqlite RoomStore
+ * @oh-my-agent/rooms - bun:sqlite RoomStore
  *
- * Purpose:        Persistent room/message/subscription store for multi-agent collaboration.
- * Public API:      RoomStore.open(), createRoom(), post(), listMessages(), subscribe(), markRead(), unreadCount(), pendingForAgent(), close()
+ * Purpose:        Persistent room, threaded-message, reaction, and subscription store for multi-agent collaboration.
+ * Public API:      RoomStore.open(), createRoom(), post(), listMessages(), react(), unreact(), subscribe(), markRead(), unreadCount(), pendingForAgent(), close();
+ *                  Room { id, kind }, RoomKind; MessageReaction { actor, emoji };
+ *                  RoomMessage { id, room, author, body, createdAt, parentId, threadRootId, replyCount, reactions };
+ *                  CreateRoomInput { id, kind }; PostMessageInput { room, author, body, createdAt?, parentId? };
+ *                  PendingRoom { room, messages }.
  * Upstream deps:   bun:sqlite (Database), node:fs/promises (mkdir)
  * Downstream consumers: extension/index.ts, any agent code importing this module
- * Failure modes:   INVALID_ROOM (missing/invalid id or kind mismatch), INVALID_MESSAGE (empty author or body), ROOM_NOT_FOUND, NOT_SUBSCRIBED, MESSAGE_NOT_IN_ROOM, INVALID_PAGE (pagination bounds violation), close idempotent (no-op if already closed)
- * Performance:     Synchronous SQLite; rooms.id, messages.id (PK), subscriptions(agent,room) (PK) indexed; WAL journal mode.
+ * Failure modes:   INVALID_ROOM, INVALID_MESSAGE, INVALID_REACTION, ROOM_NOT_FOUND, MESSAGE_NOT_FOUND, MESSAGE_NOT_IN_ROOM, NOT_SUBSCRIBED, INVALID_PAGE; react/unreact and close are idempotent.
+ * Performance:     Synchronous SQLite with WAL; listMessages() and pendingForAgent() aggregate thread metadata and reactions in one query each; message parent and reaction keys are indexed.
  */
 
 import { Database } from "bun:sqlite";
@@ -19,12 +23,21 @@ export interface Room {
 	kind: RoomKind;
 }
 
+export interface MessageReaction {
+	actor: string;
+	emoji: string;
+}
+
 export interface RoomMessage {
 	id: number;
 	room: string;
 	author: string;
 	body: string;
 	createdAt: number;
+	parentId: number | null;
+	threadRootId: number | null;
+	replyCount: number;
+	reactions: MessageReaction[];
 }
 
 export interface CreateRoomInput {
@@ -37,11 +50,35 @@ export interface PostMessageInput {
 	author: string;
 	body: string;
 	createdAt?: number;
+	parentId?: number | null;
 }
 
 export interface PendingRoom {
 	room: string;
 	messages: RoomMessage[];
+}
+interface MessageRow {
+	id: number;
+	room: string;
+	author: string;
+	body: string;
+	created_at: number;
+	parent_id: number | null;
+	thread_root_id: number | null;
+	reply_count: number;
+	reactions: string;
+}
+
+interface NullableMessageRow {
+	id: number | null;
+	room: string;
+	author: string | null;
+	body: string | null;
+	created_at: number | null;
+	parent_id: number | null;
+	thread_root_id: number | null;
+	reply_count: number;
+	reactions: string;
 }
 
 export class RoomStore {
@@ -69,7 +106,18 @@ export class RoomStore {
         author     TEXT NOT NULL,
         body       TEXT NOT NULL,
         created_at INTEGER NOT NULL,
-        FOREIGN KEY (room) REFERENCES rooms(id)
+        parent_id  INTEGER,
+        UNIQUE (id, room),
+        FOREIGN KEY (room) REFERENCES rooms(id),
+        FOREIGN KEY (parent_id, room) REFERENCES messages(id, room)
+      );
+      CREATE INDEX IF NOT EXISTS messages_parent_id_idx ON messages(parent_id);
+      CREATE TABLE IF NOT EXISTS reactions (
+        message_id INTEGER NOT NULL,
+        actor      TEXT NOT NULL CHECK (length(trim(actor)) > 0),
+        emoji      TEXT NOT NULL CHECK (length(trim(emoji)) > 0),
+        PRIMARY KEY (message_id, actor, emoji),
+        FOREIGN KEY (message_id) REFERENCES messages(id)
       );
       CREATE TABLE IF NOT EXISTS subscriptions (
         agent        TEXT NOT NULL,
@@ -86,20 +134,36 @@ export class RoomStore {
 		return { id: row.id, kind: row.kind as RoomKind };
 	}
 
-	private mapMessage(row: {
-		id: number;
-		room: string;
-		author: string;
-		body: string;
-		created_at: number;
-	}): RoomMessage {
+	private mapMessage(row: MessageRow): RoomMessage {
 		return {
 			id: row.id,
 			room: row.room,
 			author: row.author,
 			body: row.body,
 			createdAt: row.created_at,
+			parentId: row.parent_id,
+			threadRootId: row.thread_root_id,
+			replyCount: row.reply_count,
+			reactions: JSON.parse(row.reactions) as MessageReaction[],
 		};
+	}
+
+	private mapNullableMessage(row: NullableMessageRow): RoomMessage | null {
+		if (
+			row.id === null ||
+			row.author === null ||
+			row.body === null ||
+			row.created_at === null
+		) {
+			return null;
+		}
+		return this.mapMessage({
+			...row,
+			id: row.id,
+			author: row.author,
+			body: row.body,
+			created_at: row.created_at,
+		});
 	}
 
 	async createRoom(input: CreateRoomInput): Promise<Room> {
@@ -130,18 +194,40 @@ export class RoomStore {
 			.prepare("SELECT id FROM rooms WHERE id = ?")
 			.get(input.room) as { id: string } | undefined;
 		if (!room) throw new Error("ROOM_NOT_FOUND");
+
+		const parentId = input.parentId ?? null;
+		let threadRootId: number | null = null;
+		if (parentId !== null) {
+			const root = this.db
+				.prepare(
+					`WITH RECURSIVE ancestors(id, parent_id) AS (
+						SELECT id, parent_id FROM messages WHERE id = ? AND room = ?
+						UNION ALL
+						SELECT m.id, m.parent_id FROM messages m JOIN ancestors a ON m.id = a.parent_id
+					)
+					SELECT id FROM ancestors WHERE parent_id IS NULL`,
+				)
+				.get(parentId, input.room) as { id: number } | undefined;
+			if (!root) throw new Error("MESSAGE_NOT_IN_ROOM");
+			threadRootId = root.id;
+		}
+
 		const createdAt = input.createdAt ?? Date.now();
 		const result = this.db
 			.prepare(
-				"INSERT INTO messages (room, author, body, created_at) VALUES (?, ?, ?, ?)",
+				"INSERT INTO messages (room, author, body, created_at, parent_id) VALUES (?, ?, ?, ?, ?)",
 			)
-			.run(input.room, input.author, body, createdAt);
+			.run(input.room, input.author, body, createdAt, parentId);
 		return {
 			id: Number(result.lastInsertRowid),
 			room: input.room,
 			author: input.author,
-			body: input.body,
+			body,
 			createdAt,
+			parentId,
+			threadRootId,
+			replyCount: 0,
+			reactions: [],
 		};
 	}
 
@@ -150,11 +236,6 @@ export class RoomStore {
 		opts: { afterId?: number; limit?: number },
 	): Promise<RoomMessage[]> {
 		if (!roomId) throw new Error("ROOM_NOT_FOUND");
-		const room = this.db
-			.prepare("SELECT id FROM rooms WHERE id = ?")
-			.get(roomId) as { id: string } | undefined;
-		if (!room) throw new Error("ROOM_NOT_FOUND");
-
 		if (opts.afterId !== undefined) {
 			if (!Number.isInteger(opts.afterId) || opts.afterId < 0)
 				throw new Error("INVALID_PAGE");
@@ -164,25 +245,77 @@ export class RoomStore {
 				throw new Error("INVALID_PAGE");
 		}
 
-		let sql =
-			"SELECT id, room, author, body, created_at FROM messages WHERE room = ?";
+		let messageFilter = "";
 		const args: (string | number)[] = [roomId];
 		if (opts.afterId !== undefined) {
-			sql += " AND id > ?";
+			messageFilter = " AND id > ?";
 			args.push(opts.afterId);
 		}
-		sql += " ORDER BY id ASC";
-		if (opts.limit !== undefined) {
-			sql += ` LIMIT ${opts.limit}`;
+		let limit = "";
+		if (opts.limit !== undefined) limit = ` LIMIT ${opts.limit}`;
+		const rows = this.db
+			.prepare(
+				`WITH RECURSIVE
+				selected AS (
+					SELECT * FROM messages WHERE room = ?${messageFilter} ORDER BY id ASC${limit}
+				),
+				ancestry(message_id, ancestor_id, parent_id) AS (
+					SELECT id, id, parent_id FROM selected
+					UNION ALL
+					SELECT a.message_id, p.id, p.parent_id
+					FROM ancestry a JOIN messages p ON p.id = a.parent_id
+				),
+				thread_roots AS (
+					SELECT message_id, MAX(CASE WHEN parent_id IS NULL AND ancestor_id != message_id THEN ancestor_id END) AS thread_root_id
+					FROM ancestry GROUP BY message_id
+				)
+				SELECT m.id, r.id AS room, m.author, m.body, m.created_at, m.parent_id,
+					tr.thread_root_id,
+					(SELECT COUNT(*) FROM messages child WHERE child.parent_id = m.id) AS reply_count,
+					COALESCE((
+						SELECT json_group_array(json_object('actor', actor, 'emoji', emoji))
+						FROM (SELECT actor, emoji FROM reactions WHERE message_id = m.id ORDER BY actor, emoji)
+					), '[]') AS reactions
+				FROM rooms r
+				LEFT JOIN selected m ON true
+				LEFT JOIN thread_roots tr ON tr.message_id = m.id
+				WHERE r.id = ?
+				ORDER BY m.id ASC`,
+			)
+			.all(...args, roomId) as NullableMessageRow[];
+		if (rows.length === 0) throw new Error("ROOM_NOT_FOUND");
+		const messages: RoomMessage[] = [];
+		for (const row of rows) {
+			const message = this.mapNullableMessage(row);
+			if (message) messages.push(message);
 		}
-		const rows = this.db.prepare(sql).all(...args) as {
-			id: number;
-			room: string;
-			author: string;
-			body: string;
-			created_at: number;
-		}[];
-		return rows.map((r) => this.mapMessage(r));
+		return messages;
+	}
+
+	async react(messageId: number, actor: string, emoji: string): Promise<void> {
+		if (!actor?.trim() || !emoji?.trim()) throw new Error("INVALID_REACTION");
+		const message = this.db
+			.prepare("SELECT id FROM messages WHERE id = ?")
+			.get(messageId);
+		if (!message) throw new Error("MESSAGE_NOT_FOUND");
+		this.db
+			.prepare(
+				"INSERT OR IGNORE INTO reactions (message_id, actor, emoji) VALUES (?, ?, ?)",
+			)
+			.run(messageId, actor, emoji);
+	}
+
+	async unreact(
+		messageId: number,
+		actor: string,
+		emoji: string,
+	): Promise<void> {
+		if (!actor?.trim() || !emoji?.trim()) throw new Error("INVALID_REACTION");
+		this.db
+			.prepare(
+				"DELETE FROM reactions WHERE message_id = ? AND actor = ? AND emoji = ?",
+			)
+			.run(messageId, actor, emoji);
 	}
 
 	async subscribe(agent: string, roomId: string): Promise<void> {
@@ -249,19 +382,35 @@ export class RoomStore {
 	async pendingForAgent(agent: string): Promise<PendingRoom[]> {
 		const rows = this.db
 			.prepare(
-				`SELECT s.room, m.id, m.author, m.body, m.created_at
-         FROM subscriptions s
-         LEFT JOIN messages m ON m.room = s.room AND m.id > s.last_read_id
-         WHERE s.agent = ?
-         ORDER BY s.room, m.id ASC`,
+				`WITH RECURSIVE
+				pending AS (
+					SELECT s.room AS subscribed_room, m.*
+					FROM subscriptions s
+					LEFT JOIN messages m ON m.room = s.room AND m.id > s.last_read_id
+					WHERE s.agent = ?
+				),
+				ancestry(message_id, ancestor_id, parent_id) AS (
+					SELECT id, id, parent_id FROM pending WHERE id IS NOT NULL
+					UNION ALL
+					SELECT a.message_id, p.id, p.parent_id
+					FROM ancestry a JOIN messages p ON p.id = a.parent_id
+				),
+				thread_roots AS (
+					SELECT message_id, MAX(CASE WHEN parent_id IS NULL AND ancestor_id != message_id THEN ancestor_id END) AS thread_root_id
+					FROM ancestry GROUP BY message_id
+				)
+				SELECT p.subscribed_room AS room, p.id, p.author, p.body, p.created_at, p.parent_id,
+					tr.thread_root_id,
+					CASE WHEN p.id IS NULL THEN 0 ELSE (SELECT COUNT(*) FROM messages child WHERE child.parent_id = p.id) END AS reply_count,
+					CASE WHEN p.id IS NULL THEN '[]' ELSE COALESCE((
+						SELECT json_group_array(json_object('actor', actor, 'emoji', emoji))
+						FROM (SELECT actor, emoji FROM reactions WHERE message_id = p.id ORDER BY actor, emoji)
+					), '[]') END AS reactions
+				FROM pending p
+				LEFT JOIN thread_roots tr ON tr.message_id = p.id
+				ORDER BY p.subscribed_room, p.id ASC`,
 			)
-			.all(agent) as {
-			room: string;
-			id: number | null;
-			author: string | null;
-			body: string | null;
-			created_at: number | null;
-		}[];
+			.all(agent) as NullableMessageRow[];
 
 		const map = new Map<string, PendingRoom>();
 		for (const row of rows) {
@@ -270,20 +419,8 @@ export class RoomStore {
 				pending = { room: row.room, messages: [] };
 				map.set(row.room, pending);
 			}
-			if (
-				row.id !== null &&
-				row.author !== null &&
-				row.body !== null &&
-				row.created_at !== null
-			) {
-				pending.messages.push({
-					id: row.id,
-					room: row.room,
-					author: row.author,
-					body: row.body,
-					createdAt: row.created_at,
-				});
-			}
+			const message = this.mapNullableMessage(row);
+			if (message) pending.messages.push(message);
 		}
 		return Array.from(map.values());
 	}
