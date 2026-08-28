@@ -1,31 +1,52 @@
 {
-  "name": "@bloodf/oh-my-agent",
-  "version": "0.1.0",
-  "type": "module",
-  "description": "OMP plugin for autonomous long-lived multi-agent collaboration",
-  "files": [
-    "src"
-  ],
-  "peerDependencies": {
-    "@oh-my-pi/pi-coding-agent": "^18.0.7"
-  },
-  "devDependencies": {
-    "@oh-my-pi/pi-ai": "^18.0.7",
-    "@oh-my-pi/pi-coding-agent": "^18.0.7",
-    "@oh-my-pi/pi-utils": "^18.0.7",
-    "@types/bun": "latest",
-    "typescript": "latest"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "bun test"
-  },
-  "omp": {
-    "name": "oh-my-agent",
-    "version": "0.1.0",
-    "description": "OMP plugin for autonomous long-lived multi-agent collaboration",
-    "extensions": [
-      "src/extension/index.ts"
-    ]
-  }
+	"name": "@bloodf/oh-my-agent",
+	"version": "0.1.0",
+	"type": "module",
+	"description": "OMP plugin for autonomous long-lived multi-agent collaboration",
+	"license": "MIT",
+	"keywords": [
+		"omp",
+		"oh-my-pi",
+		"agents",
+		"multi-agent",
+		"automation"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+ssh://git@github.com/bloodf/oh-my-agent.git"
+	},
+	"homepage": "https://github.com/bloodf/oh-my-agent#readme",
+	"bugs": "https://github.com/bloodf/oh-my-agent/issues",
+	"engines": {
+		"bun": ">=1.3.14"
+	},
+	"files": [
+		"src"
+	],
+	"peerDependencies": {
+		"@oh-my-pi/pi-coding-agent": "^18.0.7"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.11",
+		"@oh-my-pi/pi-ai": "^18.0.7",
+		"@oh-my-pi/pi-coding-agent": "^18.0.7",
+		"@oh-my-pi/pi-utils": "^18.0.7",
+		"@types/bun": "latest",
+		"typescript": "latest"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "bun test",
+		"lint": "biome check .",
+		"format": "biome check --write .",
+		"docs": "python3 scripts/gen-delivery-docs.py"
+	},
+	"omp": {
+		"name": "oh-my-agent",
+		"version": "0.1.0",
+		"description": "OMP plugin for autonomous long-lived multi-agent collaboration",
+		"extensions": [
+			"src/extension/index.ts"
+		]
+	}
 }

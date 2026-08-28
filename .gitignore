@@ -6,6 +6,9 @@ dist/
 build/
 out/
 .DS_Store
+__pycache__/
+# OMP worker runtime state written when omp runs in this repo
+.pi/
 # dinostack (agentic-engineering) - .agentic/ runtime state; see the !.agentic/<file> negations below for what is committed
 .agentic/*
 !.agentic/config.json
