@@ -1,5 +1,5 @@
 /**
- * Purpose: Expose the worker's eight daemon-backed collaboration tools without
+ * Purpose: Expose the worker's nine daemon-backed collaboration tools without
  *          giving worker processes direct access to daemon state or room data.
  *
  * Public API: default extension factory `(pi: ExtensionAPI): void`.
@@ -30,6 +30,7 @@ const TOOL_NAMES = [
 	"chat_send",
 	"chat_read",
 	"chat_wait",
+	"agent_create",
 	"agent_spawn",
 	"agent_status",
 	"task_handoff",
@@ -45,6 +46,9 @@ const REACTION_EMOJIS = ["👀", "⏳", "✅", "❌"] as const;
 type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
 type ReactionMethod = "chat_react" | "chat_unreact";
 
+const SELECTION_GUIDANCE =
+	"native task for temporary in-run subagents; agent_create then agent_spawn with parent for persistent children; agent_spawn without parent for top-level peers; post to a room to talk to an existing peer";
+
 interface ReactionParams {
 	messageId: number;
 	emoji: ReactionEmoji;
@@ -54,6 +58,14 @@ interface ReactionResult {
 	messageId: number;
 	emoji: ReactionEmoji;
 	reacted: boolean;
+}
+
+interface SpawnToolParams {
+	name: string;
+	rooms?: string[];
+	cwd?: string;
+	parent?: boolean;
+	expected_output?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -250,7 +262,7 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "chat_send",
 		label: "Send chat message",
-		description: "Post a message to a daemon room.",
+		description: `Post a message to a daemon room. Use this to talk to an existing peer; ${SELECTION_GUIDANCE}.`,
 		loadMode: "essential",
 		parameters: z.object({
 			room: z.string().describe("Room id"),
@@ -323,10 +335,44 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
+		name: "agent_create",
+		label: "Create peer definition",
+		description: `Write a parse-validated peer definition without starting it. ${SELECTION_GUIDANCE}.`,
+		loadMode: "essential",
+		parameters: z.object({
+			name: z.string().describe("Peer definition name"),
+			description: z.string().describe("Peer purpose"),
+			model: z.array(z.string()).optional().describe("Ordered model choices"),
+			rooms: z.array(z.string()).optional().describe("Default rooms"),
+			wake: z
+				.object({
+					mention: z.boolean().optional(),
+					rooms: z.boolean().optional(),
+				})
+				.optional()
+				.describe("Wake policy"),
+			autonomy: z
+				.object({
+					maxTurns: z.number().optional(),
+					budgetUsd: z.number().optional(),
+				})
+				.optional()
+				.describe("Run limits"),
+			spawns: z
+				.union([z.array(z.string()), z.literal("*")])
+				.optional()
+				.describe("Native task-agent allowlist"),
+			body: z.string().describe("Peer instructions"),
+		}),
+		approval: "write",
+		execute: async (_id, params, signal) =>
+			await call("agent_create", params, signal),
+	});
+
+	pi.registerTool({
 		name: "agent_spawn",
 		label: "Spawn durable peer",
-		description:
-			"Create a durable peer with its own lifecycle, rooms, and budget. Never use for coding or one-shot subtasks; dispatch those through native task.",
+		description: `Start a durable peer with its own lifecycle, rooms, and budget. Never use for coding or one-shot subtasks; dispatch those through native task. ${SELECTION_GUIDANCE}. Parentage is cooperative metadata, never an authority boundary.`,
 		loadMode: "essential",
 		parameters: z.object({
 			name: z.string().describe("Peer definition name"),
@@ -335,6 +381,10 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 				.optional()
 				.describe("Rooms the durable peer joins"),
 			cwd: z.string().optional().describe("Peer working directory"),
+			parent: z
+				.boolean()
+				.optional()
+				.describe("Set true to deploy this peer as your persistent child"),
 			expected_output: z
 				.string()
 				.optional()
@@ -342,10 +392,12 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 		}),
 		approval: "write",
 		execute: async (_id, params, signal) => {
-			const spawnParams = params as AgentSpawnParams & {
-				expected_output?: string;
-			};
-			if (classifyAgentSpawn({ ...spawnParams }) === "subtask") {
+			const spawnParams = params as SpawnToolParams;
+			if (
+				spawnParams.expected_output !== undefined ||
+				(spawnParams.parent !== true &&
+					classifyAgentSpawn({ ...spawnParams }) === "subtask")
+			) {
 				return toolError(
 					"agent_spawn creates durable peers only; dispatch coding and one-shot subtasks through native task.",
 				);
@@ -355,6 +407,14 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 				rooms: spawnParams.rooms,
 				cwd: spawnParams.cwd,
 			};
+			if (spawnParams.parent === true) {
+				if (actor === undefined) {
+					return toolError(
+						"worker identity unavailable; cannot record child parentage",
+					);
+				}
+				daemonParams.parent = actor;
+			}
 			return await call("agent_spawn", daemonParams, signal);
 		},
 	});

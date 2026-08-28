@@ -6,6 +6,7 @@ import * as zod from "@oh-my-pi/omptype/zod";
 import type { ExtensionAPI, ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
 import { materializeWorker } from "../src/daemon/materializer";
+import { createPeerStore, type PeerStore } from "../src/daemon/peer-store";
 import { Scheduler } from "../src/daemon/scheduler";
 import {
 	type DaemonContext,
@@ -44,6 +45,8 @@ async function harness(): Promise<{
 	spawnCalls: string[];
 	workerPrompts: string[];
 	socketPath: string;
+	store: PeerStore;
+	projectAgentRoot: string;
 }> {
 	const rootDir = await mkdtemp(join(tmpdir(), "oma-toolbelt-"));
 	const agentDir = join(
@@ -57,6 +60,11 @@ async function harness(): Promise<{
 	await mkdir(agentDir, { recursive: true });
 	const socketPath = join(rootDir, "daemon.sock");
 	const rooms = await RoomStore.open(join(rootDir, "rooms.sqlite"));
+	const projectAgentRoot = join(rootDir, "project-agents");
+	const store = createPeerStore({
+		user: join(rootDir, "user-agents"),
+		project: projectAgentRoot,
+	});
 	await rooms.createRoom({ id: "#general", kind: "channel" });
 
 	const workerPrompts: string[] = [];
@@ -100,10 +108,19 @@ async function harness(): Promise<{
 			await rooms.createRoom({ id, kind });
 			context.knownRooms.set(id, { id, kind, name: id });
 		},
-		spawnPeer: async (name): Promise<AgentSpawnResult> => {
+		spawnPeer: async (name, options): Promise<AgentSpawnResult> => {
 			spawnCalls.push(name);
+			peers.set(name, {
+				worker: { ...worker, name },
+				accountId: "test",
+				rooms: [],
+				...(options?.parent === undefined ? {} : { parent: options.parent }),
+			});
 			return { name, state: "running" };
 		},
+		store,
+		writeDefinition: async (fields, options) =>
+			await store.write(fields, options),
 		armSchedule: () => undefined,
 		bumpAccount: async () => [],
 	};
@@ -124,7 +141,9 @@ async function harness(): Promise<{
 	return {
 		tools,
 		rooms,
+		store,
 		supervisor,
+		projectAgentRoot,
 		spawnCalls,
 		workerPrompts,
 		socketPath,
@@ -165,7 +184,7 @@ function messageId(result: ToolResult): number {
 }
 
 describe("worker toolbelt", () => {
-	test("registers eight additive tools and states their conventions", async () => {
+	test("registers nine additive tools and pins their selection guidance", async () => {
 		const { tools } = await harness();
 		expect([...tools.keys()]).toEqual([
 			"chat_send",
@@ -173,12 +192,18 @@ describe("worker toolbelt", () => {
 			"chat_wait",
 			"chat_react",
 			"chat_unreact",
+			"agent_create",
 			"agent_spawn",
 			"agent_status",
 			"task_handoff",
 		]);
-		expect(tools.get("agent_spawn")?.description).toContain("durable peer");
-		expect(tools.get("agent_spawn")?.description).toContain("native task");
+		const guidance =
+			"native task for temporary in-run subagents; agent_create then agent_spawn with parent for persistent children; agent_spawn without parent for top-level peers; post to a room to talk to an existing peer";
+		expect(tools.get("agent_create")?.description).toContain(guidance);
+		expect(tools.get("agent_spawn")?.description).toContain(guidance);
+		expect(tools.get("agent_spawn")?.description).toContain(
+			"Parentage is cooperative metadata, never an authority boundary.",
+		);
 		const reactionDescription = tools.get("chat_react")?.description ?? "";
 		for (const convention of ["👀", "⏳", "✅", "❌"]) {
 			expect(reactionDescription).toContain(convention);
@@ -275,6 +300,55 @@ describe("worker toolbelt", () => {
 			summary: "Take over review",
 		});
 		expect(handoff.details).toMatchObject({ handoffId: "#general:2" });
+	});
+
+	test("creates then spawns a persistent child through the production socket", async () => {
+		const { tools } = await harness();
+		const created = await invoke(tools, "agent_create", {
+			name: "qa",
+			description: "Checks the work.",
+			model: ["anthropic/claude-sonnet-4-5"],
+			spawns: ["scout"],
+			rooms: ["#qa"],
+			body: "You are qa.",
+		});
+		expect(created.details).toEqual({ name: "qa", created: true });
+
+		const spawned = await invoke(tools, "agent_spawn", {
+			name: "qa",
+			parent: true,
+		});
+		expect(spawned.details).toEqual({ name: "qa", state: "running" });
+		const status = await invoke(tools, "agent_status", { name: "qa" });
+		expect(status.details).toMatchObject({
+			agents: [{ name: "qa", parent: "reviewer" }],
+		});
+	});
+
+	test("refuses one-shot markers even when child parentage is requested", async () => {
+		const { tools, spawnCalls } = await harness();
+		const result = await invoke(tools, "agent_spawn", {
+			name: "one-shot-child",
+			parent: true,
+			expected_output: "a patch",
+		});
+		expect(result.isError).toBe(true);
+		expect(text(result)).toContain("native task");
+		expect(spawnCalls).toEqual([]);
+	});
+	test("surfaces parser refusal verbatim and leaves no definition", async () => {
+		const { tools, store, projectAgentRoot } = await harness();
+		const result = await invoke(tools, "agent_create", {
+			name: "broken",
+			description: "Has no spawn policy.",
+			body: "You are broken.",
+		});
+		expect(result.isError).toBe(true);
+		expect(text(result)).toBe("Missing required field: spawns");
+		expect(await store.get("broken")).toBeUndefined();
+		expect(await Bun.file(join(projectAgentRoot, "broken.md")).exists()).toBe(
+			false,
+		);
 	});
 
 	test("chat_wait blocks until the daemon returns a new message", async () => {
