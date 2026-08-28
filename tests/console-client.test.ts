@@ -395,6 +395,11 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 			}
 
 			const path = url.pathname === "/" ? "/index.html" : url.pathname;
+			// Chrome fetches a favicon on every fresh profile; a 404 there is
+			// noise that pollutes page-error assertions, so answer it empty.
+			if (path === "/favicon.ico") {
+				return new Response(null, { status: 204 });
+			}
 			const file = Bun.file(join(staticRoot, path));
 			if (!(await file.exists())) {
 				return new Response("not found", { status: 404 });
