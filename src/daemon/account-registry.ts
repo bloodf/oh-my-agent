@@ -19,8 +19,9 @@
  *
  * Performance: one state machine and at most one pending timer per account.
  */
-import { AccountStateMachine } from "./quota-state";
+
 import type { QuotaBlock } from "./quota-state";
+import { AccountStateMachine } from "./quota-state";
 import type { Scheduler } from "./scheduler";
 
 export type AccountMode = "metered" | "subscription";

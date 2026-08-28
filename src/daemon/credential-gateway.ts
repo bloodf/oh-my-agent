@@ -122,7 +122,9 @@ interface SnapshotEntryLike {
 }
 
 const lower = (value: unknown): string | undefined =>
-	typeof value === "string" && value.trim().length > 0 ? value.trim().toLowerCase() : undefined;
+	typeof value === "string" && value.trim().length > 0
+		? value.trim().toLowerCase()
+		: undefined;
 
 /**
  * Affirmative-match only. A report is attributed to an identity when the org
@@ -130,7 +132,10 @@ const lower = (value: unknown): string | undefined =>
  * identifiers (API key) never matches, so an unattributed report is dropped
  * rather than shown to every worker on that provider.
  */
-export function reportMatchesIdentity(report: UsageReportLike, identity: BoundIdentity): boolean {
+export function reportMatchesIdentity(
+	report: UsageReportLike,
+	identity: BoundIdentity,
+): boolean {
 	if (report.provider !== identity.provider) return false;
 	if (!identity.identifiable) return false;
 
@@ -142,7 +147,8 @@ export function reportMatchesIdentity(report: UsageReportLike, identity: BoundId
 		["email", identity.email],
 		["projectId", identity.projectId],
 	] as const) {
-		if (expected !== undefined && lower(metadata[field]) === expected) return true;
+		if (expected !== undefined && lower(metadata[field]) === expected)
+			return true;
 	}
 	return false;
 }
@@ -151,11 +157,19 @@ export function reportMatchesIdentity(report: UsageReportLike, identity: BoundId
  * History rows carry `accountId`/`email` directly. Same affirmative rule:
  * an unidentifiable binding matches nothing.
  */
-export function historyMatchesIdentity(entry: UsageHistoryLike, identity: BoundIdentity): boolean {
+export function historyMatchesIdentity(
+	entry: UsageHistoryLike,
+	identity: BoundIdentity,
+): boolean {
 	if (entry.provider !== identity.provider) return false;
 	if (!identity.identifiable) return false;
-	if (identity.accountId !== undefined && lower(entry.accountId) === identity.accountId) return true;
-	if (identity.email !== undefined && lower(entry.email) === identity.email) return true;
+	if (
+		identity.accountId !== undefined &&
+		lower(entry.accountId) === identity.accountId
+	)
+		return true;
+	if (identity.email !== undefined && lower(entry.email) === identity.email)
+		return true;
 	return false;
 }
 
@@ -187,7 +201,9 @@ export async function startCredentialGateway(
 	let lastUpstreamGeneration = 0;
 
 	const upstreamSnapshot = async (): Promise<SnapshotBody> => {
-		const res = await fetchUpstream(`${upstreamUrl}/v1/snapshot`, { headers: upstreamHeaders() });
+		const res = await fetchUpstream(`${upstreamUrl}/v1/snapshot`, {
+			headers: upstreamHeaders(),
+		});
 		if (!res.ok) throw new Error(`upstream snapshot failed: ${res.status}`);
 		return (await res.json()) as SnapshotBody;
 	};
@@ -206,7 +222,9 @@ export async function startCredentialGateway(
 			const view = {
 				...body,
 				generation: other.generation,
-				credentials: body.credentials.filter((entry) => other.credentialIds.has(entry.id)),
+				credentials: body.credentials.filter((entry) =>
+					other.credentialIds.has(entry.id),
+				),
 			};
 			const frame = `data: ${JSON.stringify({ kind: "snapshot", ...view })}\n\n`;
 			for (const write of other.streams) write(frame);
@@ -219,13 +237,17 @@ export async function startCredentialGateway(
 	 * `RemoteAuthCredentialStore` ignores any event whose generation is not
 	 * newer than what it already holds (remote-store.ts:504-511).
 	 */
-	const filteredSnapshot = async (binding: WorkerBinding): Promise<SnapshotBody> => {
+	const filteredSnapshot = async (
+		binding: WorkerBinding,
+	): Promise<SnapshotBody> => {
 		const body = await upstreamSnapshot();
 		notifyUpstreamChange(body);
 		return {
 			...body,
 			generation: binding.generation,
-			credentials: body.credentials.filter((entry) => binding.credentialIds.has(entry.id)),
+			credentials: body.credentials.filter((entry) =>
+				binding.credentialIds.has(entry.id),
+			),
 		};
 	};
 
@@ -245,7 +267,8 @@ export async function startCredentialGateway(
 					headers: upstreamHeaders({ "If-None-Match": `"${seen}"` }),
 					signal: watchAbort.signal,
 				});
-				if (res.status === 200) notifyUpstreamChange((await res.json()) as SnapshotBody);
+				if (res.status === 200)
+					notifyUpstreamChange((await res.json()) as SnapshotBody);
 				else await res.body?.cancel();
 				// An upstream that answers immediately without advancing — no
 				// conditional support, an eager 304, or a same-generation 200 —
@@ -265,7 +288,9 @@ export async function startCredentialGateway(
 	 * snapshot. API keys carry no account identity, so they resolve to an
 	 * unidentifiable entry and match no usage report.
 	 */
-	const boundIdentities = async (binding: WorkerBinding): Promise<BoundIdentity[]> => {
+	const boundIdentities = async (
+		binding: WorkerBinding,
+	): Promise<BoundIdentity[]> => {
 		const body = await upstreamSnapshot();
 		const identities: BoundIdentity[] = [];
 		for (const raw of body.credentials) {
@@ -283,7 +308,9 @@ export async function startCredentialGateway(
 				projectId,
 				identifiable:
 					credential.type === "oauth" &&
-					(accountId !== undefined || email !== undefined || projectId !== undefined),
+					(accountId !== undefined ||
+						email !== undefined ||
+						projectId !== undefined),
 			});
 		}
 		return identities;
@@ -304,7 +331,11 @@ export async function startCredentialGateway(
 	};
 
 	/** Resolve once this worker's generation moves past `seen`, or on timeout. */
-	const waitForGeneration = (binding: WorkerBinding, seen: number, waitMs: number): Promise<void> => {
+	const waitForGeneration = (
+		binding: WorkerBinding,
+		seen: number,
+		waitMs: number,
+	): Promise<void> => {
 		if (binding.generation > seen) return Promise.resolve();
 		const { promise, resolve } = Promise.withResolvers<void>();
 		const wake = () => {
@@ -340,18 +371,26 @@ export async function startCredentialGateway(
 				// Conditional long-poll: hold while the worker's view is unchanged,
 				// so a synthetic generation bump wakes it the same way SSE does.
 				const ifNoneMatch = req.headers.get("If-None-Match");
-				const seen = ifNoneMatch ? Number(ifNoneMatch.replace(/"/g, "")) : Number.NaN;
+				const seen = ifNoneMatch
+					? Number(ifNoneMatch.replace(/"/g, ""))
+					: Number.NaN;
 				const waitSeconds = Number(url.searchParams.get("wait") ?? "0");
 				if (Number.isFinite(seen) && waitSeconds > 0) {
 					await waitForGeneration(binding, seen, waitSeconds * 1_000);
 					if (binding.generation <= seen) {
-						return new Response(null, { status: 304, headers: { ETag: `"${binding.generation}"` } });
+						return new Response(null, {
+							status: 304,
+							headers: { ETag: `"${binding.generation}"` },
+						});
 					}
 				}
 
 				const snapshot = await filteredSnapshot(binding);
 				if (Number.isFinite(seen) && snapshot.generation === seen) {
-					return new Response(null, { status: 304, headers: { ETag: `"${snapshot.generation}"` } });
+					return new Response(null, {
+						status: 304,
+						headers: { ETag: `"${snapshot.generation}"` },
+					});
 				}
 				return new Response(JSON.stringify(snapshot), {
 					status: 200,
@@ -376,7 +415,9 @@ export async function startCredentialGateway(
 							}
 						};
 						binding.streams.add(write);
-						write(`data: ${JSON.stringify({ kind: "snapshot", ...snapshot })}\n\n`);
+						write(
+							`data: ${JSON.stringify({ kind: "snapshot", ...snapshot })}\n\n`,
+						);
 					},
 					cancel() {
 						if (write) binding.streams.delete(write);
@@ -392,7 +433,8 @@ export async function startCredentialGateway(
 				});
 			}
 
-			const credentialRoute = /^\/v1\/credential\/(\d+)\/(refresh|block|disable)$/.exec(path);
+			const credentialRoute =
+				/^\/v1\/credential\/(\d+)\/(refresh|block|disable)$/.exec(path);
 			if (credentialRoute) {
 				const credentialId = Number(credentialRoute[1]);
 				const action = credentialRoute[2];
@@ -412,7 +454,8 @@ export async function startCredentialGateway(
 				const sharedWith = [...bindings.values()].filter((other) =>
 					other.credentialIds.has(credentialId),
 				);
-				const isShared = new Set(sharedWith.map((other) => other.workerId)).size > 1;
+				const isShared =
+					new Set(sharedWith.map((other) => other.workerId)).size > 1;
 				if (!isShared) {
 					return await fetchUpstream(`${upstreamUrl}${path}`, {
 						method: "POST",
@@ -434,7 +477,10 @@ export async function startCredentialGateway(
 				// Upstream is untouched; only this worker's view moves, and it
 				// receives a full snapshot so its optimistic removal is undone.
 				await bumpAndBroadcast(binding);
-				return json(409, { status: "pending_policy", requestId: request.requestId });
+				return json(409, {
+					status: "pending_policy",
+					requestId: request.requestId,
+				});
 			}
 
 			// Usage stays reachable — stock `RemoteAuthCredentialStore` calls it for
@@ -451,12 +497,17 @@ export async function startCredentialGateway(
 				if (path === "/v1/usage") {
 					const reports = (body.reports as UsageReportLike[] | undefined) ?? [];
 					body.reports = reports.filter((report) =>
-						identities.some((identity) => reportMatchesIdentity(report, identity)),
+						identities.some((identity) =>
+							reportMatchesIdentity(report, identity),
+						),
 					);
 				} else {
-					const entries = (body.entries as UsageHistoryLike[] | undefined) ?? [];
+					const entries =
+						(body.entries as UsageHistoryLike[] | undefined) ?? [];
 					body.entries = entries.filter((entry) =>
-						identities.some((identity) => historyMatchesIdentity(entry, identity)),
+						identities.some((identity) =>
+							historyMatchesIdentity(entry, identity),
+						),
 					);
 				}
 				return json(200, body);

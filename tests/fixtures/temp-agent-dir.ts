@@ -6,18 +6,18 @@
  * Failure modes: Cleanup via finally ensures dir removed even on callback throw.
  * Performance: mkdtemp is O(1); rm is async recursive.
  */
-import { mkdir, mkdtemp, rm } from "fs/promises";
-import { tmpdir } from "os";
-import { join } from "path";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export async function withTempAgentDir<T>(
-  callback: (root: string) => Promise<T>,
+	callback: (root: string) => Promise<T>,
 ): Promise<T> {
-  const root = await mkdtemp(join(tmpdir(), "agent-"));
-  await mkdir(join(root, "agents"));
-  try {
-    return await callback(root);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+	const root = await mkdtemp(join(tmpdir(), "agent-"));
+	await mkdir(join(root, "agents"));
+	try {
+		return await callback(root);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
 }

@@ -82,15 +82,19 @@ async function discoverBrokerConfig(
  */
 async function probeBroker(url: string, token: string): Promise<void> {
 	const health = await fetch(`${url}/v1/healthz`);
-	if (!health.ok) throw new Error(`Auth broker at ${url} is unhealthy: ${health.status}`);
+	if (!health.ok)
+		throw new Error(`Auth broker at ${url} is unhealthy: ${health.status}`);
 
 	const snapshot = await fetch(`${url}/v1/snapshot`, {
 		headers: { Authorization: `Bearer ${token}` },
 	});
 	if (snapshot.status === 401 || snapshot.status === 403) {
-		throw new Error(`Auth broker at ${url} rejected the configured token: ${snapshot.status}`);
+		throw new Error(
+			`Auth broker at ${url} rejected the configured token: ${snapshot.status}`,
+		);
 	}
-	if (!snapshot.ok) throw new Error(`Auth broker at ${url} returned ${snapshot.status}`);
+	if (!snapshot.ok)
+		throw new Error(`Auth broker at ${url} returned ${snapshot.status}`);
 }
 
 export async function resolveBrokerHosting(

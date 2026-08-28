@@ -22,8 +22,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { AccountRegistry } from "../src/daemon/account-registry";
-import { Scheduler } from "../src/daemon/scheduler";
 import type { QuotaBlock } from "../src/daemon/quota-state";
+import { Scheduler } from "../src/daemon/scheduler";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -58,8 +58,10 @@ function harness(startMs = 1_000_000) {
 	const registry = new AccountRegistry({
 		scheduler,
 		now: () => now,
-		onPark: (accountId, runIds) => parked.push(`${accountId}:${runIds.join(",")}`),
-		onResume: (accountId, runIds) => resumed.push(`${accountId}:${runIds.join(",")}`),
+		onPark: (accountId, runIds) =>
+			parked.push(`${accountId}:${runIds.join(",")}`),
+		onResume: (accountId, runIds) =>
+			resumed.push(`${accountId}:${runIds.join(",")}`),
 		onWarning: (accountId) => warned.push(accountId),
 		onWake: (runId) => woken.push(runId),
 	});
@@ -124,7 +126,10 @@ describe("block-driven resume arming", () => {
 		h.registry.addRun("acct-1", "run-1");
 
 		h.registry.applyBlock("acct-1", block());
-		h.registry.applyBlock("acct-1", block({ blockedUntilMs: 1_000_000 + 1_800_000 }));
+		h.registry.applyBlock(
+			"acct-1",
+			block({ blockedUntilMs: 1_000_000 + 1_800_000 }),
+		);
 
 		expect(h.captured).toHaveLength(2);
 		expect(h.captured[1].delayMs).toBe(1_800_000);
@@ -142,8 +147,14 @@ describe("block-driven resume arming", () => {
 		// Two distinct credentials, so both blocks stay active. Arming the
 		// second block's own (earlier) deadline would fire while the first is
 		// still active: tick retires the timer and the account never resumes.
-		h.registry.applyBlock("acct-1", block({ credentialId: 7, blockedUntilMs: 1_000_000 + 1_800_000 }));
-		h.registry.applyBlock("acct-1", block({ credentialId: 8, blockedUntilMs: 1_000_000 + 600_000 }));
+		h.registry.applyBlock(
+			"acct-1",
+			block({ credentialId: 7, blockedUntilMs: 1_000_000 + 1_800_000 }),
+		);
+		h.registry.applyBlock(
+			"acct-1",
+			block({ credentialId: 8, blockedUntilMs: 1_000_000 + 600_000 }),
+		);
 
 		const armed = h.captured[h.captured.length - 1];
 		expect(armed.delayMs).toBe(1_800_000);

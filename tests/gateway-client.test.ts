@@ -19,15 +19,14 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
 import { AuthBrokerClient, startAuthBroker } from "@oh-my-pi/pi-ai/auth-broker";
 import { RemoteAuthCredentialStore } from "@oh-my-pi/pi-ai/auth-broker/remote-store";
-
-import { startCredentialGateway } from "../src/daemon/credential-gateway";
 import type { CredentialGateway } from "../src/daemon/credential-gateway";
+import { startCredentialGateway } from "../src/daemon/credential-gateway";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -121,7 +120,10 @@ const idsOf = (store: RemoteAuthCredentialStore): number[] =>
 	store.listAuthCredentials().map((c) => c.id);
 
 /** Poll until `predicate` holds or the deadline passes. */
-async function waitFor(predicate: () => boolean, timeoutMs = 3_000): Promise<boolean> {
+async function waitFor(
+	predicate: () => boolean,
+	timeoutMs = 3_000,
+): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		if (predicate()) return true;
@@ -151,8 +153,14 @@ describe("a real store reads through the gateway", () => {
 	test("two stores on one gateway stay disjoint", async () => {
 		const up = await upstream();
 		const gateway = await gatewayFor(up);
-		const a = gateway.issueWorkerToken({ workerId: "a", credentialIds: [up.ids.openai] });
-		const b = gateway.issueWorkerToken({ workerId: "b", credentialIds: [up.ids.anthropic] });
+		const a = gateway.issueWorkerToken({
+			workerId: "a",
+			credentialIds: [up.ids.openai],
+		});
+		const b = gateway.issueWorkerToken({
+			workerId: "b",
+			credentialIds: [up.ids.anthropic],
+		});
 
 		const storeA = await storeFor(gateway, a.token);
 		const storeB = await storeFor(gateway, b.token);
@@ -189,11 +197,21 @@ describe("requester recovery after a refused shared disable", () => {
 
 		// Two workers bound to the same credential make the account shared, so a
 		// disable from either cannot be unilateral.
-		const requester = gateway.issueWorkerToken({ workerId: "r", credentialIds: [shared] });
-		const peer = gateway.issueWorkerToken({ workerId: "p", credentialIds: [shared] });
+		const requester = gateway.issueWorkerToken({
+			workerId: "r",
+			credentialIds: [shared],
+		});
+		const peer = gateway.issueWorkerToken({
+			workerId: "p",
+			credentialIds: [shared],
+		});
 
-		const requesterStore = await storeFor(gateway, requester.token, { streamSnapshots: true });
-		const peerStore = await storeFor(gateway, peer.token, { streamSnapshots: true });
+		const requesterStore = await storeFor(gateway, requester.token, {
+			streamSnapshots: true,
+		});
+		const peerStore = await storeFor(gateway, peer.token, {
+			streamSnapshots: true,
+		});
 		expect(idsOf(requesterStore)).toContain(shared);
 
 		// `deleteAuthCredential` removes locally first, then tells the broker.
@@ -204,7 +222,9 @@ describe("requester recovery after a refused shared disable", () => {
 		expect(idsOf(requesterStore)).not.toContain(shared);
 
 		// No manual reload: the gateway must restore it on its own.
-		expect(await waitFor(() => idsOf(requesterStore).includes(shared))).toBe(true);
+		expect(await waitFor(() => idsOf(requesterStore).includes(shared))).toBe(
+			true,
+		);
 
 		// The peer, which asked for nothing, was never disturbed.
 		expect(idsOf(peerStore)).toContain(shared);
@@ -214,10 +234,15 @@ describe("requester recovery after a refused shared disable", () => {
 		const up = await upstream();
 		const gateway = await gatewayFor(up);
 		const shared = up.ids.openai;
-		const requester = gateway.issueWorkerToken({ workerId: "r", credentialIds: [shared] });
+		const requester = gateway.issueWorkerToken({
+			workerId: "r",
+			credentialIds: [shared],
+		});
 		gateway.issueWorkerToken({ workerId: "p", credentialIds: [shared] });
 
-		const store = await storeFor(gateway, requester.token, { streamSnapshots: true });
+		const store = await storeFor(gateway, requester.token, {
+			streamSnapshots: true,
+		});
 		store.deleteAuthCredential(shared, "worker asked to disable");
 		await waitFor(() => idsOf(store).includes(shared));
 
@@ -231,10 +256,15 @@ describe("requester recovery after a refused shared disable", () => {
 		const up = await upstream();
 		const gateway = await gatewayFor(up);
 		const shared = up.ids.openai;
-		const requester = gateway.issueWorkerToken({ workerId: "r", credentialIds: [shared] });
+		const requester = gateway.issueWorkerToken({
+			workerId: "r",
+			credentialIds: [shared],
+		});
 		gateway.issueWorkerToken({ workerId: "p", credentialIds: [shared] });
 
-		const store = await storeFor(gateway, requester.token, { streamSnapshots: true });
+		const store = await storeFor(gateway, requester.token, {
+			streamSnapshots: true,
+		});
 		store.deleteAuthCredential(shared, "worker asked to disable");
 		await waitFor(() => gateway.pendingPolicyRequests().length > 0);
 
@@ -250,8 +280,13 @@ describe("requester recovery after a refused shared disable", () => {
 		const own = up.ids.anthropic;
 
 		// Only one worker is bound, so nothing is shared and the disable stands.
-		const worker = gateway.issueWorkerToken({ workerId: "solo", credentialIds: [own] });
-		const store = await storeFor(gateway, worker.token, { streamSnapshots: true });
+		const worker = gateway.issueWorkerToken({
+			workerId: "solo",
+			credentialIds: [own],
+		});
+		const store = await storeFor(gateway, worker.token, {
+			streamSnapshots: true,
+		});
 		expect(idsOf(store)).toContain(own);
 
 		store.deleteAuthCredential(own, "worker owns this account");
@@ -273,7 +308,9 @@ describe("upstream changes propagate to a real store", () => {
 			credentialIds: [up.ids.openai, up.ids.anthropic],
 		});
 
-		const store = await storeFor(gateway, worker.token, { streamSnapshots: true });
+		const store = await storeFor(gateway, worker.token, {
+			streamSnapshots: true,
+		});
 		expect(idsOf(store)).toContain(up.ids.anthropic);
 
 		// Someone else disables the credential directly upstream: not this
@@ -282,7 +319,9 @@ describe("upstream changes propagate to a real store", () => {
 		const admin = new AuthBrokerClient({ url: up.url, token: ADMIN_TOKEN });
 		await admin.disableCredential(up.ids.anthropic, "revoked by an operator");
 
-		expect(await waitFor(() => !idsOf(store).includes(up.ids.anthropic))).toBe(true);
+		expect(await waitFor(() => !idsOf(store).includes(up.ids.anthropic))).toBe(
+			true,
+		);
 
 		// The worker's other credential is untouched: propagation is not a reset.
 		expect(idsOf(store)).toContain(up.ids.openai);
@@ -293,6 +332,8 @@ describe("upstream changes propagate to a real store", () => {
 		const after = await fetch(`${gateway.url}/v1/snapshot`, {
 			headers: { Authorization: `Bearer ${worker.token}` },
 		});
-		expect(Number(after.headers.get("ETag")?.replace(/"/g, ""))).toBeGreaterThan(1);
+		expect(
+			Number(after.headers.get("ETag")?.replace(/"/g, "")),
+		).toBeGreaterThan(1);
 	});
 });

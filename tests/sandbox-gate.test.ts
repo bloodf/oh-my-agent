@@ -16,10 +16,9 @@
  * @Environment bun
  */
 import { describe, expect, test } from "bun:test";
-
+import { resolveSandboxLaunch } from "../src/worker/launch-gate";
 import type { SandboxPolicy } from "../src/worker/sandbox";
 import { SANDBOX_NETWORK_UNENFORCED } from "../src/worker/sandbox";
-import { resolveSandboxLaunch } from "../src/worker/launch-gate";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -35,7 +34,8 @@ const COMMAND = ["bun", "/path/to/cli.js", "--mode", "rpc"];
 
 /** `which` stub: resolves the named binaries, misses everything else. */
 function which(...available: string[]) {
-	return async (binary: string) => (available.includes(binary) ? `/usr/bin/${binary}` : null);
+	return async (binary: string) =>
+		available.includes(binary) ? `/usr/bin/${binary}` : null;
 }
 
 /** Gateway bridge stubs. */
@@ -45,7 +45,10 @@ const unreachable = async () => false;
 type LaunchArgs = Parameters<typeof resolveSandboxLaunch>[0];
 
 /** Defaults the bridge to reachable so each test states only what it varies. */
-function launch(args: Omit<LaunchArgs, "probeBridge"> & Partial<Pick<LaunchArgs, "probeBridge">>) {
+function launch(
+	args: Omit<LaunchArgs, "probeBridge"> &
+		Partial<Pick<LaunchArgs, "probeBridge">>,
+) {
 	return resolveSandboxLaunch({ probeBridge: reachable, ...args });
 }
 

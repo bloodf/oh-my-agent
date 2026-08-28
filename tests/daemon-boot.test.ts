@@ -20,15 +20,14 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
-import { startAuthBroker } from "@oh-my-pi/pi-ai/auth-broker";
 import type { AuthBrokerServerHandle } from "@oh-my-pi/pi-ai/auth-broker";
-
-import { resolveBrokerHosting } from "../src/daemon/boot";
+import { startAuthBroker } from "@oh-my-pi/pi-ai/auth-broker";
 import type { BrokerHosting } from "../src/daemon/boot";
+import { resolveBrokerHosting } from "../src/daemon/boot";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -78,7 +77,10 @@ describe("resolveBrokerHosting — external broker discovered", () => {
 
 		const hosting = await resolveBrokerHosting({
 			agentDir,
-			env: { OMP_AUTH_BROKER_URL: upstream.url, OMP_AUTH_BROKER_TOKEN: "upstream-token" },
+			env: {
+				OMP_AUTH_BROKER_URL: upstream.url,
+				OMP_AUTH_BROKER_TOKEN: "upstream-token",
+			},
 		});
 		cleanups.push(() => stopHosting(hosting));
 
@@ -116,7 +118,10 @@ describe("resolveBrokerHosting — external broker discovered", () => {
 
 		const hosting = await resolveBrokerHosting({
 			agentDir,
-			env: { OMP_AUTH_BROKER_URL: fromEnv.url, OMP_AUTH_BROKER_TOKEN: "env-token" },
+			env: {
+				OMP_AUTH_BROKER_URL: fromEnv.url,
+				OMP_AUTH_BROKER_TOKEN: "env-token",
+			},
 		});
 		cleanups.push(() => stopHosting(hosting));
 
@@ -129,7 +134,10 @@ describe("resolveBrokerHosting — external broker discovered", () => {
 
 		const hosting = await resolveBrokerHosting({
 			agentDir,
-			env: { OMP_AUTH_BROKER_URL: upstream.url, OMP_AUTH_BROKER_TOKEN: "upstream-token" },
+			env: {
+				OMP_AUTH_BROKER_URL: upstream.url,
+				OMP_AUTH_BROKER_TOKEN: "upstream-token",
+			},
 		});
 		cleanups.push(() => stopHosting(hosting));
 
@@ -142,7 +150,10 @@ describe("resolveBrokerHosting — external broker discovered", () => {
 
 		const hosting = await resolveBrokerHosting({
 			agentDir,
-			env: { OMP_AUTH_BROKER_URL: upstream.url, OMP_AUTH_BROKER_TOKEN: "upstream-token" },
+			env: {
+				OMP_AUTH_BROKER_URL: upstream.url,
+				OMP_AUTH_BROKER_TOKEN: "upstream-token",
+			},
 		});
 		await hosting.close();
 
@@ -155,7 +166,10 @@ describe("resolveBrokerHosting — external broker discovered", () => {
 		await expect(
 			resolveBrokerHosting({
 				agentDir,
-				env: { OMP_AUTH_BROKER_URL: "http://127.0.0.1:1", OMP_AUTH_BROKER_TOKEN: "t" },
+				env: {
+					OMP_AUTH_BROKER_URL: "http://127.0.0.1:1",
+					OMP_AUTH_BROKER_TOKEN: "t",
+				},
 			}),
 		).rejects.toThrow();
 	});
@@ -167,7 +181,10 @@ describe("resolveBrokerHosting — external broker discovered", () => {
 		await expect(
 			resolveBrokerHosting({
 				agentDir,
-				env: { OMP_AUTH_BROKER_URL: upstream.url, OMP_AUTH_BROKER_TOKEN: "wrong-token" },
+				env: {
+					OMP_AUTH_BROKER_URL: upstream.url,
+					OMP_AUTH_BROKER_TOKEN: "wrong-token",
+				},
 			}),
 		).rejects.toThrow();
 	});
@@ -204,9 +221,15 @@ describe("resolveBrokerHosting — embedded fallback", () => {
 	});
 
 	test("admin token is freshly generated per boot and unguessable", async () => {
-		const first = await resolveBrokerHosting({ agentDir: await tempAgentDir(), env: {} });
+		const first = await resolveBrokerHosting({
+			agentDir: await tempAgentDir(),
+			env: {},
+		});
 		cleanups.push(() => stopHosting(first));
-		const second = await resolveBrokerHosting({ agentDir: await tempAgentDir(), env: {} });
+		const second = await resolveBrokerHosting({
+			agentDir: await tempAgentDir(),
+			env: {},
+		});
 		cleanups.push(() => stopHosting(second));
 
 		expect(first.adminToken).not.toBe(second.adminToken);
@@ -242,7 +265,10 @@ describe("resolveBrokerHosting — embedded fallback", () => {
 	});
 
 	test("close is idempotent", async () => {
-		const hosting = await resolveBrokerHosting({ agentDir: await tempAgentDir(), env: {} });
+		const hosting = await resolveBrokerHosting({
+			agentDir: await tempAgentDir(),
+			env: {},
+		});
 		await hosting.close();
 		await hosting.close();
 	});

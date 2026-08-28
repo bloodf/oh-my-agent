@@ -14,13 +14,12 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
-
-import { materializeWorker } from "../src/daemon/materializer";
+import { join } from "node:path";
 import type { WorkerLayout } from "../src/daemon/materializer";
-import { parsePeerDefinition } from "../src/shared/agent-definition";
+import { materializeWorker } from "../src/daemon/materializer";
 import type { PeerDefinition } from "../src/shared/agent-definition";
+import { parsePeerDefinition } from "../src/shared/agent-definition";
 import { resolveSandboxLaunch } from "../src/worker/launch-gate";
 import { buildWorkerPolicy } from "../src/worker/lifecycle";
 
@@ -43,7 +42,10 @@ function peer(frontmatter: Record<string, unknown> = {}): PeerDefinition {
 	})
 		.map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
 		.join("\n");
-	return parsePeerDefinition("/agents/reviewer.md", `---\n${yaml}\n---\nYou are the reviewer.`);
+	return parsePeerDefinition(
+		"/agents/reviewer.md",
+		`---\n${yaml}\n---\nYou are the reviewer.`,
+	);
 }
 
 /** Materialize a worker against a gateway on `port`. */
@@ -69,7 +71,10 @@ async function materialized(
 }
 
 /** Gate a materialized worker on Darwin with stubbed probes. */
-async function profileFor(port: number, overrides: Record<string, unknown> = {}) {
+async function profileFor(
+	port: number,
+	overrides: Record<string, unknown> = {},
+) {
 	const { cwd, layout, parsedPeer } = await materialized(port, overrides);
 
 	const launch = await resolveSandboxLaunch({
@@ -106,7 +111,9 @@ describe("seatbelt profile matches the materialized worker", () => {
 		const { profile, layout } = await profileFor(18803);
 
 		expect(layout.inferenceGateway.port).toBe(18803);
-		expect(profile).toContain(`(allow network-outbound (remote ip "127.0.0.1:18803"))`);
+		expect(profile).toContain(
+			`(allow network-outbound (remote ip "127.0.0.1:18803"))`,
+		);
 	});
 
 	test("a different gateway port produces a different profile", async () => {
@@ -130,15 +137,17 @@ describe("seatbelt profile matches the materialized worker", () => {
 		});
 
 		expect(profile).toContain(`(allow file-read* (subpath "/opt/shared-lib"))`);
-		expect(profile).not.toContain(`(allow file-write* (subpath "/opt/shared-lib"))`);
+		expect(profile).not.toContain(
+			`(allow file-write* (subpath "/opt/shared-lib"))`,
+		);
 	});
 
 	test("the profile grants no write access outside workspace and home", async () => {
 		const { profile, cwd, layout } = await profileFor(18808);
 
-		const writes = [...profile.matchAll(/\(allow file-write\* \(subpath "([^"]+)"\)\)/g)].map(
-			(match) => match[1],
-		);
+		const writes = [
+			...profile.matchAll(/\(allow file-write\* \(subpath "([^"]+)"\)\)/g),
+		].map((match) => match[1]);
 		expect(writes.sort()).toEqual([cwd, layout.home].sort());
 	});
 
@@ -191,8 +200,10 @@ describe("gateway endpoint validation", () => {
 			}),
 		).rejects.toThrow(/loopback/);
 
-		expect(await Bun.file(join(base, "worker", "home", ".omp", "agent", "models.yml")).exists()).toBe(
-			false,
-		);
+		expect(
+			await Bun.file(
+				join(base, "worker", "home", ".omp", "agent", "models.yml"),
+			).exists(),
+		).toBe(false);
 	});
 });

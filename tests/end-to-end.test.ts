@@ -15,20 +15,19 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { AccountRegistry } from "../src/daemon/account-registry";
-import { materializeWorker } from "../src/daemon/materializer";
 import type { WorkerLayout } from "../src/daemon/materializer";
-import { Supervisor } from "../src/daemon/supervisor";
-import { Scheduler } from "../src/daemon/scheduler";
+import { materializeWorker } from "../src/daemon/materializer";
 import type { QuotaBlock } from "../src/daemon/quota-state";
+import { Scheduler } from "../src/daemon/scheduler";
+import { Supervisor } from "../src/daemon/supervisor";
 import { RoomStore } from "../src/rooms/store";
-import { parsePeerDefinition } from "../src/shared/agent-definition";
 import type { PeerDefinition } from "../src/shared/agent-definition";
-import { startWorker } from "../src/worker/lifecycle";
+import { parsePeerDefinition } from "../src/shared/agent-definition";
 import type { WorkerHandle } from "../src/worker/lifecycle";
+import { startWorker } from "../src/worker/lifecycle";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -38,10 +37,14 @@ afterEach(async () => {
 	while (cleanups.length > 0) await cleanups.pop()?.();
 });
 
-type ScriptTurn = { tool: string; arguments: Record<string, unknown> } | { text: string };
+type ScriptTurn =
+	| { tool: string; arguments: Record<string, unknown> }
+	| { text: string };
 
 /** Deterministic pi-native gateway (see pi-native-server.ts:21-24). */
-async function fakeInference(script: ScriptTurn[]): Promise<{ url: string; token: string }> {
+async function fakeInference(
+	script: ScriptTurn[],
+): Promise<{ url: string; token: string }> {
 	let turn = 0;
 
 	const assistant = (content: unknown[], stopReason: string) => ({
@@ -111,7 +114,10 @@ async function fakeInference(script: ScriptTurn[]): Promise<{ url: string; token
 		await server.stop(true);
 	});
 
-	return { url: `http://${server.hostname}:${server.port}`, token: "worker-token" };
+	return {
+		url: `http://${server.hostname}:${server.port}`,
+		token: "worker-token",
+	};
 }
 
 function peer(frontmatter: Record<string, unknown> = {}): PeerDefinition {
@@ -126,11 +132,17 @@ function peer(frontmatter: Record<string, unknown> = {}): PeerDefinition {
 	})
 		.map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
 		.join("\n");
-	return parsePeerDefinition("/agents/reviewer.md", `---\n${yaml}\n---\nYou are the reviewer.`);
+	return parsePeerDefinition(
+		"/agents/reviewer.md",
+		`---\n${yaml}\n---\nYou are the reviewer.`,
+	);
 }
 
 /** A full daemon slice: rooms, scheduler, registry, and a spawned worker. */
-async function daemon(script: ScriptTurn[], overrides: Record<string, unknown> = {}) {
+async function daemon(
+	script: ScriptTurn[],
+	overrides: Record<string, unknown> = {},
+) {
 	const base = await mkdtemp(join(tmpdir(), "oh-my-agent-e2e-"));
 	cleanups.push(() => rm(base, { recursive: true, force: true }));
 	await writeFile(join(base, "README.md"), "# fixture\n", "utf8");
@@ -244,7 +256,11 @@ describe("spawn → room message → delegate → park → auto-resume", () => {
 		// Posting through the daemon path: a parked peer is skipped, and the
 		// message waits rather than burning a turn that would fail.
 		expect(
-			await d.supervisor.post({ room: "#reviews", author: "@you", body: "While parked." }),
+			await d.supervisor.post({
+				room: "#reviews",
+				author: "@you",
+				body: "While parked.",
+			}),
 		).toEqual([]);
 		expect(dispatched).toEqual([]);
 
@@ -320,7 +336,11 @@ describe("spawn → room message → delegate → park → auto-resume", () => {
 
 		// An agent that summarizes into its own room would otherwise re-wake
 		// itself forever.
-		await d.rooms.post({ room: "#reviews", author: "reviewer", body: "My summary." });
+		await d.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "My summary.",
+		});
 
 		expect(await d.supervisor.deliver("reviewer")).toBe(false);
 	});

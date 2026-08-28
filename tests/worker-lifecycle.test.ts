@@ -21,16 +21,16 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
 
 import { materializeWorker } from "../src/daemon/materializer";
-import { parsePeerDefinition } from "../src/shared/agent-definition";
 import type { PeerDefinition } from "../src/shared/agent-definition";
-import { classifyAgentSpawn, startWorker } from "../src/worker/lifecycle";
-import type { WorkerHandle } from "../src/worker/lifecycle";
+import { parsePeerDefinition } from "../src/shared/agent-definition";
 import { resolveSandboxLaunch } from "../src/worker/launch-gate";
+import type { WorkerHandle } from "../src/worker/lifecycle";
+import { classifyAgentSpawn, startWorker } from "../src/worker/lifecycle";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -40,7 +40,10 @@ afterEach(async () => {
 	while (cleanups.length > 0) await cleanups.pop()?.();
 });
 
-const GATEWAY = { url: "http://127.0.0.1:9999", token: "worker-token" } as const;
+const GATEWAY = {
+	url: "http://127.0.0.1:9999",
+	token: "worker-token",
+} as const;
 
 function peer(frontmatter: Record<string, unknown> = {}): PeerDefinition {
 	const yaml = Object.entries({
@@ -52,11 +55,16 @@ function peer(frontmatter: Record<string, unknown> = {}): PeerDefinition {
 	})
 		.map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
 		.join("\n");
-	return parsePeerDefinition("/agents/reviewer.md", `---\n${yaml}\n---\nYou are the reviewer.`);
+	return parsePeerDefinition(
+		"/agents/reviewer.md",
+		`---\n${yaml}\n---\nYou are the reviewer.`,
+	);
 }
 
 /** One scripted assistant turn: either a tool call or final text. */
-type ScriptTurn = { tool: string; arguments: Record<string, unknown> } | { text: string };
+type ScriptTurn =
+	| { tool: string; arguments: Record<string, unknown> }
+	| { text: string };
 
 /**
  * Minimal pi-native gateway. The worker's models.yml sets
@@ -67,10 +75,10 @@ type ScriptTurn = { tool: string; arguments: Record<string, unknown> } | { text:
  * an SSE stream of canonical `AssistantMessageEvent`s terminated by
  * `data: [DONE]`.
  */
-let inferenceHits = 0;
 
-async function fakeInference(script: ScriptTurn[]): Promise<{ url: string; token: string }> {
-	inferenceHits = 0;
+async function fakeInference(
+	script: ScriptTurn[],
+): Promise<{ url: string; token: string }> {
 	let turn = 0;
 
 	// Canonical zero-usage AssistantMessage, mirroring pi-ai's own
@@ -133,8 +141,8 @@ async function fakeInference(script: ScriptTurn[]): Promise<{ url: string; token
 		port: 0,
 		fetch: (req) => {
 			const { pathname } = new URL(req.url);
-			inferenceHits += 1;
-			if (pathname !== "/v1/pi/stream") return new Response("not found", { status: 404 });
+			if (pathname !== "/v1/pi/stream")
+				return new Response("not found", { status: 404 });
 
 			const step = script[Math.min(turn, script.length - 1)];
 			turn += 1;
@@ -143,7 +151,10 @@ async function fakeInference(script: ScriptTurn[]): Promise<{ url: string; token
 				.join("");
 
 			return new Response(`${frames}data: [DONE]\n\n`, {
-				headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+				headers: {
+					"Content-Type": "text/event-stream",
+					"Cache-Control": "no-cache",
+				},
 			});
 		},
 	});
@@ -151,11 +162,17 @@ async function fakeInference(script: ScriptTurn[]): Promise<{ url: string; token
 		await server.stop(true);
 	});
 
-	return { url: `http://${server.hostname}:${server.port}`, token: "worker-token" };
+	return {
+		url: `http://${server.hostname}:${server.port}`,
+		token: "worker-token",
+	};
 }
 
 /** A materialized worker dir plus a project cwd, as the daemon would build them. */
-async function workerFixture(overrides: Record<string, unknown> = {}, script?: ScriptTurn[]) {
+async function workerFixture(
+	overrides: Record<string, unknown> = {},
+	script?: ScriptTurn[],
+) {
 	const base = await mkdtemp(join(tmpdir(), "oh-my-agent-wl-"));
 	cleanups.push(() => rm(base, { recursive: true, force: true }));
 
@@ -184,7 +201,9 @@ async function passthroughAdapter(root: string): Promise<string> {
 	const path = join(root, "passthrough-adapter");
 	await writeFile(
 		path,
-		["#!/bin/sh", 'if [ "$1" = "-p" ]; then shift 2; fi', 'exec "$@"', ""].join("\n"),
+		["#!/bin/sh", 'if [ "$1" = "-p" ]; then shift 2; fi', 'exec "$@"', ""].join(
+			"\n",
+		),
 		{ encoding: "utf8", mode: 0o755 },
 	);
 	return path;
@@ -216,7 +235,9 @@ describe("worker lifecycle", () => {
 
 		expect(handle.env.HOME).toBe(handle.layout.home);
 		expect(handle.env.PI_CODING_AGENT_DIR).toBe(handle.layout.agentDir);
-		expect(handle.env.XDG_CONFIG_HOME).toBe(join(handle.layout.home, ".config"));
+		expect(handle.env.XDG_CONFIG_HOME).toBe(
+			join(handle.layout.home, ".config"),
+		);
 	});
 
 	test("carries the gateway token and no upstream credentials", async () => {
@@ -310,7 +331,9 @@ describe("§5.1 delegation contract", () => {
 		const dispatched: string[] = [];
 		handle.onToolCall((name) => dispatched.push(name));
 
-		await handle.prompt("Summarize README.md, delegating the read to a subagent.");
+		await handle.prompt(
+			"Summarize README.md, delegating the read to a subagent.",
+		);
 
 		expect(dispatched).toContain("task");
 		expect(dispatched).not.toContain("agent_spawn");
@@ -321,7 +344,7 @@ describe("§5.1 delegation contract", () => {
 
 describe("sandbox wiring", () => {
 	test("a sandboxed worker actually runs under the resolved argv", async () => {
-		const { cwd, parsedPeer, layout } = await workerFixture({}, [{ text: "ok" }]);
+		const { cwd, layout } = await workerFixture({}, [{ text: "ok" }]);
 		// Stand-in for sandbox-exec: records the payload it was handed, then
 		// execs it. If the shim bypassed the gate, this file never appears.
 		const marker = join(layout.root, "sandbox-invoked");
@@ -391,7 +414,7 @@ describe("sandbox wiring", () => {
 	});
 
 	test("stopping a sandboxed worker terminates the sandboxed child", async () => {
-		const { cwd, parsedPeer, layout } = await workerFixture({}, [{ text: "ok" }]);
+		const { cwd, layout } = await workerFixture({}, [{ text: "ok" }]);
 
 		// Records the grandchild pid so the test can check it really died: the
 		// parent kills the shim, and an unforwarded signal would orphan it.
@@ -410,25 +433,6 @@ describe("sandbox wiring", () => {
 			].join("\n"),
 			{ encoding: "utf8", mode: 0o755 },
 		);
-
-		const realCli = fileURLToPath(
-			import.meta.resolve("@oh-my-pi/pi-coding-agent/package.json"),
-		).replace(/package\.json$/, "dist/cli.js");
-
-		const gated = await resolveSandboxLaunch({
-			policy: {
-				workspace: cwd,
-				workerHome: layout.home,
-				runtimePaths: ["/usr/bin", "/bin"],
-				inferenceGateway: { host: "127.0.0.1", port: 9999 },
-				loopbackPorts: [9999],
-			},
-			command: ["bun", realCli],
-			platform: "darwin",
-			which: async () => "/usr/bin/sandbox-exec",
-			probeBridge: async () => true,
-			adapterCommand: wrapper,
-		});
 
 		const handle = await startWorker({
 			peer: peer({ sandbox: true }),
@@ -481,7 +485,9 @@ describe("sandbox wiring", () => {
 
 		expect(probed).toEqual(["sandbox-exec"]);
 		expect(handle.sandboxed).toBe(true);
-		expect(await Bun.file(join(layout.root, "sandbox-shim.ts")).exists()).toBe(true);
+		expect(await Bun.file(join(layout.root, "sandbox-shim.ts")).exists()).toBe(
+			true,
+		);
 	});
 
 	test("sandbox: true with a missing adapter refuses to start", async () => {
@@ -506,7 +512,9 @@ describe("sandbox wiring", () => {
 		const handle = await start();
 
 		expect(handle.sandboxed).toBe(false);
-		expect(await Bun.file(join(handle.layout.root, "sandbox-shim.ts")).exists()).toBe(false);
+		expect(
+			await Bun.file(join(handle.layout.root, "sandbox-shim.ts")).exists(),
+		).toBe(false);
 	});
 
 	test("sandbox: false stays unsandboxed even when an adapter exists", async () => {
@@ -561,12 +569,14 @@ describe("classifyAgentSpawn — subtask vs durable peer", () => {
 	});
 
 	test("neither rooms nor expected_output is a subtask", () => {
-		expect(classifyAgentSpawn({ name: "helper", prompt: "Do a thing." })).toBe("subtask");
+		expect(classifyAgentSpawn({ name: "helper", prompt: "Do a thing." })).toBe(
+			"subtask",
+		);
 	});
 
 	test("an empty rooms list does not make a peer", () => {
-		expect(classifyAgentSpawn({ name: "helper", prompt: "Do a thing.", rooms: [] })).toBe(
-			"subtask",
-		);
+		expect(
+			classifyAgentSpawn({ name: "helper", prompt: "Do a thing.", rooms: [] }),
+		).toBe("subtask");
 	});
 });

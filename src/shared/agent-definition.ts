@@ -34,11 +34,12 @@
  *
  * Performance: sync parse + hash; linear in document size
  */
-import { parseFrontmatter } from "@oh-my-pi/pi-utils";
+
+import { createHash } from "node:crypto";
+import { isAbsolute } from "node:path";
 import { parseAgent } from "@oh-my-pi/pi-coding-agent/task/agents";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
-import { isAbsolute } from "node:path";
-import { createHash } from "node:crypto";
+import { parseFrontmatter } from "@oh-my-pi/pi-utils";
 
 // ── Allowed key sets ────────────────────────────────────────────────────────────
 
@@ -118,7 +119,10 @@ export interface SandboxConfig {
 // ── PeerDefinition ─────────────────────────────────────────────────────────────
 
 export interface PeerDefinition
-	extends Omit<AgentDefinition, "spawns" | "filePath" | "source" | "systemPrompt"> {
+	extends Omit<
+		AgentDefinition,
+		"spawns" | "filePath" | "source" | "systemPrompt"
+	> {
 	spawns: string[] | "*";
 	body: string;
 	workspace?: string;
@@ -136,7 +140,12 @@ export interface PeerDefinition
 // ── Structural helpers ─────────────────────────────────────────────────────────
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-	return v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Date);
+	return (
+		v !== null &&
+		typeof v === "object" &&
+		!Array.isArray(v) &&
+		!(v instanceof Date)
+	);
 }
 
 function validateNestedKeys(
@@ -236,7 +245,11 @@ function validateExtras(fm: Record<string, unknown>): void {
 			validateNestedKeys(val, new Set(["maxTurns", "budgetUsd"]), "autonomy");
 			const { maxTurns, budgetUsd } = val;
 			if (maxTurns !== undefined) {
-				if (typeof maxTurns !== "number" || !Number.isInteger(maxTurns) || maxTurns < 1) {
+				if (
+					typeof maxTurns !== "number" ||
+					!Number.isInteger(maxTurns) ||
+					maxTurns < 1
+				) {
 					throw new PeerParsingError(
 						`autonomy.maxTurns must be a positive integer, got: ${maxTurns}`,
 						"INVALID_AUTONOMY",
@@ -244,7 +257,11 @@ function validateExtras(fm: Record<string, unknown>): void {
 				}
 			}
 			if (budgetUsd !== undefined) {
-				if (typeof budgetUsd !== "number" || !Number.isFinite(budgetUsd) || budgetUsd <= 0) {
+				if (
+					typeof budgetUsd !== "number" ||
+					!Number.isFinite(budgetUsd) ||
+					budgetUsd <= 0
+				) {
 					throw new PeerParsingError(
 						`autonomy.budgetUsd must be a positive finite number, got: ${budgetUsd}`,
 						"INVALID_AUTONOMY",
@@ -325,7 +342,11 @@ function validateExtras(fm: Record<string, unknown>): void {
 						"INVALID_SCHEDULE",
 					);
 				}
-				validateNestedKeys(s, new Set(["cron", "prompt", "room"]), `schedules[${i}]`);
+				validateNestedKeys(
+					s,
+					new Set(["cron", "prompt", "room"]),
+					`schedules[${i}]`,
+				);
 				const { cron, prompt, room } = s as Record<string, unknown>;
 				if (typeof cron !== "string" || cron.trim().length === 0) {
 					throw new PeerParsingError(
@@ -340,7 +361,10 @@ function validateExtras(fm: Record<string, unknown>): void {
 					);
 				}
 				if (room !== undefined) {
-					if (typeof room !== "string" || (!room.startsWith("#") && !room.startsWith("@"))) {
+					if (
+						typeof room !== "string" ||
+						(!room.startsWith("#") && !room.startsWith("@"))
+					) {
 						throw new PeerParsingError(
 							`schedules[${i}].room must start with "#" or "@", got: ${room}`,
 							"INVALID_ROOM",
@@ -365,7 +389,11 @@ function validateExtras(fm: Record<string, unknown>): void {
 						"INVALID_AUTOMATION",
 					);
 				}
-				validateNestedKeys(a, new Set(["event", "prompt", "room"]), `automations[${i}]`);
+				validateNestedKeys(
+					a,
+					new Set(["event", "prompt", "room"]),
+					`automations[${i}]`,
+				);
 				const { event, prompt, room } = a as Record<string, unknown>;
 				if (typeof event !== "string" || event.trim().length === 0) {
 					throw new PeerParsingError(
@@ -380,7 +408,10 @@ function validateExtras(fm: Record<string, unknown>): void {
 					);
 				}
 				if (room !== undefined) {
-					if (typeof room !== "string" || (!room.startsWith("#") && !room.startsWith("@"))) {
+					if (
+						typeof room !== "string" ||
+						(!room.startsWith("#") && !room.startsWith("@"))
+					) {
 						throw new PeerParsingError(
 							`automations[${i}].room must start with "#" or "@", got: ${room}`,
 							"INVALID_ROOM",
@@ -398,11 +429,28 @@ function computeFingerprint(def: PeerDefinition): string {
 	const record = def as unknown as Record<string, unknown>;
 	const sig: Record<string, unknown> = {};
 	const keys = [
-		"name", "description", "model", "tools", "spawns",
-		"thinkingLevel", "output", "blocking", "autoloadSkills",
-		"readSummarize", "prewalk", "advisor",
-		"workspace", "rooms", "wake", "autonomy", "sandbox",
-		"mcps", "skills", "schedules", "automations", "body",
+		"name",
+		"description",
+		"model",
+		"tools",
+		"spawns",
+		"thinkingLevel",
+		"output",
+		"blocking",
+		"autoloadSkills",
+		"readSummarize",
+		"prewalk",
+		"advisor",
+		"workspace",
+		"rooms",
+		"wake",
+		"autonomy",
+		"sandbox",
+		"mcps",
+		"skills",
+		"schedules",
+		"automations",
+		"body",
 	];
 	for (const k of keys) {
 		const v = record[k];
@@ -423,7 +471,10 @@ function sortCanonical(v: unknown): unknown {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function parsePeerDefinition(filePath: string, content: string): PeerDefinition {
+export function parsePeerDefinition(
+	filePath: string,
+	content: string,
+): PeerDefinition {
 	// Native fields via OMP parseAgent (fatal)
 	const agent = parseAgent(filePath, content, "user", "fatal");
 

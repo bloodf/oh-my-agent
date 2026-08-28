@@ -16,8 +16,13 @@
  *
  * Performance: one adapter probe per launch; the gate never executes anything.
  */
-import { compileSandboxPolicy, probeSandbox, SANDBOX_NETWORK_UNENFORCED } from "./sandbox";
+
 import type { SandboxPolicy } from "./sandbox";
+import {
+	compileSandboxPolicy,
+	probeSandbox,
+	SANDBOX_NETWORK_UNENFORCED,
+} from "./sandbox";
 
 export interface ResolveSandboxLaunchOptions {
 	policy: SandboxPolicy;
@@ -58,9 +63,16 @@ export interface SandboxLaunch {
  * Real loopback reachability: open a TCP connection and close it. Used unless
  * a caller injects its own probe.
  */
-async function defaultBridgeProbe(host: string, port: number): Promise<boolean> {
+async function defaultBridgeProbe(
+	host: string,
+	port: number,
+): Promise<boolean> {
 	try {
-		const socket = await Bun.connect({ hostname: host, port, socket: { data() {} } });
+		const socket = await Bun.connect({
+			hostname: host,
+			port,
+			socket: { data() {} },
+		});
 		socket.end();
 		return true;
 	} catch {
@@ -71,10 +83,18 @@ async function defaultBridgeProbe(host: string, port: number): Promise<boolean> 
 export async function resolveSandboxLaunch(
 	options: ResolveSandboxLaunchOptions,
 ): Promise<SandboxLaunch> {
-	const { policy, command, platform, which, allowUnenforcedNetwork, enabled = true } = options;
+	const {
+		policy,
+		command,
+		platform,
+		which,
+		allowUnenforcedNetwork,
+		enabled = true,
+	} = options;
 
 	const [executable, ...rest] = command;
-	if (!executable) throw new Error("Sandbox launch requires a non-empty command");
+	if (!executable)
+		throw new Error("Sandbox launch requires a non-empty command");
 
 	if (!enabled) {
 		// Opted out: no probe, no wrapping, and the lack of isolation is stated
@@ -100,7 +120,9 @@ export async function resolveSandboxLaunch(
 		throw new Error(`Inference gateway unreachable at ${host}:${port}`);
 	}
 
-	const compiled = compileSandboxPolicy(policy, platform, { allowUnenforcedNetwork });
+	const compiled = compileSandboxPolicy(policy, platform, {
+		allowUnenforcedNetwork,
+	});
 
 	return {
 		sandboxed: true,

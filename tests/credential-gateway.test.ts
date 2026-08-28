@@ -25,18 +25,21 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
-import { startAuthBroker } from "@oh-my-pi/pi-ai/auth-broker";
 import type { SnapshotResponse } from "@oh-my-pi/pi-ai/auth-broker";
+import { startAuthBroker } from "@oh-my-pi/pi-ai/auth-broker";
+import type {
+	BoundIdentity,
+	CredentialGateway,
+} from "../src/daemon/credential-gateway";
 import {
 	historyMatchesIdentity,
 	reportMatchesIdentity,
 	startCredentialGateway,
 } from "../src/daemon/credential-gateway";
-import type { BoundIdentity, CredentialGateway } from "../src/daemon/credential-gateway";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -77,7 +80,6 @@ async function upstream(): Promise<Upstream> {
 	// rows written straight to the store must be pulled in before it starts.
 	await storage.reload();
 
-
 	const handle = startAuthBroker({
 		storage,
 		bind: "127.0.0.1:0",
@@ -103,7 +105,10 @@ async function gatewayFor(up: Upstream): Promise<CredentialGateway> {
 	return gateway;
 }
 
-async function snapshotVia(gateway: CredentialGateway, token: string): Promise<Response> {
+async function snapshotVia(
+	gateway: CredentialGateway,
+	token: string,
+): Promise<Response> {
 	return await fetch(`${gateway.url}/v1/snapshot`, {
 		headers: { Authorization: `Bearer ${token}` },
 	});
@@ -138,8 +143,8 @@ async function readEvents(
 			if (done) break;
 			buffer += decoder.decode(value, { stream: true });
 
-			let index: number;
-			while ((index = buffer.indexOf("\n\n")) !== -1) {
+			let index = buffer.indexOf("\n\n");
+			while (index !== -1) {
 				const frame = buffer.slice(0, index);
 				buffer = buffer.slice(index + 2);
 				for (const line of frame.split("\n")) {
@@ -148,8 +153,8 @@ async function readEvents(
 					if (payload.length === 0) continue;
 					events.push(JSON.parse(payload) as Record<string, unknown>);
 				}
+				index = buffer.indexOf("\n\n");
 			}
-
 			if (!triggered && trigger && events.length >= 1) {
 				triggered = true;
 				await trigger();
@@ -169,8 +174,14 @@ describe("worker token issuance", () => {
 		const up = await upstream();
 		const gateway = await gatewayFor(up);
 
-		const a = gateway.issueWorkerToken({ workerId: "reviewer", credentialIds: [up.ids.openai] });
-		const b = gateway.issueWorkerToken({ workerId: "scout", credentialIds: [up.ids.openai] });
+		const a = gateway.issueWorkerToken({
+			workerId: "reviewer",
+			credentialIds: [up.ids.openai],
+		});
+		const b = gateway.issueWorkerToken({
+			workerId: "scout",
+			credentialIds: [up.ids.openai],
+		});
 
 		expect(a.token).not.toBe(b.token);
 		expect(a.token.length).toBeGreaterThanOrEqual(32);
@@ -222,18 +233,30 @@ describe("snapshot filtering", () => {
 			credentialIds: [up.ids.openai],
 		});
 
-		const body = (await (await snapshotVia(gateway, worker.token)).json()) as SnapshotResponse;
+		const body = (await (
+			await snapshotVia(gateway, worker.token)
+		).json()) as SnapshotResponse;
 		expect(body.credentials.map((c) => c.id)).toEqual([up.ids.openai]);
 	});
 
 	test("two workers see disjoint credential sets", async () => {
 		const up = await upstream();
 		const gateway = await gatewayFor(up);
-		const a = gateway.issueWorkerToken({ workerId: "a", credentialIds: [up.ids.openai] });
-		const b = gateway.issueWorkerToken({ workerId: "b", credentialIds: [up.ids.anthropic] });
+		const a = gateway.issueWorkerToken({
+			workerId: "a",
+			credentialIds: [up.ids.openai],
+		});
+		const b = gateway.issueWorkerToken({
+			workerId: "b",
+			credentialIds: [up.ids.anthropic],
+		});
 
-		const aBody = (await (await snapshotVia(gateway, a.token)).json()) as SnapshotResponse;
-		const bBody = (await (await snapshotVia(gateway, b.token)).json()) as SnapshotResponse;
+		const aBody = (await (
+			await snapshotVia(gateway, a.token)
+		).json()) as SnapshotResponse;
+		const bBody = (await (
+			await snapshotVia(gateway, b.token)
+		).json()) as SnapshotResponse;
 
 		expect(aBody.credentials.map((c) => c.id)).toEqual([up.ids.openai]);
 		expect(bBody.credentials.map((c) => c.id)).toEqual([up.ids.anthropic]);
@@ -265,7 +288,9 @@ describe("snapshot filtering", () => {
 				headers: { Authorization: `Bearer ${ADMIN_TOKEN}` },
 			})
 		).json()) as SnapshotResponse;
-		const workerBody = (await (await snapshotVia(gateway, worker.token)).json()) as SnapshotResponse;
+		const workerBody = (await (
+			await snapshotVia(gateway, worker.token)
+		).json()) as SnapshotResponse;
 
 		expect(workerBody.generation).toBeGreaterThan(0);
 		expect(workerBody.generation).not.toBe(upstreamBody.generation);
@@ -279,8 +304,12 @@ describe("snapshot filtering", () => {
 			credentialIds: [up.ids.openai],
 		});
 
-		const first = (await (await snapshotVia(gateway, worker.token)).json()) as SnapshotResponse;
-		const second = (await (await snapshotVia(gateway, worker.token)).json()) as SnapshotResponse;
+		const first = (await (
+			await snapshotVia(gateway, worker.token)
+		).json()) as SnapshotResponse;
+		const second = (await (
+			await snapshotVia(gateway, worker.token)
+		).json()) as SnapshotResponse;
 		expect(second.generation).toBeGreaterThanOrEqual(first.generation);
 	});
 });
@@ -296,10 +325,13 @@ describe("route scoping", () => {
 			credentialIds: [up.ids.openai],
 		});
 
-		const res = await fetch(`${gateway.url}/v1/credential/${up.ids.openai}/refresh`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${worker.token}` },
-		});
+		const res = await fetch(
+			`${gateway.url}/v1/credential/${up.ids.openai}/refresh`,
+			{
+				method: "POST",
+				headers: { Authorization: `Bearer ${worker.token}` },
+			},
+		);
 		expect(res.status).not.toBe(403);
 	});
 
@@ -311,10 +343,13 @@ describe("route scoping", () => {
 			credentialIds: [up.ids.openai],
 		});
 
-		const res = await fetch(`${gateway.url}/v1/credential/${up.ids.anthropic}/refresh`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${worker.token}` },
-		});
+		const res = await fetch(
+			`${gateway.url}/v1/credential/${up.ids.anthropic}/refresh`,
+			{
+				method: "POST",
+				headers: { Authorization: `Bearer ${worker.token}` },
+			},
+		);
 		expect(res.status).toBe(403);
 	});
 
@@ -326,11 +361,21 @@ describe("route scoping", () => {
 			credentialIds: [up.ids.openai],
 		});
 
-		const res = await fetch(`${gateway.url}/v1/credential/${up.ids.google}/block`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${worker.token}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ providerKey: "google", blockScope: "account", blockedUntilMs: Date.now() + 1000 }),
-		});
+		const res = await fetch(
+			`${gateway.url}/v1/credential/${up.ids.google}/block`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${worker.token}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					providerKey: "google",
+					blockScope: "account",
+					blockedUntilMs: Date.now() + 1000,
+				}),
+			},
+		);
 		expect(res.status).toBe(403);
 	});
 
@@ -342,11 +387,21 @@ describe("route scoping", () => {
 			credentialIds: [up.ids.openai],
 		});
 
-		const res = await fetch(`${gateway.url}/v1/credential/${up.ids.openai}/block`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${worker.token}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ providerKey: "openai", blockScope: "account", blockedUntilMs: Date.now() + 60_000 }),
-		});
+		const res = await fetch(
+			`${gateway.url}/v1/credential/${up.ids.openai}/block`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${worker.token}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					providerKey: "openai",
+					blockScope: "account",
+					blockedUntilMs: Date.now() + 60_000,
+				}),
+			},
+		);
 		expect(res.ok).toBe(true);
 	});
 
@@ -360,8 +415,14 @@ describe("route scoping", () => {
 
 		const res = await fetch(`${gateway.url}/v1/credential`, {
 			method: "POST",
-			headers: { Authorization: `Bearer ${worker.token}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ provider: "openai", credential: { type: "api_key", key: "smuggled" } }),
+			headers: {
+				Authorization: `Bearer ${worker.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				provider: "openai",
+				credential: { type: "api_key", key: "smuggled" },
+			}),
 		});
 		expect(res.status).toBe(403);
 	});
@@ -423,8 +484,15 @@ describe("route scoping", () => {
 
 		const res = await fetch(`${gateway.url}/v1/usage/observed`, {
 			method: "POST",
-			headers: { Authorization: `Bearer ${worker.token}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ installId: "worker", hostname: "worker", entries: [] }),
+			headers: {
+				Authorization: `Bearer ${worker.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				installId: "worker",
+				hostname: "worker",
+				entries: [],
+			}),
 		});
 		expect(res.status).toBeLessThan(500);
 		expect(res.status).not.toBe(403);
@@ -448,11 +516,17 @@ describe("disable — dedicated account", () => {
 			credentialIds: [up.ids.openai],
 		});
 
-		const res = await fetch(`${gateway.url}/v1/credential/${up.ids.openai}/disable`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${worker.token}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ cause: "rotated" }),
-		});
+		const res = await fetch(
+			`${gateway.url}/v1/credential/${up.ids.openai}/disable`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${worker.token}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ cause: "rotated" }),
+			},
+		);
 
 		expect(res.ok).toBe(true);
 		expect(up.store.listAuthCredentials("openai")).toHaveLength(0);
@@ -467,13 +541,22 @@ describe("disable — shared account", () => {
 			workerId: "reviewer",
 			credentialIds: [up.ids.openai],
 		});
-		gateway.issueWorkerToken({ workerId: "peer", credentialIds: [up.ids.openai] });
-
-		const res = await fetch(`${gateway.url}/v1/credential/${up.ids.openai}/disable`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${requester.token}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ cause: "quota" }),
+		gateway.issueWorkerToken({
+			workerId: "peer",
+			credentialIds: [up.ids.openai],
 		});
+
+		const res = await fetch(
+			`${gateway.url}/v1/credential/${up.ids.openai}/disable`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${requester.token}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ cause: "quota" }),
+			},
+		);
 
 		expect(res.status).toBe(409);
 		const body = (await res.json()) as { status: string; requestId: string };
@@ -488,11 +571,17 @@ describe("disable — shared account", () => {
 			workerId: "reviewer",
 			credentialIds: [up.ids.openai],
 		});
-		gateway.issueWorkerToken({ workerId: "peer", credentialIds: [up.ids.openai] });
+		gateway.issueWorkerToken({
+			workerId: "peer",
+			credentialIds: [up.ids.openai],
+		});
 
 		await fetch(`${gateway.url}/v1/credential/${up.ids.openai}/disable`, {
 			method: "POST",
-			headers: { Authorization: `Bearer ${requester.token}`, "Content-Type": "application/json" },
+			headers: {
+				Authorization: `Bearer ${requester.token}`,
+				"Content-Type": "application/json",
+			},
 			body: JSON.stringify({ cause: "quota" }),
 		});
 
@@ -506,12 +595,18 @@ describe("disable — shared account", () => {
 			workerId: "reviewer",
 			credentialIds: [up.ids.openai],
 		});
-		gateway.issueWorkerToken({ workerId: "peer", credentialIds: [up.ids.openai] });
+		gateway.issueWorkerToken({
+			workerId: "peer",
+			credentialIds: [up.ids.openai],
+		});
 
 		const send = async () =>
 			(await fetch(`${gateway.url}/v1/credential/${up.ids.openai}/disable`, {
 				method: "POST",
-				headers: { Authorization: `Bearer ${requester.token}`, "Content-Type": "application/json" },
+				headers: {
+					Authorization: `Bearer ${requester.token}`,
+					"Content-Type": "application/json",
+				},
 				body: JSON.stringify({ cause: "quota" }),
 			}).then((r) => r.json())) as { requestId: string };
 
@@ -520,7 +615,11 @@ describe("disable — shared account", () => {
 
 		expect(second.requestId).toBe(first.requestId);
 		expect(gateway.pendingPolicyRequests()).toEqual([
-			{ requestId: first.requestId, credentialId: up.ids.openai, workerId: "reviewer" },
+			{
+				requestId: first.requestId,
+				credentialId: up.ids.openai,
+				workerId: "reviewer",
+			},
 		]);
 	});
 
@@ -531,25 +630,37 @@ describe("disable — shared account", () => {
 			workerId: "reviewer",
 			credentialIds: [up.ids.openai],
 		});
-		const peer = gateway.issueWorkerToken({ workerId: "peer", credentialIds: [up.ids.openai] });
+		const peer = gateway.issueWorkerToken({
+			workerId: "peer",
+			credentialIds: [up.ids.openai],
+		});
 
-		const peerBefore = (await (await snapshotVia(gateway, peer.token)).json()) as SnapshotResponse;
+		const peerBefore = (await (
+			await snapshotVia(gateway, peer.token)
+		).json()) as SnapshotResponse;
 		const requesterBefore = (await (
 			await snapshotVia(gateway, requester.token)
 		).json()) as SnapshotResponse;
 
 		await fetch(`${gateway.url}/v1/credential/${up.ids.openai}/disable`, {
 			method: "POST",
-			headers: { Authorization: `Bearer ${requester.token}`, "Content-Type": "application/json" },
+			headers: {
+				Authorization: `Bearer ${requester.token}`,
+				"Content-Type": "application/json",
+			},
 			body: JSON.stringify({ cause: "quota" }),
 		});
 
-		const peerAfter = (await (await snapshotVia(gateway, peer.token)).json()) as SnapshotResponse;
+		const peerAfter = (await (
+			await snapshotVia(gateway, peer.token)
+		).json()) as SnapshotResponse;
 		const requesterAfter = (await (
 			await snapshotVia(gateway, requester.token)
 		).json()) as SnapshotResponse;
 
-		expect(requesterAfter.generation).toBeGreaterThan(requesterBefore.generation);
+		expect(requesterAfter.generation).toBeGreaterThan(
+			requesterBefore.generation,
+		);
 		expect(peerAfter.generation).toBe(peerBefore.generation);
 	});
 
@@ -560,15 +671,23 @@ describe("disable — shared account", () => {
 			workerId: "reviewer",
 			credentialIds: [up.ids.openai],
 		});
-		const peer = gateway.issueWorkerToken({ workerId: "peer", credentialIds: [up.ids.openai] });
+		const peer = gateway.issueWorkerToken({
+			workerId: "peer",
+			credentialIds: [up.ids.openai],
+		});
 
 		await fetch(`${gateway.url}/v1/credential/${up.ids.openai}/disable`, {
 			method: "POST",
-			headers: { Authorization: `Bearer ${requester.token}`, "Content-Type": "application/json" },
+			headers: {
+				Authorization: `Bearer ${requester.token}`,
+				"Content-Type": "application/json",
+			},
 			body: JSON.stringify({ cause: "quota" }),
 		});
 
-		const body = (await (await snapshotVia(gateway, peer.token)).json()) as SnapshotResponse;
+		const body = (await (
+			await snapshotVia(gateway, peer.token)
+		).json()) as SnapshotResponse;
 		expect(body.credentials.map((c) => c.id)).toEqual([up.ids.openai]);
 	});
 });
@@ -583,7 +702,10 @@ describe("requester recovery", () => {
 			workerId: "reviewer",
 			credentialIds: [up.ids.openai],
 		});
-		gateway.issueWorkerToken({ workerId: "peer", credentialIds: [up.ids.openai] });
+		gateway.issueWorkerToken({
+			workerId: "peer",
+			credentialIds: [up.ids.openai],
+		});
 
 		const events = await readEvents(
 			`${gateway.url}/v1/snapshot/stream`,
@@ -602,7 +724,9 @@ describe("requester recovery", () => {
 		);
 
 		const initial = events[0] as unknown as SnapshotResponse & { kind: string };
-		const recovery = events[1] as unknown as SnapshotResponse & { kind: string };
+		const recovery = events[1] as unknown as SnapshotResponse & {
+			kind: string;
+		};
 
 		expect(recovery.kind).toBe("snapshot");
 		expect(recovery.generation).toBeGreaterThan(initial.generation);
@@ -619,12 +743,15 @@ describe("requester recovery", () => {
 			credentialIds: [up.ids.openai],
 		});
 
-		const events = await readEvents(`${gateway.url}/v1/snapshot/stream`, worker.token, 1);
+		const events = await readEvents(
+			`${gateway.url}/v1/snapshot/stream`,
+			worker.token,
+			1,
+		);
 		const initial = events[0] as unknown as SnapshotResponse;
 		expect(initial.credentials.map((c) => c.id)).toEqual([up.ids.openai]);
 	});
 });
-
 
 // ── Conditional long-poll ────────────────────────────────────────────────────
 
@@ -642,7 +769,10 @@ describe("conditional long-poll", () => {
 		if (!etag) throw new Error("snapshot did not carry an ETag");
 
 		const res = await fetch(`${gateway.url}/v1/snapshot?wait=1`, {
-			headers: { Authorization: `Bearer ${worker.token}`, "If-None-Match": etag },
+			headers: {
+				Authorization: `Bearer ${worker.token}`,
+				"If-None-Match": etag,
+			},
 		});
 		expect(res.status).toBe(304);
 	});
@@ -654,7 +784,10 @@ describe("conditional long-poll", () => {
 			workerId: "reviewer",
 			credentialIds: [up.ids.openai],
 		});
-		gateway.issueWorkerToken({ workerId: "peer", credentialIds: [up.ids.openai] });
+		gateway.issueWorkerToken({
+			workerId: "peer",
+			credentialIds: [up.ids.openai],
+		});
 
 		const first = await snapshotVia(gateway, requester.token);
 		const before = (await first.json()) as SnapshotResponse;
@@ -662,14 +795,23 @@ describe("conditional long-poll", () => {
 		if (!etag) throw new Error("snapshot did not carry an ETag");
 
 		const polling = fetch(`${gateway.url}/v1/snapshot?wait=10`, {
-			headers: { Authorization: `Bearer ${requester.token}`, "If-None-Match": etag },
+			headers: {
+				Authorization: `Bearer ${requester.token}`,
+				"If-None-Match": etag,
+			},
 		});
 
-		const disable = await fetch(`${gateway.url}/v1/credential/${up.ids.openai}/disable`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${requester.token}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ cause: "quota" }),
-		});
+		const disable = await fetch(
+			`${gateway.url}/v1/credential/${up.ids.openai}/disable`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${requester.token}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ cause: "quota" }),
+			},
+		);
 		expect(disable.status).toBe(409);
 
 		const res = await polling;
@@ -687,7 +829,10 @@ describe("conditional long-poll", () => {
 			workerId: "reviewer",
 			credentialIds: [up.ids.openai],
 		});
-		const peer = gateway.issueWorkerToken({ workerId: "peer", credentialIds: [up.ids.openai] });
+		const peer = gateway.issueWorkerToken({
+			workerId: "peer",
+			credentialIds: [up.ids.openai],
+		});
 
 		const first = await snapshotVia(gateway, peer.token);
 		const etag = first.headers.get("etag");
@@ -699,7 +844,10 @@ describe("conditional long-poll", () => {
 
 		await fetch(`${gateway.url}/v1/credential/${up.ids.openai}/disable`, {
 			method: "POST",
-			headers: { Authorization: `Bearer ${requester.token}`, "Content-Type": "application/json" },
+			headers: {
+				Authorization: `Bearer ${requester.token}`,
+				"Content-Type": "application/json",
+			},
 			body: JSON.stringify({ cause: "quota" }),
 		});
 
@@ -718,16 +866,26 @@ describe("upstream change propagation", () => {
 			credentialIds: [up.ids.openai, up.ids.anthropic],
 		});
 
-		const before = (await (await snapshotVia(gateway, worker.token)).json()) as SnapshotResponse;
+		const before = (await (
+			await snapshotVia(gateway, worker.token)
+		).json()) as SnapshotResponse;
 
-		const res = await fetch(`${up.url}/v1/credential/${up.ids.anthropic}/disable`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${ADMIN_TOKEN}`, "Content-Type": "application/json" },
-			body: JSON.stringify({ cause: "rotated" }),
-		});
+		const res = await fetch(
+			`${up.url}/v1/credential/${up.ids.anthropic}/disable`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${ADMIN_TOKEN}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ cause: "rotated" }),
+			},
+		);
 		expect(res.ok).toBe(true);
 
-		const after = (await (await snapshotVia(gateway, worker.token)).json()) as SnapshotResponse;
+		const after = (await (
+			await snapshotVia(gateway, worker.token)
+		).json()) as SnapshotResponse;
 		// The store ignores events not newer than what it holds, so the worker
 		// view must advance or the worker keeps using a dead credential.
 		expect(after.generation).toBeGreaterThan(before.generation);
@@ -751,7 +909,10 @@ describe("upstream change propagation", () => {
 			async () => {
 				await fetch(`${up.url}/v1/credential/${up.ids.anthropic}/disable`, {
 					method: "POST",
-					headers: { Authorization: `Bearer ${ADMIN_TOKEN}`, "Content-Type": "application/json" },
+					headers: {
+						Authorization: `Bearer ${ADMIN_TOKEN}`,
+						"Content-Type": "application/json",
+					},
 					body: JSON.stringify({ cause: "rotated" }),
 				});
 			},
@@ -782,7 +943,10 @@ describe("usage account filtering", () => {
 		email: "bob@example.com",
 		identifiable: true,
 	};
-	const apiKeyOnly: BoundIdentity = { provider: "anthropic", identifiable: false };
+	const apiKeyOnly: BoundIdentity = {
+		provider: "anthropic",
+		identifiable: false,
+	};
 
 	const aliceReport = {
 		provider: "anthropic",
@@ -840,19 +1004,39 @@ describe("usage account filtering", () => {
 	});
 
 	test("a different provider never matches", () => {
-		expect(reportMatchesIdentity({ ...aliceReport, provider: "openai" }, alice)).toBe(false);
+		expect(
+			reportMatchesIdentity({ ...aliceReport, provider: "openai" }, alice),
+		).toBe(false);
 	});
 
 	test("history rows filter to their own account", () => {
 		const rows = [
-			{ provider: "anthropic", accountId: "acct-alice", email: "alice@example.com" },
-			{ provider: "anthropic", accountId: "acct-bob", email: "bob@example.com" },
-			{ provider: "openai", accountId: "acct-alice", email: "alice@example.com" },
+			{
+				provider: "anthropic",
+				accountId: "acct-alice",
+				email: "alice@example.com",
+			},
+			{
+				provider: "anthropic",
+				accountId: "acct-bob",
+				email: "bob@example.com",
+			},
+			{
+				provider: "openai",
+				accountId: "acct-alice",
+				email: "alice@example.com",
+			},
 		];
 
-		expect(rows.filter((r) => historyMatchesIdentity(r, alice))).toEqual([rows[0]]);
-		expect(rows.filter((r) => historyMatchesIdentity(r, bob))).toEqual([rows[1]]);
-		expect(rows.filter((r) => historyMatchesIdentity(r, apiKeyOnly))).toEqual([]);
+		expect(rows.filter((r) => historyMatchesIdentity(r, alice))).toEqual([
+			rows[0],
+		]);
+		expect(rows.filter((r) => historyMatchesIdentity(r, bob))).toEqual([
+			rows[1],
+		]);
+		expect(rows.filter((r) => historyMatchesIdentity(r, apiKeyOnly))).toEqual(
+			[],
+		);
 	});
 });
 
@@ -879,7 +1063,10 @@ describe("usage routes isolate same-provider accounts", () => {
 	let watchParked = Promise.withResolvers<void>();
 
 	/** Upstream stub: two OAuth accounts on one provider, plus their usage. */
-	const stubUpstream = async (input: string, init?: RequestInit): Promise<Response> => {
+	const stubUpstream = async (
+		input: string,
+		init?: RequestInit,
+	): Promise<Response> => {
 		const url = new URL(String(input));
 		const path = url.pathname;
 		const body = (value: unknown) =>
@@ -896,9 +1083,13 @@ describe("usage routes isolate same-provider accounts", () => {
 				// Park like a real conditional long-poll until the gateway aborts.
 				if (init?.signal?.aborted) throw new Error("aborted");
 				const { promise, reject } = Promise.withResolvers<Response>();
-				init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
-					once: true,
-				});
+				init?.signal?.addEventListener(
+					"abort",
+					() => reject(new Error("aborted")),
+					{
+						once: true,
+					},
+				);
 				watchParked.resolve();
 				return await promise;
 			}
@@ -908,23 +1099,42 @@ describe("usage routes isolate same-provider accounts", () => {
 					{
 						id: ALICE_ID,
 						provider: "anthropic",
-						credential: { type: "oauth", accountId: "acct-alice", email: "alice@example.com" },
+						credential: {
+							type: "oauth",
+							accountId: "acct-alice",
+							email: "alice@example.com",
+						},
 					},
 					{
 						id: BOB_ID,
 						provider: "anthropic",
-						credential: { type: "oauth", accountId: "acct-bob", email: "bob@example.com" },
+						credential: {
+							type: "oauth",
+							accountId: "acct-bob",
+							email: "bob@example.com",
+						},
 					},
 				],
 			});
 		}
-		if (path === "/v1/usage") return body({ generatedAt: 1, reports: [aliceReport, bobReport] });
+		if (path === "/v1/usage")
+			return body({ generatedAt: 1, reports: [aliceReport, bobReport] });
 		if (path === "/v1/usage/history") {
 			return body({
 				generatedAt: 1,
 				entries: [
-					{ provider: "anthropic", accountId: "acct-alice", email: "alice@example.com", limitId: "5h" },
-					{ provider: "anthropic", accountId: "acct-bob", email: "bob@example.com", limitId: "5h" },
+					{
+						provider: "anthropic",
+						accountId: "acct-alice",
+						email: "alice@example.com",
+						limitId: "5h",
+					},
+					{
+						provider: "anthropic",
+						accountId: "acct-bob",
+						email: "bob@example.com",
+						limitId: "5h",
+					},
 				],
 			});
 		}
@@ -943,24 +1153,40 @@ describe("usage routes isolate same-provider accounts", () => {
 
 	test("each worker's /v1/usage carries only its own account", async () => {
 		const gateway = await stubbedGateway();
-		const alice = gateway.issueWorkerToken({ workerId: "alice", credentialIds: [ALICE_ID] });
-		const bob = gateway.issueWorkerToken({ workerId: "bob", credentialIds: [BOB_ID] });
+		const alice = gateway.issueWorkerToken({
+			workerId: "alice",
+			credentialIds: [ALICE_ID],
+		});
+		const bob = gateway.issueWorkerToken({
+			workerId: "bob",
+			credentialIds: [BOB_ID],
+		});
 
 		const read = async (token: string) =>
 			(await (
-				await fetch(`${gateway.url}/v1/usage`, { headers: { Authorization: `Bearer ${token}` } })
+				await fetch(`${gateway.url}/v1/usage`, {
+					headers: { Authorization: `Bearer ${token}` },
+				})
 			).json()) as { reports: { metadata: { accountId: string } }[] };
 
-		expect((await read(alice.token)).reports.map((r) => r.metadata.accountId)).toEqual([
-			"acct-alice",
-		]);
-		expect((await read(bob.token)).reports.map((r) => r.metadata.accountId)).toEqual(["acct-bob"]);
+		expect(
+			(await read(alice.token)).reports.map((r) => r.metadata.accountId),
+		).toEqual(["acct-alice"]);
+		expect(
+			(await read(bob.token)).reports.map((r) => r.metadata.accountId),
+		).toEqual(["acct-bob"]);
 	});
 
 	test("each worker's /v1/usage/history carries only its own account", async () => {
 		const gateway = await stubbedGateway();
-		const alice = gateway.issueWorkerToken({ workerId: "alice", credentialIds: [ALICE_ID] });
-		const bob = gateway.issueWorkerToken({ workerId: "bob", credentialIds: [BOB_ID] });
+		const alice = gateway.issueWorkerToken({
+			workerId: "alice",
+			credentialIds: [ALICE_ID],
+		});
+		const bob = gateway.issueWorkerToken({
+			workerId: "bob",
+			credentialIds: [BOB_ID],
+		});
 
 		const read = async (token: string) =>
 			(await (
@@ -969,8 +1195,12 @@ describe("usage routes isolate same-provider accounts", () => {
 				})
 			).json()) as { entries: { accountId: string }[] };
 
-		expect((await read(alice.token)).entries.map((e) => e.accountId)).toEqual(["acct-alice"]);
-		expect((await read(bob.token)).entries.map((e) => e.accountId)).toEqual(["acct-bob"]);
+		expect((await read(alice.token)).entries.map((e) => e.accountId)).toEqual([
+			"acct-alice",
+		]);
+		expect((await read(bob.token)).entries.map((e) => e.accountId)).toEqual([
+			"acct-bob",
+		]);
 	});
 
 	test("a worker bound to both accounts sees both", async () => {
@@ -986,7 +1216,10 @@ describe("usage routes isolate same-provider accounts", () => {
 			})
 		).json()) as { reports: { metadata: { accountId: string } }[] };
 
-		expect(res.reports.map((r) => r.metadata.accountId)).toEqual(["acct-alice", "acct-bob"]);
+		expect(res.reports.map((r) => r.metadata.accountId)).toEqual([
+			"acct-alice",
+			"acct-bob",
+		]);
 	});
 
 	test("close() completes while the watcher is parked on a long-poll", async () => {

@@ -27,10 +27,10 @@
 export const SANDBOX_NETWORK_UNENFORCED = "SANDBOX_NETWORK_UNENFORCED";
 
 class SandboxError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SandboxError";
-  }
+	constructor(message: string) {
+		super(message);
+		this.name = "SandboxError";
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -38,27 +38,30 @@ class SandboxError extends Error {
 // ---------------------------------------------------------------------------
 
 export interface SandboxPolicy {
-  workspace: string;
-  workerHome: string;
-  runtimePaths: string[];
-  inferenceGateway: { host: string; port: number };
-  loopbackPorts: number[];
-  extraRoots?: string[];
+	workspace: string;
+	workerHome: string;
+	runtimePaths: string[];
+	inferenceGateway: { host: string; port: number };
+	loopbackPorts: number[];
+	extraRoots?: string[];
 }
 
 export interface CompileOptions {
-  allowUnenforcedNetwork?: boolean;
+	allowUnenforcedNetwork?: boolean;
 }
 
 export type CompiledPolicy = {
-  command: string;
-  args: string[];
-  networkIsolation: "loopback-enforced" | "unrestricted-host-network";
+	command: string;
+	args: string[];
+	networkIsolation: "loopback-enforced" | "unrestricted-host-network";
 };
 
 export type ProbeResult =
-  | { available: true; networkIsolation: "loopback-enforced" | "unrestricted-host-network" }
-  | { available: false; reason: string };
+	| {
+			available: true;
+			networkIsolation: "loopback-enforced" | "unrestricted-host-network";
+	  }
+	| { available: false; reason: string };
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -66,21 +69,24 @@ export type ProbeResult =
 
 const PORT_MAX = 65535;
 const PORT_MIN = 1;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately rejects NUL, newline, and quote in sandbox paths.
 const DANGEROUS = /[\x00\n"]/;
 
 function validatePath(label: string, value: string): void {
-  if (DANGEROUS.test(value)) {
-    throw new SandboxError(`Invalid ${label}: contains NUL, newline, or quote`);
-  }
-  if (!value.startsWith("/")) {
-    throw new SandboxError(`Invalid ${label}: must be absolute`);
-  }
+	if (DANGEROUS.test(value)) {
+		throw new SandboxError(`Invalid ${label}: contains NUL, newline, or quote`);
+	}
+	if (!value.startsWith("/")) {
+		throw new SandboxError(`Invalid ${label}: must be absolute`);
+	}
 }
 
 function validatePort(label: string, port: number): void {
-  if (!Number.isInteger(port) || port < PORT_MIN || port > PORT_MAX) {
-    throw new SandboxError(`Invalid ${label}: must be integer ${PORT_MIN}–${PORT_MAX}`);
-  }
+	if (!Number.isInteger(port) || port < PORT_MIN || port > PORT_MAX) {
+		throw new SandboxError(
+			`Invalid ${label}: must be integer ${PORT_MIN}–${PORT_MAX}`,
+		);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -88,92 +94,103 @@ function validatePort(label: string, port: number): void {
 // ---------------------------------------------------------------------------
 
 function compileDarwin(policy: SandboxPolicy): CompiledPolicy {
-  const {
-    workspace,
-    workerHome,
-    runtimePaths,
-    inferenceGateway,
-    loopbackPorts,
-    extraRoots = [],
-  } = policy;
+	const {
+		workspace,
+		workerHome,
+		runtimePaths,
+		inferenceGateway,
+		loopbackPorts,
+		extraRoots = [],
+	} = policy;
 
-  validatePath("workspace", workspace);
-  validatePath("workerHome", workerHome);
-  for (const rt of runtimePaths) validatePath("runtimePaths entry", rt);
-  for (const er of extraRoots) validatePath("extraRoots entry", er);
+	validatePath("workspace", workspace);
+	validatePath("workerHome", workerHome);
+	for (const rt of runtimePaths) validatePath("runtimePaths entry", rt);
+	for (const er of extraRoots) validatePath("extraRoots entry", er);
 
-  if (inferenceGateway.host !== "127.0.0.1") {
-    throw new SandboxError(`inferenceGateway.host must be 127.0.0.1; got "${inferenceGateway.host}"`);
-  }
-  validatePort("inferenceGateway.port", inferenceGateway.port);
+	if (inferenceGateway.host !== "127.0.0.1") {
+		throw new SandboxError(
+			`inferenceGateway.host must be 127.0.0.1; got "${inferenceGateway.host}"`,
+		);
+	}
+	validatePort("inferenceGateway.port", inferenceGateway.port);
 
-  const ports = new Set(loopbackPorts);
-  if (ports.size !== loopbackPorts.length) {
-    throw new SandboxError("loopbackPorts contains duplicates");
-  }
-  for (const p of loopbackPorts) validatePort("loopbackPorts entry", p);
+	const ports = new Set(loopbackPorts);
+	if (ports.size !== loopbackPorts.length) {
+		throw new SandboxError("loopbackPorts contains duplicates");
+	}
+	for (const p of loopbackPorts) validatePort("loopbackPorts entry", p);
 
-  const lines: string[] = [
-    "(version 1)",
-    "(deny default)",
-    "(deny network*)",
-    "(allow process*)",
-    "(allow sysctl-read)",
-    "(allow mach-lookup)",
-    `(allow file-read* (subpath "${workspace}"))`,
-    `(allow file-write* (subpath "${workspace}"))`,
-    `(allow file-write* (subpath "${workerHome}"))`,
-    `(allow file-read* (subpath "${workerHome}"))`,
-    ...runtimePaths.map((rt) => `(allow file-read* (subpath "${rt}"))`),
-    ...extraRoots.map((er) => `(allow file-read* (subpath "${er}"))`),
-    `(allow network-outbound (remote ip "127.0.0.1:${inferenceGateway.port}"))`,
-    ...loopbackPorts.map((p) => `(allow network-outbound (remote ip "127.0.0.1:${p}"))`),
-  ];
+	const lines: string[] = [
+		"(version 1)",
+		"(deny default)",
+		"(deny network*)",
+		"(allow process*)",
+		"(allow sysctl-read)",
+		"(allow mach-lookup)",
+		`(allow file-read* (subpath "${workspace}"))`,
+		`(allow file-write* (subpath "${workspace}"))`,
+		`(allow file-write* (subpath "${workerHome}"))`,
+		`(allow file-read* (subpath "${workerHome}"))`,
+		...runtimePaths.map((rt) => `(allow file-read* (subpath "${rt}"))`),
+		...extraRoots.map((er) => `(allow file-read* (subpath "${er}"))`),
+		`(allow network-outbound (remote ip "127.0.0.1:${inferenceGateway.port}"))`,
+		...loopbackPorts.map(
+			(p) => `(allow network-outbound (remote ip "127.0.0.1:${p}"))`,
+		),
+	];
 
-  return {
-    command: "sandbox-exec",
-    args: ["-p", lines.join("\n")],
-    networkIsolation: "loopback-enforced",
-  };
+	return {
+		command: "sandbox-exec",
+		args: ["-p", lines.join("\n")],
+		networkIsolation: "loopback-enforced",
+	};
 }
 
 // ---------------------------------------------------------------------------
 // Linux profile compiler (bwrap)
 // ---------------------------------------------------------------------------
 
-function compileLinux(policy: SandboxPolicy, opts: CompileOptions): CompiledPolicy {
-  const { workspace, workerHome, runtimePaths, extraRoots = [] } = policy;
+function compileLinux(
+	policy: SandboxPolicy,
+	opts: CompileOptions,
+): CompiledPolicy {
+	const { workspace, workerHome, runtimePaths, extraRoots = [] } = policy;
 
-  if (!opts.allowUnenforcedNetwork) {
-    throw new SandboxError(SANDBOX_NETWORK_UNENFORCED);
-  }
+	if (!opts.allowUnenforcedNetwork) {
+		throw new SandboxError(SANDBOX_NETWORK_UNENFORCED);
+	}
 
-  validatePath("workspace", workspace);
-  validatePath("workerHome", workerHome);
-  for (const rt of runtimePaths) validatePath("runtimePaths entry", rt);
-  for (const er of extraRoots) validatePath("extraRoots entry", er);
+	validatePath("workspace", workspace);
+	validatePath("workerHome", workerHome);
+	for (const rt of runtimePaths) validatePath("runtimePaths entry", rt);
+	for (const er of extraRoots) validatePath("extraRoots entry", er);
 
-  const args: string[] = [
-    "--unshare-all",
-    "--share-net",
-    "--bind",
-    workspace,
-    workspace,
-    "--bind",
-    workerHome,
-    workerHome,
-  ];
+	const args: string[] = [
+		"--unshare-all",
+		"--share-net",
+		"--bind",
+		workspace,
+		workspace,
+		"--bind",
+		workerHome,
+		workerHome,
+	];
 
-  for (const rt of runtimePaths) {
-    args.push("--ro-bind", rt, rt);
-  }
-  for (const er of extraRoots) {
-    args.push("--ro-bind", er, er);
-  }
+	for (const rt of runtimePaths) {
+		args.push("--ro-bind", rt, rt);
+	}
+	for (const er of extraRoots) {
+		args.push("--ro-bind", er, er);
+	}
 
-  args.push("--");
+	args.push("--");
 
-  return { command: "bwrap", args, networkIsolation: "unrestricted-host-network" };
+	return {
+		command: "bwrap",
+		args,
+		networkIsolation: "unrestricted-host-network",
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -181,18 +198,18 @@ function compileLinux(policy: SandboxPolicy, opts: CompileOptions): CompiledPoli
 // ---------------------------------------------------------------------------
 
 export function compileSandboxPolicy(
-  policy: SandboxPolicy,
-  platform: NodeJS.Platform,
-  opts: CompileOptions = {}
+	policy: SandboxPolicy,
+	platform: NodeJS.Platform,
+	opts: CompileOptions = {},
 ): CompiledPolicy {
-  switch (platform) {
-    case "darwin":
-      return compileDarwin(policy);
-    case "linux":
-      return compileLinux(policy, opts);
-    default:
-      throw new SandboxError(`Unsupported platform: ${platform}`);
-  }
+	switch (platform) {
+		case "darwin":
+			return compileDarwin(policy);
+		case "linux":
+			return compileLinux(policy, opts);
+		default:
+			throw new SandboxError(`Unsupported platform: ${platform}`);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -200,23 +217,23 @@ export function compileSandboxPolicy(
 // ---------------------------------------------------------------------------
 
 export async function probeSandbox(
-  platform: NodeJS.Platform,
-  whichFn: (binary: string) => Promise<string | null>
+	platform: NodeJS.Platform,
+	whichFn: (binary: string) => Promise<string | null>,
 ): Promise<ProbeResult> {
-  switch (platform) {
-    case "darwin": {
-      const path = await whichFn("sandbox-exec");
-      return path
-        ? { available: true, networkIsolation: "loopback-enforced" }
-        : { available: false, reason: "sandbox-exec not found" };
-    }
-    case "linux": {
-      const path = await whichFn("bwrap");
-      return path
-        ? { available: true, networkIsolation: "unrestricted-host-network" }
-        : { available: false, reason: "bwrap not found" };
-    }
-    default:
-      return { available: false, reason: `Unsupported platform: ${platform}` };
-  }
+	switch (platform) {
+		case "darwin": {
+			const path = await whichFn("sandbox-exec");
+			return path
+				? { available: true, networkIsolation: "loopback-enforced" }
+				: { available: false, reason: "sandbox-exec not found" };
+		}
+		case "linux": {
+			const path = await whichFn("bwrap");
+			return path
+				? { available: true, networkIsolation: "unrestricted-host-network" }
+				: { available: false, reason: "bwrap not found" };
+		}
+		default:
+			return { available: false, reason: `Unsupported platform: ${platform}` };
+	}
 }

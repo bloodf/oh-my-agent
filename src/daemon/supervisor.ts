@@ -19,11 +19,12 @@
  *
  * Performance: one room query per delivery; no polling loop of its own.
  */
-import { AccountRegistry } from "./account-registry";
+
+import type { RoomStore } from "../rooms/store";
 import type { AccountMode } from "./account-registry";
+import { AccountRegistry } from "./account-registry";
 import type { QuotaBlock } from "./quota-state";
 import type { Scheduler } from "./scheduler";
-import type { RoomStore } from "../rooms/store";
 
 /** The slice of a worker the supervisor drives. */
 export interface SupervisedWorker {
@@ -128,7 +129,10 @@ export class Supervisor {
 		for (const room of rooms) {
 			// The daemon owns room existence: a peer declaring a room in its
 			// frontmatter should not fail to start because nobody created it.
-			await this.deps.rooms.createRoom({ id: room, kind: room.startsWith("@") ? "dm" : "channel" });
+			await this.deps.rooms.createRoom({
+				id: room,
+				kind: room.startsWith("@") ? "dm" : "channel",
+			});
 			await this.deps.rooms.subscribe(worker.name, room);
 		}
 	}
@@ -140,7 +144,11 @@ export class Supervisor {
 	 * notice a message and decide who should see it. Parked peers are skipped
 	 * and pick the backlog up on resume.
 	 */
-	async post(input: { room: string; author: string; body: string }): Promise<string[]> {
+	async post(input: {
+		room: string;
+		author: string;
+		body: string;
+	}): Promise<string[]> {
 		await this.deps.rooms.post(input);
 
 		const woken: string[] = [];
@@ -171,7 +179,9 @@ export class Supervisor {
 		const rooms = pending
 			.map((entry) => ({
 				room: entry.room,
-				messages: entry.messages.filter((message) => message.author !== peerName),
+				messages: entry.messages.filter(
+					(message) => message.author !== peerName,
+				),
 			}))
 			.filter((entry) => entry.messages.length > 0);
 		if (rooms.length === 0) {
@@ -181,7 +191,11 @@ export class Supervisor {
 
 		const batch = rooms
 			.map((entry) =>
-				entry.messages.map((message) => `[${entry.room}] ${message.author}: ${message.body}`).join("\n"),
+				entry.messages
+					.map(
+						(message) => `[${entry.room}] ${message.author}: ${message.body}`,
+					)
+					.join("\n"),
 			)
 			.join("\n");
 

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "fs/promises";
-import { join } from "path";
-import { tmpdir } from "os";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
 import type {
 	AuthBrokerClient,
 	CredentialBlockSnapshot,
@@ -9,8 +10,10 @@ import type {
 	SnapshotResponse,
 	SnapshotStreamSnapshotEvent,
 } from "@oh-my-pi/pi-ai/auth-broker";
-import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
-import { AuthBrokerClient as ABClient, startAuthBroker } from "@oh-my-pi/pi-ai/auth-broker";
+import {
+	AuthBrokerClient as ABClient,
+	startAuthBroker,
+} from "@oh-my-pi/pi-ai/auth-broker";
 
 async function withBroker(
 	fn: (client: AuthBrokerClient, baseUrl: string) => Promise<void>,
@@ -73,7 +76,8 @@ describe("auth-broker contract", () => {
 				headers: { Authorization: "Bearer test-token" },
 			});
 			expect(first.status).toBe(200);
-			const etag = first.headers.get("etag")!;
+			const etag = first.headers.get("etag");
+			if (!etag) throw new Error("snapshot response had no ETag");
 			const second = await fetch(`${baseUrl}/v1/snapshot?wait=1`, {
 				headers: { Authorization: "Bearer test-token", "If-None-Match": etag },
 			});
@@ -83,25 +87,35 @@ describe("auth-broker contract", () => {
 
 	test("upload API-key credential appears in snapshot", async () => {
 		await withBroker(async (client, baseUrl) => {
-			await client.uploadCredential("openai", { type: "api_key", key: "sk-contract-test" });
+			await client.uploadCredential("openai", {
+				type: "api_key",
+				key: "sk-contract-test",
+			});
 			const res = await fetch(`${baseUrl}/v1/snapshot`, {
 				headers: { Authorization: "Bearer test-token" },
 			});
 			expect(res.status).toBe(200);
 			const body = (await res.json()) as SnapshotResponse;
-			const entry = body.credentials.find(e => e.provider === "openai");
-			expect(entry).toBeDefined();
-			expect(entry!.credential.type).toBe("api_key");
+			const entry = body.credentials.find((e) => e.provider === "openai");
+			if (!entry) throw new Error("uploaded credential missing from snapshot");
+			expect(entry.credential.type).toBe("api_key");
 		});
 	});
 
 	test("block route updates credential snapshot with blockedUntilMs", async () => {
-		await withBroker(async (client, baseUrl) => {
-			await client.uploadCredential("openai", { type: "api_key", key: "sk-block-test" });
+		await withBroker(async (client) => {
+			await client.uploadCredential("openai", {
+				type: "api_key",
+				key: "sk-block-test",
+			});
 			const snap = await client.fetchSnapshot();
-			if (snap.status !== 200) throw new Error(`expected 200, got ${snap.status}`);
-			const entry = snap.snapshot.credentials.find(e => e.provider === "openai");
-			const credId = entry!.id;
+			if (snap.status !== 200)
+				throw new Error(`expected 200, got ${snap.status}`);
+			const entry = snap.snapshot.credentials.find(
+				(e) => e.provider === "openai",
+			);
+			if (!entry) throw new Error("uploaded credential missing from snapshot");
+			const credId = entry.id;
 
 			const block: CredentialBlockSnapshot = {
 				providerKey: "openai:global",
@@ -112,16 +126,24 @@ describe("auth-broker contract", () => {
 			expect(blockRes.ok).toBe(true);
 
 			const snapAfter = await client.fetchSnapshot();
-			if (snapAfter.status !== 200) throw new Error(`expected 200, got ${snapAfter.status}`);
-			const updated = snapAfter.snapshot.credentials.find(e => e.id === credId);
-			const blocks = updated!.blocks ?? [];
-			expect(blocks.some(b => b.blockedUntilMs === block.blockedUntilMs)).toBe(true);
+			if (snapAfter.status !== 200)
+				throw new Error(`expected 200, got ${snapAfter.status}`);
+			const updated = snapAfter.snapshot.credentials.find(
+				(e) => e.id === credId,
+			);
+			if (!updated) throw new Error("blocked credential missing from snapshot");
+			const blocks = updated.blocks ?? [];
+			expect(
+				blocks.some((b) => b.blockedUntilMs === block.blockedUntilMs),
+			).toBe(true);
 		});
 	});
 
 	test("refresh nonexistent id throws", async () => {
 		await withBroker(async (client) => {
-			await expect(client.refreshCredential(Number.MAX_SAFE_INTEGER)).rejects.toThrow();
+			await expect(
+				client.refreshCredential(Number.MAX_SAFE_INTEGER),
+			).rejects.toThrow();
 		});
 	});
 

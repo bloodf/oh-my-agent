@@ -19,14 +19,14 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { AccountRegistry } from "../src/daemon/account-registry";
-import { Scheduler } from "../src/daemon/scheduler";
 import type { QuotaBlock } from "../src/daemon/quota-state";
-import { Supervisor } from "../src/daemon/supervisor";
+import { Scheduler } from "../src/daemon/scheduler";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
+import { Supervisor } from "../src/daemon/supervisor";
 import { RoomStore } from "../src/rooms/store";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -61,9 +61,13 @@ function stubWorker(name = "reviewer") {
 		},
 	};
 
-	return { worker, prompts, get state() {
-		return state;
-	} };
+	return {
+		worker,
+		prompts,
+		get state() {
+			return state;
+		},
+	};
 }
 
 async function harness() {
@@ -190,7 +194,11 @@ describe("room message delivery", () => {
 			rooms: ["#reviews"],
 		});
 
-		await h.rooms.post({ room: "#reviews", author: "reviewer", body: "My own note." });
+		await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "My own note.",
+		});
 
 		// Otherwise an agent that posts a summary wakes itself forever.
 		expect(await h.supervisor.deliver("reviewer")).toBe(false);
@@ -273,7 +281,11 @@ describe("quota park and auto-resume", () => {
 		});
 		await h.supervisor.applyBlock("acct-1", block());
 
-		await h.rooms.post({ room: "#reviews", author: "@you", body: "While parked." });
+		await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "While parked.",
+		});
 
 		// The message waits for the armed resume rather than failing a turn.
 		expect(await h.supervisor.deliver("reviewer")).toBe(false);
