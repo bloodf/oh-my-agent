@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-11](../epics/EP-11-operator-polish.md) | [SP-12](../sprints/SP-12-operator-polish.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-11](../epics/EP-11-operator-polish.md) | [SP-12](../sprints/SP-12-operator-polish.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -42,9 +42,16 @@ The console presents like a product: one coherent design system behind every pan
 
 ## Acceptance
 
-- [ ] All styling resolves through the token layer; the suite fails on a hardcoded color or pixel outside tokens.
-- [ ] Every state (connecting, empty, offline, error) renders with a next action, browser-proven.
-- [ ] The dependency-free constraint holds: no new runtime dependency, no build step.
+- [x] All styling resolves through the token layer; the suite fails on a hardcoded color or pixel outside tokens.
+- [x] Every state (connecting, empty, offline, error) renders with a next action, browser-proven.
+- [x] The dependency-free constraint holds: no new runtime dependency, no build step.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Token layer and the system-wide client | [`src/console/style.css`](../../../src/console/style.css) |
+| Browser suite, 28 tests incl. token and state assertions | [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) |
 
 ## Out of scope
 

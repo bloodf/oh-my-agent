@@ -2989,7 +2989,7 @@ TASKS += [
     # ── EP-11: operator polish ───────────────────────────────────────────────
     Task(
         id="T-1101", slug="console-visual-system", title="Console visual system and usability overhaul",
-        epic="EP-11", sprint="SP-12", status="Ready",
+        epic="EP-11", sprint="SP-12", status="Done",
         goal="The console presents like a product: one coherent design system behind every pane, state, and control.",
         read_first=[
             ("Console client", "src/console/app.js"),
@@ -3022,6 +3022,7 @@ TASKS += [
             "Every state (connecting, empty, offline, error) renders with a next action, browser-proven.",
             "The dependency-free constraint holds: no new runtime dependency, no build step.",
         ],
+                evidence=[("Token layer and the system-wide client", "src/console/style.css"), ("Browser suite, 28 tests incl. token and state assertions", "tests/console-client.test.ts")],
         depends_on=["T-603"],
         out_of_scope=["The accessibility layer itself (ARIA, focus, keyboard), which is T-1102 built on this system."],
     ),
