@@ -21,6 +21,11 @@
  * @Environment bun
  */
 
+/** Browser globals used inside `page.evaluate` callbacks (no DOM lib here). */
+declare const document: {
+	querySelector(selector: string): { click(): void } | null;
+};
+
 import {
 	afterAll,
 	afterEach,
@@ -633,7 +638,9 @@ describe("reactions", () => {
 		const clickChip = async () => {
 			await page.waitForSelector(chip, { timeout: 10_000 });
 			await page.evaluate((s) => {
-				(document.querySelector(s) as HTMLElement).click();
+				// This callback runs in the browser; the repo has no DOM lib,
+				// so the global is declared structurally at the top of the file.
+				document.querySelector(s)?.click();
 			}, chip);
 		};
 
