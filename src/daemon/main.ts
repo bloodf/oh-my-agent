@@ -27,7 +27,16 @@
  * per running peer.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import {
+	chmod,
+	mkdir,
+	readdir,
+	readFile,
+	rm,
+	stat,
+	writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 
 import { getAgentDir, postmortem } from "@oh-my-pi/pi-utils";
@@ -46,6 +55,8 @@ import type {
 import type { WorkerHandle } from "../worker/lifecycle";
 import { startWorker } from "../worker/lifecycle";
 import { resolveBrokerHosting } from "./boot";
+import type { ConsoleApi } from "./console-api";
+import { startConsoleApi } from "./console-api";
 import { startCredentialGateway } from "./credential-gateway";
 import type { RunTrigger } from "./db";
 import { DaemonDb } from "./db";
@@ -98,11 +109,19 @@ export interface BootDaemonOptions {
 	workerFactory?: WorkerFactory;
 	now?: () => number;
 	logger?: (message: string) => void;
+	/**
+	 * Called once with the console URL, or with `undefined` when no console was
+	 * mounted. The detached CLI relays this to the launcher's terminal, which
+	 * is the only place an operator can actually read it.
+	 */
+	announce?: (url: string | undefined) => void;
 }
 
 export interface DaemonHandle {
 	socketPath: string;
 	pidPath: string;
+	/** Where the console is served, token included; absent when disabled. */
+	consoleUrl?: string;
 	close(): Promise<void>;
 }
 
@@ -162,6 +181,49 @@ async function claimPidfile(pidPath: string): Promise<void> {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
 	await writeFile(pidPath, String(process.pid), "utf8");
+}
+
+/** Where the operator token lives, and the only mode it may have. */
+const TOKEN_FILE = "console-token";
+const TOKEN_MODE = 0o600;
+
+/**
+ * Load the operator token, or mint one.
+ *
+ * A stored token is reused so the URL an operator bookmarked keeps working
+ * across restarts; deleting the file is how you rotate. A file with looser
+ * permissions than 0600 fails the boot rather than being quietly replaced:
+ * regenerating would revoke the URL the operator is holding without saying so,
+ * and leaving it would keep serving a secret every local process can read.
+ */
+async function loadConsoleToken(stateDir: string): Promise<string> {
+	const path = join(stateDir, TOKEN_FILE);
+	try {
+		const stats = await stat(path);
+		const mode = stats.mode & 0o777;
+		if (mode !== TOKEN_MODE) {
+			throw new Error(
+				`${path} has mode ${mode.toString(8)}, not 0600: any local process can read the console token. ` +
+					`Run 'chmod 600 ${path}' to keep this token, or delete the file to rotate it.`,
+			);
+		}
+		const token = (await readFile(path, "utf8")).trim();
+		if (token.length > 0) return token;
+		// An empty file is crash debris, not a token: nothing was revoked by
+		// replacing it, because it never gated anything.
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+
+	// 32 bytes of CSPRNG, base64url so it survives a URL without escaping.
+	const token = randomBytes(32).toString("base64url");
+	// `mode` on write only applies to a file being created, so an existing
+	// empty one is removed first rather than left with whatever mode it had.
+	await rm(path, { force: true });
+	await writeFile(path, token, { encoding: "utf8", mode: TOKEN_MODE });
+	// umask can mask bits off the create mode; set them explicitly.
+	await chmod(path, TOKEN_MODE);
+	return token;
 }
 
 /** The real worker path: materialize a synthetic root, then launch the child. */
@@ -1005,17 +1067,74 @@ export async function bootDaemon(
 		const socket = await startControlSocket({ socketPath, context });
 		started.push(() => socket.close());
 
+		/**
+		 * The console, unless the operator asked for a headless daemon.
+		 *
+		 * Serving it is the point of the surface, so it is on by default; the
+		 * kill switch exists for a daemon nobody is meant to look at. The URL
+		 * carries the token, so it is announced once and never written to disk
+		 * beside the token file it would duplicate.
+		 */
+		let consoleApi: ConsoleApi | undefined;
+		let consoleUrl: string | undefined;
+		if (env.OMA_CONSOLE !== "0") {
+			const token = await loadConsoleToken(stateDir);
+			// A typo'd port must not quietly become a random one: set means valid,
+			// and anything else refuses the boot (the materializer's standard).
+			let consolePort = 0;
+			const portEnv = env.OMA_CONSOLE_PORT;
+			if (portEnv !== undefined && portEnv !== "") {
+				if (!/^\d+$/.test(portEnv)) {
+					throw new Error(`Invalid OMA_CONSOLE_PORT: ${JSON.stringify(portEnv)}`);
+				}
+				const parsed = Number.parseInt(portEnv, 10);
+				if (parsed < 0 || parsed > 65535) {
+					throw new Error(`OMA_CONSOLE_PORT out of range: ${portEnv}`);
+				}
+				consolePort = parsed;
+			}
+			consoleApi = await startConsoleApi({
+				rooms,
+				supervisor,
+				peers,
+				knownRooms,
+				peerStore: store,
+				ensureRoom,
+				token,
+				// Loopback only. Binding wider is T-1004's decision, not a
+				// default this task gets to make.
+				hostname: "127.0.0.1",
+				port: consolePort,
+			});
+			// Registered before anything below can throw, so a failed boot takes
+			// the listener down with it rather than leaving a bound port.
+			const api = consoleApi;
+			started.push(() => api.close());
+			consoleUrl = `${api.url}/?token=${encodeURIComponent(token)}`;
+			log(`console: ${consoleUrl}`);
+		}
+		// Always called, console or not: the CLI launcher is holding a pipe open
+		// for this and needs to stop waiting either way.
+		options.announce?.(consoleUrl);
+
 		let closed = false;
 		return {
 			socketPath,
 			pidPath,
+			...(consoleUrl === undefined ? {} : { consoleUrl }),
 			close: async () => {
 				if (closed) return;
 				closed = true;
 
-				// Reverse order: the socket first, so no new request arrives; then
-				// the workers, then the machinery they depend on, and only then the
-				// files that advertise this daemon's existence.
+				// Reverse order: the console and the socket first, so no new request
+				// arrives; then the workers, then the machinery they depend on, and
+				// only then the files that advertise this daemon's existence.
+				//
+				// The console goes before the room store on purpose: its live feed
+				// polls that store while a browser is connected, and closing the
+				// database under a running poller is a query against a closed
+				// handle.
+				await consoleApi?.close();
 				await socket.close();
 				await supervisor.settled();
 				for (const record of peers.values()) {
@@ -1071,6 +1190,14 @@ async function runDaemon(): Promise<void> {
 		logger: (message) => {
 			process.stderr.write(`${message}\n`);
 		},
+		// The launcher holds this pipe open waiting for exactly this line. It is
+		// the only thing ever written to stdout, and stdout is closed straight
+		// after — including when there is no console to announce — so the
+		// launcher stops waiting instead of hanging for the daemon's lifetime.
+		announce: (url) => {
+			if (url !== undefined) process.stdout.write(`${url}\n`);
+			process.stdout.end();
+		},
 	});
 	postmortem.register("oh-my-agent-daemon", () => handle.close());
 }
@@ -1089,15 +1216,44 @@ if (import.meta.main) {
 		// Surviving a closed terminal is the product's core claim, so the
 		// launching process must not be the daemon: re-spawn detached, print
 		// where to reach the child, and exit.
+		//
+		// stdout is a pipe rather than `ignore` so the child can hand back the
+		// one thing only it knows — the console URL, with the port the OS just
+		// assigned. It writes that line and nothing else to stdout, so the pipe
+		// closing when this launcher exits can never break a later write. The
+		// alternative, polling the child's `console-url` file, cannot tell a
+		// fresh line from one a crashed daemon left behind, and clearing that
+		// file first would delete the URL of a daemon that is still running when
+		// this boot is refused as a double start.
 		const child = Bun.spawn({
 			cmd: [process.execPath, import.meta.path, ...argv],
 			env: { ...process.env, [DETACHED_ENV]: "1" },
-			stdio: ["ignore", "ignore", "ignore"],
+			stdio: ["ignore", "pipe", "ignore"],
 			detached: true,
 		});
 		child.unref();
 		const agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir();
 		process.stdout.write(`${join(agentDir, STATE_DIR, "daemon.sock")}\n`);
+
+		// Stop at the first newline rather than at EOF: the child closes stdout
+		// right after announcing, but a launcher that waited for EOF regardless
+		// would hang for the daemon's whole lifetime if it ever stopped doing
+		// so. A child that dies on the way up closes the pipe and ends this too.
+		let readiness = "";
+		const reader = child.stdout.getReader();
+		const decoder = new TextDecoder();
+		try {
+			while (!readiness.includes("\n")) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				readiness += decoder.decode(value, { stream: true });
+			}
+		} finally {
+			await reader.cancel().catch(() => {});
+		}
+		const url = readiness.split("\n", 1)[0]?.trim();
+		if (url !== undefined && url.length > 0) process.stdout.write(`${url}\n`);
+
 		process.exit(0);
 	}
 }

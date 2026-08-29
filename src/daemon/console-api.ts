@@ -1,9 +1,10 @@
 /**
  * Purpose: The browser-facing half of the operator surface (§4.6). Serves the
- * console's reads (agents, channels, messages) and writes (create an agent or
- * channel, edit a definition, change membership, post a message, toggle a
- * reaction) over loopback HTTP, and pushes new messages and reactions over a
- * WebSocket so an open console does not poll.
+ * console client itself from `src/console/`, plus the reads (agents, channels,
+ * messages) and writes (create an agent or channel, edit a definition, change
+ * membership, post a message, toggle a reaction) behind it over loopback HTTP,
+ * and pushes new messages and reactions over a WebSocket so an open console
+ * does not poll.
  *
  * Public API: `startConsoleApi`, `ConsoleApi`, `StartConsoleApiOptions`,
  * `ConsoleEvent`.
@@ -18,12 +19,16 @@
  * and this server's lifetime, and the browser client (T-603, T-605).
  *
  * Failure modes: a request without the operator token is refused 401 before
- * anything else runs, including the WebSocket handshake. A write naming a
- * registered peer as its author — or as a reaction's actor, since reactions
- * carry agent status — is refused 403 and lands nothing: the console acts as
- * the human, and a forgeable identity makes a transcript worthless. A
- * definition the parser refuses is answered 400 with the parser's own message
- * and no file is written. Errors are `{error: {code, message}}` throughout.
+ * anything else runs — the client's own HTML included, so a shell handed out
+ * unauthenticated cannot become a fingerprinting oracle for a running daemon —
+ * and that check precedes the WebSocket handshake too. Static paths are an
+ * allow-list resolved and contained under `src/console/`, so no request target
+ * reaches a file beside it. A write naming a registered peer as its author — or
+ * as a reaction's actor, since reactions carry agent status — is refused 403 and
+ * lands nothing: the console acts as the human, and a forgeable identity makes a
+ * transcript worthless. A definition the parser refuses is answered 400 with the
+ * parser's own message and no file is written. Errors are
+ * `{error: {code, message}}` throughout.
  *
  * Performance: reads are one store query each. A definition write is one
  * render, one parse, and one atomic rename. The live feed polls only while at
@@ -33,6 +38,7 @@
  */
 
 import { createHash, timingSafeEqual } from "node:crypto";
+import { join, resolve, sep } from "node:path";
 
 import type { RoomMessage, RoomStore } from "../rooms/store";
 import {
@@ -138,8 +144,8 @@ export async function startConsoleApi(
 		Response.json({ error: { code, message } }, { status });
 
 	/**
-	 * The presented operator token, from the header a client can set or the
-	 * query parameter a browser WebSocket handshake is stuck with.
+	 * The presented operator token, from a header a client can set or the query
+	 * parameter a browser is stuck with on a handshake or a sub-resource load.
 	 */
 	const presentedToken = (
 		request: Request,
@@ -148,9 +154,15 @@ export async function startConsoleApi(
 	): string | undefined => {
 		const header = request.headers.get("Authorization");
 		if (header?.startsWith("Bearer ")) return header.slice("Bearer ".length);
-		// The query parameter exists for the WebSocket handshake, the one place
-		// a browser cannot set headers; honoring it elsewhere would plant the
-		// token in browser history.
+		// What the browser client sends on every API call (`app.js:177`). The
+		// header is the client's own choice, not a browser constraint — a
+		// same-origin fetch could set `Authorization` — but it is what ships, so
+		// refusing it here is a console whose every request 401s.
+		const operator = request.headers.get("X-Operator-Token");
+		if (operator !== null && operator.length > 0) return operator;
+		// The query parameter exists for the WebSocket handshake and the static
+		// client, the two places a browser cannot set a header at all; honoring
+		// it on an API call would plant the token in browser history.
 		if (!allowQuery) return undefined;
 		return url.searchParams.get("token") ?? undefined;
 	};
@@ -161,6 +173,7 @@ export async function startConsoleApi(
 	const cursors = new Map<string, RoomCursor>();
 	let poller: ReturnType<typeof setInterval> | undefined;
 	let polling = false;
+	let tickInFlight: Promise<void> | undefined;
 	let nextSocketId = 1;
 
 	const broadcast = (event: ConsoleEvent): void => {
@@ -280,19 +293,25 @@ export async function startConsoleApi(
 			// Skip rather than overlap: a slow tick must not queue more of itself.
 			if (running) return;
 			running = true;
-			void tick().finally(() => {
-				running = false;
-			});
+			tickInFlight = tick()
+				.catch(() => {})
+				.finally(() => {
+					running = false;
+					tickInFlight = undefined;
+				});
 		}, pollIntervalMs);
 	};
 
-	const stopPolling = (): void => {
+	const stopPolling = async (): Promise<void> => {
 		if (!polling) return;
 		polling = false;
 		if (poller !== undefined) {
 			clearInterval(poller);
 			poller = undefined;
 		}
+		// A tick already in flight holds a store read; it must finish before the
+		// store closes under it, not after.
+		await tickInFlight;
 		cursors.clear();
 	};
 
@@ -786,6 +805,88 @@ export async function startConsoleApi(
 		return fail(404, "not_found", `Unknown route: ${path}`);
 	};
 
+	// ── Static client ─────────────────────────────────────────────────────────
+
+	/**
+	 * The files `src/console/` publishes, by their name on disk. A fixed set
+	 * rather than a directory walk: a served tree that grows whenever someone
+	 * drops a file next to the client is how a stray note or an editor backup
+	 * becomes a public URL.
+	 */
+	const STATIC_FILES = new Set(["index.html", "app.js", "style.css"]);
+
+	const consoleRoot = resolve(join(import.meta.dir, "..", "console"));
+
+	/**
+	 * Serve one client file, with the token carried into the shell's asset URLs.
+	 *
+	 * The `<link>` and `<script>` are rewritten to append `?token=` because
+	 * every route here is gated and a browser sends nothing of its own on a
+	 * sub-resource load: unrewritten, the console arrives as unstyled HTML with
+	 * a 401'd script. The token is already in the page URL the operator pasted
+	 * — `app.js` reads it from `location.search` — so this moves it nowhere new.
+	 *
+	 * A cookie is the other way to carry it, and is deliberately not used:
+	 * cookies are scoped by host and ignore the port, so one set here would ride
+	 * along to every other service on `127.0.0.1`, handing the operator token to
+	 * any unrelated local dev server the browser later visits.
+	 */
+	const serveStatic = async (
+		request: Request,
+		pathname: string,
+		presented: string,
+	): Promise<Response> => {
+		const notFound = (): Response =>
+			fail(404, "not_found", `Unknown route: ${pathname}`);
+
+		// The client is read-only: a browser only ever GETs these. Answering a
+		// POST with the shell would make the static half of this server look
+		// like it accepts writes it does nothing with.
+		if (request.method !== "GET" && request.method !== "HEAD") {
+			return fail(405, "method_not_allowed", `${request.method} not allowed`);
+		}
+
+		// Decode before resolving. The server sees the request target close to
+		// verbatim — Bun collapses a literal `/../`, but leaves `%2e%2e%2f`
+		// alone — so a path checked only in its encoded form is checked against
+		// something other than what will be opened.
+		let requested: string;
+		try {
+			requested = decodeURIComponent(pathname);
+		} catch {
+			// A malformed escape cannot name a file worth serving.
+			return notFound();
+		}
+		if (requested.includes("\0")) return notFound();
+
+		// Resolve-and-contain, the same standard as the peer-store write, and
+		// applied to the request's own path so it is what refuses a traversal
+		// rather than a formality sitting behind a lookup table.
+		const path = resolve(
+			join(consoleRoot, requested === "/" ? "index.html" : requested),
+		);
+		if (!path.startsWith(consoleRoot + sep)) return notFound();
+
+		// Contained, and one of the files this console publishes: containment
+		// alone would serve anything that happened to sit in `src/console/`.
+		const filename = path.slice(consoleRoot.length + 1);
+		if (!STATIC_FILES.has(filename)) return notFound();
+
+		const file = Bun.file(path);
+		if (!(await file.exists())) return notFound();
+
+		if (filename !== "index.html") return new Response(file);
+
+		const query = `?token=${encodeURIComponent(presented)}`;
+		const html = (await file.text()).replace(
+			/(<(?:script|link)\b[^>]*?\b(?:src|href)=")(\/[^"?]*)(")/g,
+			`$1$2${query}$3`,
+		);
+		return new Response(html, {
+			headers: { "content-type": "text/html;charset=utf-8" },
+		});
+	};
+
 	const server = Bun.serve<SocketData>({
 		hostname,
 		port: options.port ?? 0,
@@ -795,9 +896,16 @@ export async function startConsoleApi(
 		fetch: async (request, self): Promise<Response | undefined> => {
 			const url = new URL(request.url);
 			const isUpgrade = url.pathname === "/api/events";
-			const presented = presentedToken(request, url, isUpgrade);
+			// The client's own files are the other place a query token is
+			// unavoidable: a stylesheet or a script tag carries no headers.
+			const isStatic = !url.pathname.startsWith("/api/");
+			const presented = presentedToken(request, url, isUpgrade || isStatic);
 			if (presented === undefined || !tokenMatches(presented, token)) {
 				return fail(401, "unauthorized", "Operator token required");
+			}
+
+			if (isStatic) {
+				return await serveStatic(request, url.pathname, presented);
 			}
 
 			if (url.pathname === "/api/events") {
@@ -829,7 +937,7 @@ export async function startConsoleApi(
 			},
 			close: (socket) => {
 				sockets.delete(socket);
-				if (sockets.size === 0) stopPolling();
+				if (sockets.size === 0) void stopPolling();
 			},
 		},
 	});
@@ -851,9 +959,9 @@ export async function startConsoleApi(
 		close: async () => {
 			if (closed) return;
 			closed = true;
-			// Stop the feed first: an in-flight tick holds no request, but it
-			// would keep querying a store the daemon is about to close.
-			stopPolling();
+			// Stop the feed first: an in-flight tick holds a store read, and it
+			// must finish before the daemon closes the store under it.
+			await stopPolling();
 			// `server.stop(true)` severs connected websockets on its own, and the
 			// client observes the close. Calling `socket.close()` first instead
 			// deadlocks `stop(true)` on Bun 1.3.14 — verified: a server-side
