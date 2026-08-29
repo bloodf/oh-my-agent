@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-10](../epics/EP-10-production-wiring.md) | [SP-11](../sprints/SP-11-production-wiring.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-10](../epics/EP-10-production-wiring.md) | [SP-11](../sprints/SP-11-production-wiring.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -29,7 +29,7 @@ A metered account's meter moves with real usage, so the 80% warning and 100% par
 | [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | The account→credential binding at spawn (worker tokens stop being bound to zero credentials) and the usage polling loop. |
 | [`src/daemon/account-registry.ts`](../../../src/daemon/account-registry.ts) | Edited | updateMeter is driven with a dollars-burned fraction computed from usage. |
 | [`src/shared/agent-definition.ts`](../../../src/shared/agent-definition.ts) | Edited | An account/credential field on the definition, if the binding is declared there — decide and document. |
-| `tests/usage-meter.test.ts` (to be created) | New | Usage moves the meter; the 80% warning posts; the park fires at the cap; no usage means no movement. |
+| [`tests/usage-meter.test.ts`](../../../tests/usage-meter.test.ts) | New | Usage moves the meter; the 80% warning posts; the park fires at the cap; no usage means no movement. |
 
 ## Steps
 
@@ -40,9 +40,16 @@ A metered account's meter moves with real usage, so the 80% warning and 100% par
 
 ## Acceptance
 
-- [ ] Reported usage moves the meter, and crossing 80% posts the warning naming the account and budget.
-- [ ] Reaching the cap parks the account's runs; a bump resumes them (T-506's tests keep passing).
-- [ ] A subscription account's meter never moves.
+- [x] Reported usage moves the meter, and crossing 80% posts the warning naming the account and budget.
+- [x] Reaching the cap parks the account's runs; a bump resumes them (T-506's tests keep passing).
+- [x] A subscription account's meter never moves.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Binding and poll loop in the daemon | [`src/daemon/main.ts`](../../../src/daemon/main.ts) |
+| Usage-meter suite, 6 tests with three revert-proofs | [`tests/usage-meter.test.ts`](../../../tests/usage-meter.test.ts) |
 
 ## Out of scope
 

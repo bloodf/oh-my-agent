@@ -1,6 +1,6 @@
 # EP-10 — Production wiring: serving, usage, and deferred hardening
 
-**Status:** Ready
+**Status:** Planned
 
 *Derived from the tasks below.*
 
@@ -39,7 +39,7 @@ Three subsystems were built and tested without a production seam: the console AP
 | Task | Title | Status |
 |---|---|---|
 | [T-1001](../tasks/T-1001-console-mounted-at-boot.md) | Serve the console from the daemon | Done |
-| [T-1002](../tasks/T-1002-usage-feeds-the-meter.md) | Usage feeds the meter | Ready |
+| [T-1002](../tasks/T-1002-usage-feeds-the-meter.md) | Usage feeds the meter | Done |
 | [T-1003](../tasks/T-1003-worker-pid-on-the-wire.md) | Worker pid in status and the registry | Done |
 | [T-1004](../tasks/T-1004-control-socket-identity.md) | Connection identity on the control socket | Planned |
 | [T-1005](../tasks/T-1005-worker-env-allowlist.md) | Allowlist the worker environment | Planned |

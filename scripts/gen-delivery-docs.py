@@ -2743,7 +2743,7 @@ TASKS += [
     ),
     Task(
         id="T-1002", slug="usage-feeds-the-meter", title="Usage feeds the meter",
-        epic="EP-10", sprint="SP-11", status="Ready",
+        epic="EP-10", sprint="SP-11", status="Done",
         goal="A metered account's meter moves with real usage, so the 80% warning and 100% park (T-506) fire on reality.",
         read_first=[
             ARCH,
@@ -2774,6 +2774,7 @@ TASKS += [
             "Reaching the cap parks the account's runs; a bump resumes them (T-506's tests keep passing).",
             "A subscription account's meter never moves.",
         ],
+                evidence=[("Binding and poll loop in the daemon", "src/daemon/main.ts"), ("Usage-meter suite, 6 tests with three revert-proofs", "tests/usage-meter.test.ts")],
         depends_on=["T-301", "T-506"],
         out_of_scope=["Usage display in the TUI/console (read models exist; presenting them is a future UI task)."],
     ),
