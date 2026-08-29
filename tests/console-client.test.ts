@@ -626,7 +626,18 @@ describe("reactions", () => {
 				(r) => r.actor === "@you" && r.emoji === "👀",
 			) ?? false;
 
-		await page.click(`#messages .message[data-id="${posted.id}"] .reaction`);
+		// Click atomically in the page: the client re-renders on every feed
+		// event, and a puppeteer-resolved node can detach between query and
+		// click ("Node is detached from document" on runners).
+		const chip = `#messages .message[data-id="${posted.id}"] .reaction`;
+		const clickChip = async () => {
+			await page.waitForSelector(chip, { timeout: 10_000 });
+			await page.evaluate((s) => {
+				(document.querySelector(s) as HTMLElement).click();
+			}, chip);
+		};
+
+		await clickChip();
 		await waitFor("operator reaction on", mine, (on) => on);
 		await waitFor(
 			"count 2",
@@ -634,7 +645,7 @@ describe("reactions", () => {
 			(chips) => chips.includes("👀 2"),
 		);
 
-		await page.click(`#messages .message[data-id="${posted.id}"] .reaction`);
+		await clickChip();
 		await waitFor("operator reaction off", mine, (on) => !on);
 		await waitFor(
 			"count 1",
