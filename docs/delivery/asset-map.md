@@ -15,7 +15,8 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `biome.json` | yes | [T-702](tasks/T-702-biome-lint.md) | — |
 | `docs/web-console.md` | yes | [T-1001](tasks/T-1001-console-mounted-at-boot.md) | — |
 | `node_modules/@oh-my-pi/pi-ai/src/auth-broker/remote-store.ts` | yes | — | [T-303](tasks/T-303-client-integration.md) |
-| `package.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-502](tasks/T-502-daemon-entry-point.md), [T-702](tasks/T-702-biome-lint.md), [T-703](tasks/T-703-root-readme-and-metadata.md), [T-804](tasks/T-804-authoring-skills.md) | [T-701](tasks/T-701-ci-workflow.md) |
+| `package.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-502](tasks/T-502-daemon-entry-point.md), [T-702](tasks/T-702-biome-lint.md), [T-703](tasks/T-703-root-readme-and-metadata.md), [T-804](tasks/T-804-authoring-skills.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md) | [T-701](tasks/T-701-ci-workflow.md) |
+| `patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch` | yes | [T-1003](tasks/T-1003-worker-pid-on-the-wire.md) | — |
 | `scripts/gen-delivery-docs.py` | yes | — | [T-701](tasks/T-701-ci-workflow.md) |
 | `skills/omp-agent-authoring/SKILL.md` | yes | [T-804](tasks/T-804-authoring-skills.md) | — |
 | `skills/omp-orchestration/SKILL.md` | yes | [T-804](tasks/T-804-authoring-skills.md) | — |
@@ -34,7 +35,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `src/daemon/peer-store.ts` | yes | [T-501](tasks/T-501-peer-store.md), [T-505](tasks/T-505-definition-staleness.md), [T-605](tasks/T-605-console-management.md) | — |
 | `src/daemon/quota-state.ts` | yes | [T-404](tasks/T-404-account-registry.md) | — |
 | `src/daemon/scheduler.ts` | yes | [T-403](tasks/T-403-scheduler.md) | — |
-| `src/daemon/socket.ts` | yes | [T-502](tasks/T-502-daemon-entry-point.md), [T-511](tasks/T-511-operator-steering.md), [T-512](tasks/T-512-sandboxed-on-the-wire.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md), [T-802](tasks/T-802-daemon-hierarchy.md), [T-1004](tasks/T-1004-control-socket-identity.md) | [T-503](tasks/T-503-agent-toolbelt.md), [T-504](tasks/T-504-tui-surface.md) |
+| `src/daemon/socket.ts` | yes | [T-502](tasks/T-502-daemon-entry-point.md), [T-511](tasks/T-511-operator-steering.md), [T-512](tasks/T-512-sandboxed-on-the-wire.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md), [T-802](tasks/T-802-daemon-hierarchy.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1004](tasks/T-1004-control-socket-identity.md) | [T-503](tasks/T-503-agent-toolbelt.md), [T-504](tasks/T-504-tui-surface.md) |
 | `src/daemon/supervisor.ts` | yes | [T-405](tasks/T-405-supervisor.md), [T-505](tasks/T-505-definition-staleness.md), [T-506](tasks/T-506-metered-budget-wiring.md), [T-509](tasks/T-509-wake-filters.md), [T-605](tasks/T-605-console-management.md) | [T-502](tasks/T-502-daemon-entry-point.md), [T-601](tasks/T-601-conversation-model.md), [T-602](tasks/T-602-console-api.md) |
 | `src/extension/commands.ts` | yes | [T-504](tasks/T-504-tui-surface.md), [T-511](tasks/T-511-operator-steering.md), [T-901](tasks/T-901-tui-tree.md), [T-903](tasks/T-903-tui-editing.md) | — |
 | `src/extension/index.ts` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-504](tasks/T-504-tui-surface.md), [T-902](tasks/T-902-tui-manager.md) | — |

@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-10](../epics/EP-10-production-wiring.md) | [SP-11](../sprints/SP-11-production-wiring.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-10](../epics/EP-10-production-wiring.md) | [SP-11](../sprints/SP-11-production-wiring.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -18,10 +18,13 @@ A running worker's OS pid is visible in status and recorded in the agents table,
 
 - `src/worker/lifecycle.ts`
 - `src/daemon/main.ts`
+- `src/daemon/socket.ts`
 - `src/shared/protocol.ts`
 - `src/shared/protocol-schemas.ts`
 - `tests/worker-lifecycle.test.ts`
 - `tests/daemon-main.test.ts`
+- `patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`
+- `package.json`
 
 ## Modules and assets in play
 
@@ -31,6 +34,9 @@ A running worker's OS pid is visible in status and recorded in the agents table,
 | [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | Records the pid in the agents table at spawn/respawn, clears it at stop. |
 | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Edited | `AgentStatus.pid?: number` — optional, additive. |
 | [`src/shared/protocol-schemas.ts`](../../../src/shared/protocol-schemas.ts) | Edited | Accept the optional field. |
+| [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Edited | `toAgentStatus` emits the live pid. |
+| [`patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`](../../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch) | New | Upstream `RpcClient.pid` accessor, reapplied by bun install; file the equivalent upstream. |
+| [`package.json`](../../../package.json) | Edited | `patchedDependencies` records the patch. |
 | [`tests/worker-lifecycle.test.ts`](../../../tests/worker-lifecycle.test.ts) | Edited | A real child's pid is reported and dead after stop. |
 | [`tests/daemon-main.test.ts`](../../../tests/daemon-main.test.ts) | Edited | Status carries the pid of a running peer. |
 
@@ -42,9 +48,16 @@ A running worker's OS pid is visible in status and recorded in the agents table,
 
 ## Acceptance
 
-- [ ] A real child's pid is exposed and the process is gone after stop.
-- [ ] Status over the socket carries the pid for a running peer and none for a parked one.
-- [ ] The agents row's worker_pid matches the live process while running.
+- [x] A real child's pid is exposed and the process is gone after stop.
+- [x] Status over the socket carries the pid for a running peer and none for a parked one.
+- [x] The agents row's worker_pid matches the live process while running.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Patched RpcClient.pid accessor | [`patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`](../../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch) |
+| Pid recorded and cleared across the lifecycle | [`src/daemon/main.ts`](../../../src/daemon/main.ts) |
 
 ## Out of scope
 
