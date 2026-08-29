@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-11](../epics/EP-11-operator-polish.md) | [SP-12](../sprints/SP-12-operator-polish.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-11](../epics/EP-11-operator-polish.md) | [SP-12](../sprints/SP-12-operator-polish.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -38,10 +38,17 @@ The console is fully operable by keyboard, readable by a screen reader, and legi
 
 ## Acceptance
 
-- [ ] The suite drives every flow keyboard-only in a real browser: no pointer event needed for any of the above.
-- [ ] Roles, names, and states asserted on the live DOM (listbox/option, log, status, alert).
-- [ ] Focus order is asserted on open/close of the thread pane and on the offline state.
-- [ ] Contrast is computed from the resolved styles and meets the declared ratio.
+- [x] The suite drives every flow keyboard-only in a real browser: no pointer event needed for any of the above.
+- [x] Roles, names, and states asserted on the live DOM (listbox/option, log, status, alert).
+- [x] Focus order is asserted on open/close of the thread pane and on the offline state.
+- [x] Contrast is computed from the resolved styles and meets the declared ratio.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Landmarks, roles, focus, keyboard model in the client | [`src/console/app.js`](../../../src/console/app.js) |
+| A11y battery in the browser suite, 38 tests | [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) |
 
 ## Out of scope
 

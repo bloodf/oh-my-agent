@@ -11,7 +11,7 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**55 of 59 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
+**56 of 59 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
 Every runtime subsystem is built and under test: workers, isolation, credentials, rooms, scheduling, and quota handling. Two things keep that from meaning finished.
 
@@ -56,7 +56,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-08](epics/EP-08-agent-hierarchy.md) | Agent hierarchy and authoring | Done | 4 |
 | [EP-09](epics/EP-09-tui-management.md) | Full TUI management surface | Done | 3 |
 | [EP-10](epics/EP-10-production-wiring.md) | Production wiring: serving, usage, and deferred hardening | Planned | 6 |
-| [EP-11](epics/EP-11-operator-polish.md) | Operator polish: AAA console and the CLI surface | Ready | 3 |
+| [EP-11](epics/EP-11-operator-polish.md) | Operator polish: AAA console and the CLI surface | Done | 3 |
 
 ## Sprints
 
@@ -73,7 +73,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [SP-09](sprints/SP-09-agent-hierarchy.md) | Agent hierarchy | Done | Persistent child peers under a parent: spawn-time parentage, cascades, and the authoring protocol and skills behind them. |
 | [SP-10](sprints/SP-10-tui-management.md) | TUI management | Done | The full-screen manager: browse the tree, edit definitions and models, steer agents without leaving the TUI. |
 | [SP-11](sprints/SP-11-production-wiring.md) | Production wiring | Planned | The console served for real, budgets fed by real usage, and the hardening deferred to a named trigger. |
-| [SP-12](sprints/SP-12-operator-polish.md) | Operator polish | Ready | AAA visuals and accessibility for the console, and a CLI that needs no TUI at all. |
+| [SP-12](sprints/SP-12-operator-polish.md) | Operator polish | Done | AAA visuals and accessibility for the console, and a CLI that needs no TUI at all. |
 
 ## Decisions
 

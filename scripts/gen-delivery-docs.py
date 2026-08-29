@@ -3028,7 +3028,7 @@ TASKS += [
     ),
     Task(
         id="T-1102", slug="console-accessibility", title="Console accessibility to AAA standard",
-        epic="EP-11", sprint="SP-12", status="Ready",
+        epic="EP-11", sprint="SP-12", status="Done",
         goal="The console is fully operable by keyboard, readable by a screen reader, and legible at AAA contrast.",
         read_first=[
             ("Console client", "src/console/app.js"),
@@ -3058,6 +3058,7 @@ TASKS += [
             "Focus order is asserted on open/close of the thread pane and on the offline state.",
             "Contrast is computed from the resolved styles and meets the declared ratio.",
         ],
+                evidence=[("Landmarks, roles, focus, keyboard model in the client", "src/console/app.js"), ("A11y battery in the browser suite, 38 tests", "tests/console-client.test.ts")],
         depends_on=["T-1101"],
         out_of_scope=["Screen-reader verification with a real SR binary; the assertions are DOM-level, not auditory."],
     ),
