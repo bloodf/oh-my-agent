@@ -60,7 +60,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/contracts/spawn-policy.contract.test.ts` | yes | [T-005](tasks/T-005-spawn-policy-contract.md) | — |
 | `tests/credential-gateway.test.ts` | yes | [T-301](tasks/T-301-credential-gateway.md), [T-302](tasks/T-302-shared-disable-recovery.md) | — |
 | `tests/daemon-boot.test.ts` | yes | [T-510](tasks/T-510-broker-hosting-resolution.md) | — |
-| `tests/daemon-console-mount.test.ts` | not yet | [T-1001](tasks/T-1001-console-mounted-at-boot.md) | — |
+| `tests/daemon-console-mount.test.ts` | yes | [T-1001](tasks/T-1001-console-mounted-at-boot.md) | — |
 | `tests/daemon-hierarchy.test.ts` | yes | [T-802](tasks/T-802-daemon-hierarchy.md) | — |
 | `tests/daemon-main.test.ts` | yes | [T-502](tasks/T-502-daemon-entry-point.md), [T-511](tasks/T-511-operator-steering.md), [T-512](tasks/T-512-sandboxed-on-the-wire.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md) | — |
 | `tests/daemon-persistence.test.ts` | yes | [T-508](tasks/T-508-daemon-persistence.md) | — |

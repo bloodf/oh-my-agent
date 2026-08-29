@@ -2704,7 +2704,7 @@ TASKS += [
     # ── EP-10: production wiring ─────────────────────────────────────────────
     Task(
         id="T-1001", slug="console-mounted-at-boot", title="Serve the console from the daemon",
-        epic="EP-10", sprint="SP-11", status="Ready",
+        epic="EP-10", sprint="SP-11", status="Done",
         goal="The daemon itself serves the console API and the client, behind an operator token — the browser UI has a backend to reach.",
         read_first=[
             ARCH,
@@ -2737,6 +2737,7 @@ TASKS += [
             "A restart keeps the same token; the token file is mode 0600.",
             "Shutdown frees the port and a second boot binds cleanly.",
         ],
+                evidence=[("Console mounted with the operator-token lifecycle", "src/daemon/main.ts"), ("Mount suite, 24 tests incl. traversal and token-reuse cases", "tests/daemon-console-mount.test.ts")],
         depends_on=["T-602", "T-603"],
         out_of_scope=["Binding beyond loopback, which is what T-1004 is for."],
     ),
