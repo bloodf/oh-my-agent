@@ -27,7 +27,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `src/console/style.css` | yes | [T-603](tasks/T-603-console-client.md), [T-1101](tasks/T-1101-console-visual-system.md), [T-1102](tasks/T-1102-console-accessibility.md) | — |
 | `src/daemon/account-registry.ts` | yes | [T-404](tasks/T-404-account-registry.md), [T-1002](tasks/T-1002-usage-feeds-the-meter.md) | [T-405](tasks/T-405-supervisor.md), [T-506](tasks/T-506-metered-budget-wiring.md) |
 | `src/daemon/boot.ts` | yes | [T-510](tasks/T-510-broker-hosting-resolution.md) | [T-502](tasks/T-502-daemon-entry-point.md) |
-| `src/daemon/cli.ts` | not yet | [T-1103](tasks/T-1103-cli-management-surface.md) | — |
+| `src/daemon/cli.ts` | yes | [T-1103](tasks/T-1103-cli-management-surface.md) | — |
 | `src/daemon/console-api.ts` | yes | [T-602](tasks/T-602-console-api.md), [T-605](tasks/T-605-console-management.md), [T-1001](tasks/T-1001-console-mounted-at-boot.md) | [T-603](tasks/T-603-console-client.md) |
 | `src/daemon/credential-gateway.ts` | yes | [T-301](tasks/T-301-credential-gateway.md), [T-302](tasks/T-302-shared-disable-recovery.md), [T-303](tasks/T-303-client-integration.md) | [T-004](tasks/T-004-broker-contract.md), [T-510](tasks/T-510-broker-hosting-resolution.md), [T-502](tasks/T-502-daemon-entry-point.md) |
 | `src/daemon/db.ts` | yes | [T-508](tasks/T-508-daemon-persistence.md), [T-802](tasks/T-802-daemon-hierarchy.md) | — |
@@ -61,7 +61,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/contracts/spawn-policy.contract.test.ts` | yes | [T-005](tasks/T-005-spawn-policy-contract.md) | — |
 | `tests/credential-gateway.test.ts` | yes | [T-301](tasks/T-301-credential-gateway.md), [T-302](tasks/T-302-shared-disable-recovery.md) | — |
 | `tests/daemon-boot.test.ts` | yes | [T-510](tasks/T-510-broker-hosting-resolution.md) | — |
-| `tests/daemon-cli.test.ts` | not yet | [T-1103](tasks/T-1103-cli-management-surface.md) | — |
+| `tests/daemon-cli.test.ts` | yes | [T-1103](tasks/T-1103-cli-management-surface.md) | — |
 | `tests/daemon-console-mount.test.ts` | yes | [T-1001](tasks/T-1001-console-mounted-at-boot.md) | — |
 | `tests/daemon-hierarchy.test.ts` | yes | [T-802](tasks/T-802-daemon-hierarchy.md) | — |
 | `tests/daemon-main.test.ts` | yes | [T-502](tasks/T-502-daemon-entry-point.md), [T-511](tasks/T-511-operator-steering.md), [T-512](tasks/T-512-sandboxed-on-the-wire.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md) | — |

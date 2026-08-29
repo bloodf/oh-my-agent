@@ -3062,7 +3062,7 @@ TASKS += [
     ),
     Task(
         id="T-1103", slug="cli-management-surface", title="CLI management verbs: no TUI required",
-        epic="EP-11", sprint="SP-12", status="Ready",
+        epic="EP-11", sprint="SP-12", status="Done",
         goal="Every daemon operation runs from a shell: `omp-agent <verb>` talks to the daemon socket and exits usefully, with no OMP session at all.",
         read_first=[
             ("Daemon entry and CLI dispatch", "src/daemon/main.ts"),
@@ -3091,6 +3091,7 @@ TASKS += [
             "--json parses and matches the socket result.",
             "A scripting example (spawn two agents, post into a room, read it back) runs as one suite test.",
         ],
+                evidence=[("Verb handlers and the socket client", "src/daemon/cli.ts"), ("CLI suite, 15 tests incl. process-level exit codes and the scripting flow", "tests/daemon-cli.test.ts")],
         depends_on=["T-502"],
         out_of_scope=["The daemon's own `daemon` verb internals (already shipped), and any TUI behavior."],
     ),

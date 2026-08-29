@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-11](../epics/EP-11-operator-polish.md) | [SP-12](../sprints/SP-12-operator-polish.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-11](../epics/EP-11-operator-polish.md) | [SP-12](../sprints/SP-12-operator-polish.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -24,9 +24,9 @@ Every daemon operation runs from a shell: `omp-agent <verb>` talks to the daemon
 
 | Path | Role | Note |
 |---|---|---|
-| `src/daemon/cli.ts` (to be created) | New | The verb handlers and the socket client; pure functions per verb so the suite can drive them directly. |
+| [`src/daemon/cli.ts`](../../../src/daemon/cli.ts) | New | The verb handlers and the socket client; pure functions per verb so the suite can drive them directly. |
 | [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | Dispatches verbs to the CLI handlers; `daemon` stays the default. |
-| `tests/daemon-cli.test.ts` (to be created) | New | Every verb against a real booted daemon; daemon-down errors; exit codes; --json shape. |
+| [`tests/daemon-cli.test.ts`](../../../tests/daemon-cli.test.ts) | New | Every verb against a real booted daemon; daemon-down errors; exit codes; --json shape. |
 
 ## Steps
 
@@ -37,10 +37,17 @@ Every daemon operation runs from a shell: `omp-agent <verb>` talks to the daemon
 
 ## Acceptance
 
-- [ ] Every verb round-trips against a real daemon in the suite.
-- [ ] Daemon down: exit 3 with the clear message on stderr and nothing on stdout.
-- [ ] --json parses and matches the socket result.
-- [ ] A scripting example (spawn two agents, post into a room, read it back) runs as one suite test.
+- [x] Every verb round-trips against a real daemon in the suite.
+- [x] Daemon down: exit 3 with the clear message on stderr and nothing on stdout.
+- [x] --json parses and matches the socket result.
+- [x] A scripting example (spawn two agents, post into a room, read it back) runs as one suite test.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Verb handlers and the socket client | [`src/daemon/cli.ts`](../../../src/daemon/cli.ts) |
+| CLI suite, 15 tests incl. process-level exit codes and the scripting flow | [`tests/daemon-cli.test.ts`](../../../tests/daemon-cli.test.ts) |
 
 ## Out of scope
 

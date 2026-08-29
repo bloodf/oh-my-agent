@@ -35,4 +35,4 @@ The console was built for correctness; it has one ARIA attribute and no visual s
 |---|---|---|
 | [T-1101](../tasks/T-1101-console-visual-system.md) | Console visual system and usability overhaul | Ready |
 | [T-1102](../tasks/T-1102-console-accessibility.md) | Console accessibility to AAA standard | Ready |
-| [T-1103](../tasks/T-1103-cli-management-surface.md) | CLI management verbs: no TUI required | Ready |
+| [T-1103](../tasks/T-1103-cli-management-surface.md) | CLI management verbs: no TUI required | Done |
