@@ -41,7 +41,7 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "bun test",
+		"test": "bun test --timeout 30000",
 		"lint": "biome check .",
 		"format": "biome check --write .",
 		"docs": "python3 scripts/gen-delivery-docs.py"

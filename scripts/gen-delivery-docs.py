@@ -2429,6 +2429,29 @@ TASKS += [
         ],
     ),
     Task(
+        id="T-705", slug="spawn-test-time-budget", title="Time budget for process-spawning tests",
+        epic="EP-07", sprint="SP-08", status="Done",
+        goal="Real-child tests stop flaking at the default 5s budget when the machine is busy — without weakening what they assert.",
+        read_first=[("Deflake task", "docs/delivery/tasks/T-704-deflake-intermittent-test.md"), ("Working rules", "docs/delivery/README.md")],
+        files=["package.json", ".github/workflows/ci.yml"],
+        assets=[
+            ("package.json", "Edited", "The test script carries the budget."),
+            (".github/workflows/ci.yml", "Edited", "CI runs with the same budget."),
+        ],
+        steps=[
+            "Distinguish the two flake classes: T-704's deterministic resolver corruption (fixed at the mechanism) from environment-throughput delay, where a child that needs ~1s idle needs >5s under load and the assertion itself is not time-dependent.",
+            "Set `bun test --timeout 30000` in the test script and CI, because the alternative — per-call-site budgets across four real-child files — is forty edits that say the same thing.",
+            "Do not touch any assertion; a logic race would still fail, just later.",
+        ],
+        acceptance=[
+            "Ten consecutive full-suite runs under normal load pass, including runs immediately after heavy parallel sessions.",
+            "No test's assertion changed in the same change.",
+        ],
+        evidence=[
+            ("Budget in the test script and CI", "./package.json"),
+        ],
+    ),
+    Task(
         id="T-704", slug="deflake-intermittent-test", title="Identify and fix the intermittent test failure",
         epic="EP-07", sprint="SP-08", status="Done",
         goal="The suite is deterministic: the failure seen once in twelve local runs is named, reproduced, and fixed.",

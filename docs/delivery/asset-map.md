@@ -6,7 +6,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 
 | Path | Exists | Owned by | Read by |
 |---|---|---|---|
-| `.github/workflows/ci.yml` | yes | [T-701](tasks/T-701-ci-workflow.md) | — |
+| `.github/workflows/ci.yml` | yes | [T-701](tasks/T-701-ci-workflow.md), [T-705](tasks/T-705-spawn-test-time-budget.md) | — |
 | `ARCHITECTURE.md` | yes | — | [T-703](tasks/T-703-root-readme-and-metadata.md) |
 | `LICENSE` | yes | [T-703](tasks/T-703-root-readme-and-metadata.md) | — |
 | `README.md` | yes | [T-703](tasks/T-703-root-readme-and-metadata.md) | — |
@@ -15,7 +15,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `biome.json` | yes | [T-702](tasks/T-702-biome-lint.md) | — |
 | `docs/web-console.md` | yes | [T-1001](tasks/T-1001-console-mounted-at-boot.md) | — |
 | `node_modules/@oh-my-pi/pi-ai/src/auth-broker/remote-store.ts` | yes | — | [T-303](tasks/T-303-client-integration.md) |
-| `package.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-502](tasks/T-502-daemon-entry-point.md), [T-702](tasks/T-702-biome-lint.md), [T-703](tasks/T-703-root-readme-and-metadata.md), [T-804](tasks/T-804-authoring-skills.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md) | [T-701](tasks/T-701-ci-workflow.md) |
+| `package.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-502](tasks/T-502-daemon-entry-point.md), [T-702](tasks/T-702-biome-lint.md), [T-703](tasks/T-703-root-readme-and-metadata.md), [T-705](tasks/T-705-spawn-test-time-budget.md), [T-804](tasks/T-804-authoring-skills.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md) | [T-701](tasks/T-701-ci-workflow.md) |
 | `patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch` | yes | [T-1003](tasks/T-1003-worker-pid-on-the-wire.md) | — |
 | `scripts/gen-delivery-docs.py` | yes | — | [T-701](tasks/T-701-ci-workflow.md) |
 | `skills/omp-agent-authoring/SKILL.md` | yes | [T-804](tasks/T-804-authoring-skills.md) | — |
