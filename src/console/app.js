@@ -321,6 +321,11 @@
 			const button = document.createElement("button");
 			button.type = "button";
 			button.className = chip.mine ? "reaction mine" : "reaction";
+			button.setAttribute("aria-pressed", chip.mine ? "true" : "false");
+			button.setAttribute(
+				"aria-label",
+				`React with ${emoji}, ${chip.count} so far`,
+			);
 			button.textContent = `${emoji} ${chip.count}`;
 			button.addEventListener("click", () => {
 				void toggleReaction(message.id, emoji);
@@ -384,11 +389,28 @@
 
 	/** @param {RoomInfo[]} channels */
 	const renderChannels = (channels) => {
+		// A repaint destroys the focused option; remember and restore, so a
+		// keyboard selection does not dump focus on <body>.
+		const hadFocus = channelsEl.contains(document.activeElement);
 		channelsEl.replaceChildren();
+		// Roving tabindex: exactly one option sits in the tab order — the
+		// open room, or the first option before any room is open.
+		const rovingId =
+			channels.some((channel) => channel.id === currentRoom) &&
+			currentRoom !== null
+				? currentRoom
+				: (channels[0]?.id ?? null);
 		for (const channel of channels) {
 			const item = document.createElement("li");
+			item.setAttribute("role", "presentation");
 			const button = document.createElement("button");
 			button.type = "button";
+			button.setAttribute("role", "option");
+			button.setAttribute(
+				"aria-selected",
+				channel.id === currentRoom ? "true" : "false",
+			);
+			button.tabIndex = channel.id === rovingId ? 0 : -1;
 			const classes = ["channel"];
 			if (channel.id === currentRoom) classes.push("active");
 			if (unreadRooms.has(channel.id)) classes.push("unread");
@@ -400,7 +422,32 @@
 			item.append(button);
 			channelsEl.append(item);
 		}
+		if (hadFocus) {
+			/** @type {HTMLElement | null} */
+			const roving = channelsEl.querySelector('.channel[tabindex="0"]');
+			roving?.focus();
+		}
 	};
+
+	// Arrow keys rove focus through the options without selecting; Enter or
+	// Space activates the focused option (the button's native click).
+	channelsEl.addEventListener("keydown", (event) => {
+		if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+		const options = /** @type {HTMLElement[]} */ ([
+			...channelsEl.querySelectorAll(".channel"),
+		]);
+		const index = options.indexOf(
+			/** @type {HTMLElement} */ (document.activeElement),
+		);
+		if (index === -1 || options.length === 0) return;
+		event.preventDefault();
+		const step = event.key === "ArrowDown" ? 1 : -1;
+		const next = options[(index + step + options.length) % options.length];
+		for (const option of options) {
+			option.tabIndex = option === next ? 0 : -1;
+		}
+		next.focus();
+	});
 
 	/**
 	 * Agent rows with a membership toggle for the open channel.
@@ -472,6 +519,11 @@
 		stateActionEl.hidden = actionLabel.length === 0;
 		stateAction = action;
 		stateEl.hidden = false;
+		// Whole-console outage: the retry affordance is the only next step,
+		// so a keyboard user starts on it instead of hunting for it.
+		if (state === "offline" && actionLabel.length > 0) {
+			stateActionEl.focus();
+		}
 	};
 
 	const clearState = () => {
@@ -578,6 +630,23 @@
 		// thread is ready, so revealing an empty list first is a lie.
 		await refresh();
 		threadEl.hidden = false;
+		// Focus follows the view change; Escape or Close hands it back.
+		el("thread-close").focus();
+	};
+
+	/** Close the pane and return focus to the opener that revealed it. */
+	const closeThread = () => {
+		const rootId = openThreadRoot;
+		openThreadRoot = null;
+		threadEl.hidden = true;
+		if (rootId === null) return;
+		// The opener is re-rendered on every refresh, so it is found by id
+		// now, not held from open time.
+		/** @type {HTMLElement | null} */
+		const opener = messagesEl.querySelector(
+			`.message[data-id="${rootId}"] .thread-open`,
+		);
+		opener?.focus();
 	};
 
 	/**
@@ -717,8 +786,31 @@
 	});
 
 	el("thread-close").addEventListener("click", () => {
-		openThreadRoot = null;
-		threadEl.hidden = true;
+		closeThread();
+	});
+
+	document.addEventListener("keydown", (event) => {
+		if (event.key !== "Escape" || threadEl.hidden) return;
+		event.preventDefault();
+		closeThread();
+	});
+
+	// The transcript log is keyboard-scrollable wherever it has focus; the
+	// handler is explicit so behavior does not depend on UA scroll quirks.
+	messagesEl.addEventListener("keydown", (event) => {
+		/** @type {Record<string, number>} */
+		const deltas = {
+			ArrowDown: 48,
+			ArrowUp: -48,
+			PageDown: messagesEl.clientHeight,
+			PageUp: -messagesEl.clientHeight,
+			End: messagesEl.scrollHeight,
+			Home: -messagesEl.scrollHeight,
+		};
+		const delta = deltas[event.key];
+		if (delta === undefined) return;
+		event.preventDefault();
+		messagesEl.scrollTop += delta;
 	});
 
 	newChannelForm.addEventListener("submit", (event) => {

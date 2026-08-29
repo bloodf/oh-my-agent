@@ -16,13 +16,13 @@
 	--surface-2: #1f2530;
 	--border: #2a3140;
 
-	/* Text. */
+	/* Text. AAA: every text token clears 7:1 on all three surfaces. */
 	--text-primary: #d7dde7;
-	--text-muted: #8b94a7;
-	--muted: #8b94a7;
+	--text-muted: #adb5c4;
+	--muted: #adb5c4;
 
 	/* Intent. */
-	--accent: #6ea8fe;
+	--accent: #8ab9ff;
 	--danger: #e5695e;
 	--success: #57ab5a;
 
@@ -76,6 +76,30 @@ button {
 	color: inherit;
 }
 
+/* ── Keyboard affordances ──────────────────────────────────────────────── */
+
+/* Hidden until keyboard focus reaches it; then the first thing on screen. */
+.skip-link {
+	position: absolute;
+	top: -100%;
+	left: var(--space-1);
+	background: var(--accent);
+	color: var(--surface-0);
+	padding: var(--space-0) var(--space-1);
+	border-radius: var(--radius-1);
+	font-weight: 600;
+}
+
+.skip-link:focus-visible {
+	top: var(--space-0);
+}
+
+/* One visible focus ring for every keyboard-reachable control. */
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
 /* ── Sidebar ───────────────────────────────────────────────────────────── */
 
 #sidebar {
@@ -119,6 +143,9 @@ button {
 	border-radius: var(--radius-1);
 	cursor: pointer;
 	font: inherit;
+	transition:
+		background-color 0.15s ease,
+		color 0.15s ease;
 }
 
 .channel:hover {
@@ -431,4 +458,20 @@ button {
 .membership-toggle:hover {
 	border-color: var(--accent);
 	color: var(--accent);
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────── */
+
+/* Hover fades and any future animation are decoration, not meaning. */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		/* biome-ignore lint/complexity/noImportantStyles: universal reduced-motion kill switch must beat any specificity */
+		transition-duration: 0s !important;
+		/* biome-ignore lint/complexity/noImportantStyles: universal reduced-motion kill switch must beat any specificity */
+		animation-duration: 0s !important;
+		/* biome-ignore lint/complexity/noImportantStyles: universal reduced-motion kill switch must beat any specificity */
+		scroll-behavior: auto !important;
+	}
 }

@@ -24,20 +24,40 @@
 /** Browser globals used inside `page.evaluate` callbacks (no DOM lib here). */
 declare const document: {
 	querySelector(selector: string): { click(): void } | null;
-	activeElement: { id: string } | null;
+	querySelectorAll(selector: string): ArrayLike<A11yNode> & {
+		[Symbol.iterator](): Iterator<A11yNode>;
+	};
+	activeElement: A11yNode | null;
 	documentElement: unknown;
 	body: {
 		append(node: unknown): void;
 	};
 	createElement(tag: string): {
 		remove(): void;
-		style: { color: string };
+		style: { color: string; backgroundColor: string };
 	};
 };
+/** The slice of Element the a11y probes touch inside page.evaluate. */
+interface A11yNode {
+	id: string;
+	tagName: string;
+	className: string;
+	textContent: string | null;
+	getAttribute(name: string): string | null;
+	closest(selector: string): A11yNode | null;
+	parentElement: A11yNode | null;
+	click(): void;
+	focus(): void;
+	remove(): void;
+	dataset: Record<string, string | undefined>;
+}
 declare function getComputedStyle(target: unknown): {
 	getPropertyValue(name: string): string;
 	backgroundColor: string;
 	color: string;
+	outlineStyle: string;
+	outlineWidth: string;
+	transitionDuration: string;
 };
 
 import {
@@ -1635,4 +1655,559 @@ describe("unread", () => {
 			expect(errors).toEqual([]);
 		},
 	);
+});
+
+// ── Accessibility (T-1102) ───────────────────────────────────────────────────
+
+/** Relative luminance of an "rgb(r, g, b)" string, per WCAG. */
+const luminance = (painted: string): number => {
+	const match = painted.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+	if (match === null) throw new Error(`Unparseable color: ${painted}`);
+	const [r, g, b] = [match[1], match[2], match[3]]
+		.map((channel) => Number(channel) / 255)
+		.map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+/** WCAG contrast ratio between two painted colors. */
+const contrastRatio = (a: string, b: string): number => {
+	const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+	return (hi + 0.05) / (lo + 0.05);
+};
+
+/** The focused element, described enough to assert focus order. */
+const focusProbe = (page: Page) =>
+	page.evaluate(() => {
+		const active = document.activeElement;
+		if (active === null) return null;
+		return {
+			id: active.id,
+			className: active.className,
+			text: (active.textContent ?? "").trim(),
+			inThread: active.closest("#thread") !== null,
+			messageId: active.closest(".message")?.dataset.id ?? null,
+		};
+	});
+
+describe("accessibility", () => {
+	browserTest(
+		"landmarks, roles, and names are exposed on the live DOM",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.rooms.post({
+				room: "#reviews",
+				author: "@you",
+				body: "Root question.",
+			});
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Threaded answer.",
+				parentId: 1,
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#channels .channel");
+
+			// Navigation landmark around the channel/agent rail, with a name.
+			const nav = await page.$eval("nav#sidebar", (node) => ({
+				label: node.getAttribute("aria-label") ?? "",
+			}));
+			expect(nav.label.length).toBeGreaterThan(0);
+
+			// One main region; the current-channel header is the banner.
+			expect(await page.$("main#main")).not.toBeNull();
+			expect(
+				await page.$eval(
+					"#current-channel",
+					(node) => node.getAttribute("role") ?? "",
+				),
+			).toBe("banner");
+
+			// Channels are a listbox of options; exactly one selected.
+			const listbox = await page.$eval("#channels", (node) => ({
+				role: node.getAttribute("role") ?? "",
+				label: node.getAttribute("aria-label") ?? "",
+			}));
+			expect(listbox.role).toBe("listbox");
+			expect(listbox.label.length).toBeGreaterThan(0);
+			const options = await page.$$eval("#channels .channel", (nodes) =>
+				nodes.map((n) => ({
+					role: n.getAttribute("role") ?? "",
+					selected: n.getAttribute("aria-selected") ?? "",
+					tabindex: n.getAttribute("tabindex") ?? "",
+				})),
+			);
+			expect(options.length).toBeGreaterThan(0);
+			for (const option of options) expect(option.role).toBe("option");
+			expect(options.filter((o) => o.selected === "true").length).toBe(1);
+			// Roving tabindex: exactly one option is in the tab order.
+			expect(options.filter((o) => o.tabindex === "0").length).toBe(1);
+
+			// The transcript is a polite live log, keyboard-scrollable.
+			const log = await page.$eval("#messages", (node) => ({
+				role: node.getAttribute("role") ?? "",
+				live: node.getAttribute("aria-live") ?? "",
+				label: node.getAttribute("aria-label") ?? "",
+				tabindex: node.getAttribute("tabindex") ?? "",
+			}));
+			expect(log.role).toBe("log");
+			expect(log.live).toBe("polite");
+			expect(log.label.length).toBeGreaterThan(0);
+			expect(log.tabindex).toBe("0");
+
+			// Both composers are labeled textboxes.
+			for (const selector of ["#composer-input", "#thread-composer-input"]) {
+				const label = await page.$eval(
+					selector,
+					(node) => node.getAttribute("aria-label") ?? "",
+				);
+				expect(label.length).toBeGreaterThan(0);
+			}
+
+			// The thread pane is a named complementary region with a labeled close.
+			const thread = await page.$eval("aside#thread", (node) => ({
+				role: node.getAttribute("role") ?? "",
+				label: node.getAttribute("aria-label") ?? "",
+			}));
+			expect(thread.role).toBe("complementary");
+			expect(thread.label.length).toBeGreaterThan(0);
+			expect(
+				(
+					await page.$eval("#thread-close", (node) => node.textContent ?? "")
+				).trim().length,
+			).toBeGreaterThan(0);
+
+			// State screens are status regions and their action is a real button.
+			const state = await page.$eval("#state", (node) => ({
+				role: node.getAttribute("role") ?? "",
+				actionTag: node.querySelector(".state-action")?.tagName ?? "",
+			}));
+			expect(state.role).toBe("status");
+			expect(state.actionTag).toBe("BUTTON");
+
+			// Non-vacuity: the assertions above read live attributes, so removing
+			// any role fails its expect; this spot-checks the strictest one.
+			expect(options[0]?.role).not.toBe("");
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"channel switching is keyboard-only: skip link, roving arrows, Enter",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.$$eval("#channels .channel", (nodes) => nodes.length);
+			await waitFor(
+				"two channel options",
+				() => page.$$eval("#channels .channel", (nodes) => nodes.length),
+				(count) => count >= 2,
+			);
+
+			// First Tab lands on the skip link.
+			await page.keyboard.press("Tab");
+			const first = await focusProbe(page);
+			expect(first?.className ?? "").toContain("skip-link");
+
+			// Second Tab lands on the roving channel option, not every option.
+			await page.keyboard.press("Tab");
+			const onOption = await focusProbe(page);
+			expect(onOption?.className ?? "").toContain("channel");
+			expect(onOption?.text ?? "").toContain("#reviews");
+
+			// ArrowDown roves to the next option without selecting it.
+			await page.keyboard.press("ArrowDown");
+			const roved = await focusProbe(page);
+			expect(roved?.text ?? "").toContain("#ops");
+			expect(
+				await page.$eval("#current-channel", (n) => n.textContent ?? ""),
+			).toContain("#reviews");
+
+			// Enter selects; the header, aria-selected, and focus all follow.
+			await page.keyboard.press("Enter");
+			await waitFor(
+				"open channel header",
+				() => page.$eval("#current-channel", (n) => n.textContent ?? ""),
+				(text) => text.includes("#ops"),
+			);
+			const selected = await waitFor(
+				"aria-selected on #ops",
+				() =>
+					page.$$eval("#channels .channel", (nodes) =>
+						nodes
+							.filter((n) => n.getAttribute("aria-selected") === "true")
+							.map((n) => (n.textContent ?? "").trim()),
+					),
+				(list) => list.length === 1,
+			);
+			expect(selected[0]).toContain("#ops");
+			const after = await waitFor(
+				"focus kept on the selected option",
+				() => focusProbe(page),
+				(probe) => (probe?.className ?? "").includes("channel"),
+			);
+			expect(after?.text ?? "").toContain("#ops");
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest("the transcript log scrolls by keyboard", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		for (let i = 0; i < 30; i += 1) {
+			await h.rooms.post({
+				room: "#reviews",
+				author: i % 2 === 0 ? "reviewer" : "second-agent",
+				body: `Filler line ${i} to force the transcript to overflow.`,
+			});
+		}
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await waitFor(
+			"transcript",
+			() => transcriptText(page),
+			(t) => t.includes("Filler line 29"),
+		);
+
+		await page.focus("#messages");
+		await page.$eval("#messages", (node) => {
+			(node as unknown as { scrollTop: number }).scrollTop = 0;
+		});
+		await page.keyboard.press("End");
+		const scrolled = await waitFor(
+			"log scrolled by End",
+			() =>
+				page.$eval(
+					"#messages",
+					(node) => (node as unknown as { scrollTop: number }).scrollTop,
+				),
+			(top) => top > 0,
+		);
+		expect(scrolled).toBeGreaterThan(0);
+
+		await page.keyboard.press("Home");
+		await waitFor(
+			"log scrolled home",
+			() =>
+				page.$eval(
+					"#messages",
+					(node) => (node as unknown as { scrollTop: number }).scrollTop,
+				),
+			(top) => top === 0,
+		);
+		expect(errors).toEqual([]);
+	});
+
+	browserTest(
+		"reaction chips are keyboard toggle buttons with aria-pressed",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const posted = await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "React to me.",
+			});
+			await h.rooms.react(posted.id, "reviewer", "👀");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"reaction chip",
+				() => renderedReactions(page, posted.id),
+				(chips) => chips.length === 1,
+			);
+
+			const chipSelector = `#messages .message[data-id="${posted.id}"] .reaction`;
+			expect(
+				await page.$eval(chipSelector, (n) => n.getAttribute("aria-pressed")),
+			).toBe("false");
+
+			// Keyboard toggle on: focus the chip and press Enter.
+			await page.focus(chipSelector);
+			await page.keyboard.press("Enter");
+			const pressed = await waitFor(
+				"chip pressed",
+				() =>
+					page
+						.$eval(chipSelector, (n) => ({
+							pressed: n.getAttribute("aria-pressed") ?? "",
+							text: (n.textContent ?? "").trim(),
+						}))
+						.catch(() => null),
+				(chip) => chip !== null && chip.pressed === "true",
+			);
+			expect(pressed?.text).toBe("👀 2");
+
+			// And off again, still by keyboard.
+			await page.focus(chipSelector);
+			await page.keyboard.press("Enter");
+			await waitFor(
+				"chip released",
+				() =>
+					page
+						.$eval(chipSelector, (n) => n.getAttribute("aria-pressed") ?? "")
+						.catch(() => null),
+				(state) => state === "false",
+			);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"thread opens by keyboard, moves focus in, and Escape returns it",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const root = await h.rooms.post({
+				room: "#reviews",
+				author: "@you",
+				body: "Root question.",
+			});
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Threaded answer.",
+				parentId: root.id,
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"transcript",
+				() => transcriptText(page),
+				(t) => t.includes("Root question."),
+			);
+
+			const openerSelector = `#messages .message[data-id="${root.id}"] .thread-open`;
+			await page.focus(openerSelector);
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#thread:not([hidden])");
+
+			// Focus moved into the pane.
+			const inPane = await waitFor(
+				"focus inside the thread pane",
+				() => focusProbe(page),
+				(probe) => probe?.inThread === true,
+			);
+			expect(inPane?.inThread).toBe(true);
+
+			// A keyboard reply posts from here. The console API drops parentId
+			// (console-api.ts reads only { body, author }), so the reply lands
+			// as a root message rather than inside the pane — a server-side
+			// T-1101 gap outside this task's editable files. The a11y claim
+			// under test is keyboard operability: Enter in the thread composer
+			// sends without a pointer.
+			await page.focus("#thread-composer-input");
+			await page.keyboard.type("Reply from the keyboard.");
+			await page.keyboard.press("Enter");
+			await waitFor(
+				"keyboard thread reply posted",
+				() => transcriptText(page),
+				(t) => t.includes("Reply from the keyboard."),
+			);
+
+			// Escape closes the pane and returns focus to the opener.
+			await page.keyboard.press("Escape");
+			await page.waitForSelector("#thread[hidden]");
+			const returned = await waitFor(
+				"focus returned to the thread opener",
+				() => focusProbe(page),
+				(probe) => (probe?.className ?? "").includes("thread-open"),
+			);
+			expect(returned?.messageId).toBe(String(root.id));
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest("a message posts by keyboard alone", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector("#composer-input");
+
+		await page.focus("#composer-input");
+		await page.keyboard.type("Sent without a pointer.");
+		await page.keyboard.press("Enter");
+		await waitFor(
+			"keyboard-posted message",
+			() => transcriptText(page),
+			(t) => t.includes("Sent without a pointer."),
+		);
+		expect(errors).toEqual([]);
+	});
+
+	browserTest("the offline state moves focus to the retry button", async () => {
+		const server = await degradedServer(() => undefined);
+		const { page } = await openPage();
+		await page.goto(server.url, { waitUntil: "domcontentloaded" });
+
+		await waitFor(
+			"offline state",
+			() => stateOnPage(page),
+			(s) => s !== null && s.state === "offline",
+		);
+		const focused = await waitFor(
+			"focus on the retry button",
+			() => focusProbe(page),
+			(probe) => (probe?.className ?? "").includes("state-action"),
+		);
+		expect(focused?.text.toLowerCase()).toContain("retry");
+	});
+
+	browserTest("keyboard focus is visible", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector("#channels .channel");
+
+		// The token layer owns the affordance, not the UA default.
+		const css = await readFile(
+			join(import.meta.dir, "../src/console/style.css"),
+			"utf8",
+		);
+		expect(css).toContain(":focus-visible");
+
+		// Reach an option by keyboard and observe a painted outline.
+		await page.keyboard.press("Tab");
+		await page.keyboard.press("Tab");
+		const outline = await page.evaluate(() => {
+			const active = document.activeElement;
+			if (active === null) return null;
+			const styles = getComputedStyle(active);
+			return {
+				className: active.className,
+				style: styles.outlineStyle,
+				width: styles.outlineWidth,
+			};
+		});
+		expect(outline?.className ?? "").toContain("channel");
+		expect(outline?.style).not.toBe("none");
+		expect(outline?.width).not.toBe("0px");
+		expect(errors).toEqual([]);
+	});
+
+	browserTest(
+		"body and interactive text meet AAA 7:1 on the surfaces that carry them",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#messages");
+
+			/**
+			 * Every (text token, surface token) pair the console actually
+			 * paints, per style.css:
+			 * - text-primary: message bodies (surface-0), headers/composers
+			 *   (surface-1), hovered channels (surface-2).
+			 * - text-muted: timestamps and chips (surface-0), sidebar labels,
+			 *   hints, membership toggles (surface-1), and it must survive
+			 *   surface-2 hovers.
+			 * - accent: thread openers (surface-0), state actions (surface-1),
+			 *   pressed reaction chips (surface-2).
+			 * - roles: author names in the transcript (surface-0).
+			 * - surface-0 on accent: the send button's label on its fill.
+			 */
+			const pairs: [string, string][] = [
+				["--text-primary", "--surface-0"],
+				["--text-primary", "--surface-1"],
+				["--text-primary", "--surface-2"],
+				["--text-muted", "--surface-0"],
+				["--text-muted", "--surface-1"],
+				["--text-muted", "--surface-2"],
+				["--accent", "--surface-0"],
+				["--accent", "--surface-1"],
+				["--accent", "--surface-2"],
+				["--role-agent", "--surface-0"],
+				["--role-you", "--surface-0"],
+				["--role-system", "--surface-0"],
+				["--surface-0", "--accent"],
+			];
+			const tokens = [...new Set(pairs.flat())];
+			const resolved = await page.evaluate((names: string[]) => {
+				const out: Record<string, string> = {};
+				for (const name of names) {
+					const node = document.createElement("div");
+					node.style.color = `var(${name})`;
+					document.body.append(node);
+					out[name] = getComputedStyle(node).color;
+					node.remove();
+				}
+				return out;
+			}, tokens);
+
+			const measured: Record<string, number> = {};
+			for (const [text, surface] of pairs) {
+				const ratio = contrastRatio(resolved[text], resolved[surface]);
+				measured[`${text} on ${surface}`] = Number(ratio.toFixed(2));
+				expect(
+					ratio,
+					`${text} on ${surface} must meet AAA`,
+				).toBeGreaterThanOrEqual(7);
+			}
+			// Non-vacuity: the same math flags a pair that is genuinely weak.
+			expect(
+				contrastRatio(
+					resolved["--surface-1"] ?? "rgb(22, 26, 33)",
+					resolved["--surface-0"],
+				),
+			).toBeLessThan(7);
+			console.log("[contrast]", JSON.stringify(measured));
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest("reduced motion removes non-essential animation", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+
+		const css = await readFile(
+			join(import.meta.dir, "../src/console/style.css"),
+			"utf8",
+		);
+		expect(css).toContain("@media (prefers-reduced-motion: reduce)");
+
+		const { page, errors } = await openPage();
+		await page.emulateMediaFeatures([
+			{ name: "prefers-reduced-motion", value: "reduce" },
+		]);
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector("#channels .channel");
+		const reduced = await page.$eval(
+			"#channels .channel",
+			(n) => getComputedStyle(n).transitionDuration,
+		);
+		expect(reduced).toBe("0s");
+
+		// Without the preference the transition is present, so the variant
+		// is doing real work rather than matching an already-static page.
+		await page.emulateMediaFeatures([
+			{ name: "prefers-reduced-motion", value: "no-preference" },
+		]);
+		const normal = await waitFor(
+			"transitions restored",
+			() =>
+				page.$eval(
+					"#channels .channel",
+					(n) => getComputedStyle(n).transitionDuration,
+				),
+			(value) => value !== "0s",
+		);
+		expect(normal).not.toBe("0s");
+		expect(errors).toEqual([]);
+	});
 });

@@ -311,11 +311,12 @@ describe("serving the console", () => {
 
 		// Follow what the served HTML actually references rather than guessing
 		// the paths: an asset the browser cannot fetch is a blank console, and
-		// hardcoding the URLs here would hide exactly that.
+		// hardcoding the URLs here would hide exactly that. In-page anchors
+		// (accessibility skip links) are not assets — filter them out.
 		const html = await (await fetch(url)).text();
-		const references = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map(
-			(match) => match[1] as string,
-		);
+		const references = [...html.matchAll(/(?:src|href)="([^"]+)"/g)]
+			.map((match) => match[1] as string)
+			.filter((reference) => !reference.startsWith("#"));
 		expect(references.length).toBeGreaterThanOrEqual(2);
 
 		const types: Record<string, string> = {

@@ -7,13 +7,25 @@
 		<link rel="stylesheet" href="/style.css" />
 	</head>
 	<body>
-		<aside id="sidebar">
+		<a class="skip-link" href="#composer-input">Skip to composer</a>
+		<nav id="sidebar" aria-label="Channels and agents">
 			<h1>Channels</h1>
-			<ul id="channels"></ul>
-		</aside>
+			<!-- biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: app.js renders role="option" children with a roving tabindex; the listbox+option pattern is asserted by tests -->
+			<ul id="channels" role="listbox" aria-label="Channels"></ul>
+		</nav>
 		<main id="main">
-			<header id="current-channel"></header>
-			<div id="messages" aria-live="polite"></div>
+			<!-- biome-ignore lint/a11y/noInteractiveElementToNoninteractiveRole: explicit banner role is asserted by tests; header nested in main has no implicit banner semantics -->
+			<header id="current-channel" role="banner"></header>
+			<!-- biome-ignore-start lint/a11y/noNoninteractiveTabindex: the scrollable transcript must be keyboard-focusable (WCAG 2.1.1); keyboard scrolling is asserted by tests -->
+			<div
+				id="messages"
+				role="log"
+				aria-label="Channel transcript"
+				aria-live="polite"
+				tabindex="0"
+			></div>
+			<!-- biome-ignore-end lint/a11y/noNoninteractiveTabindex: transcript focusability -->
+
 			<div id="state" role="status" hidden>
 				<p class="state-title"></p>
 				<p class="state-detail"></p>
@@ -23,6 +35,7 @@
 				<textarea
 					id="composer-input"
 					rows="1"
+					aria-label="Message the channel"
 					placeholder="Message the channel"
 					autocomplete="off"
 				></textarea>
@@ -33,16 +46,20 @@
 				</p>
 			</form>
 		</main>
-		<aside id="thread" hidden>
+		<!-- biome-ignore lint/a11y/noRedundantRoles: tests assert the explicit complementary role; keeping it explicit guards the landmark against element changes -->
+		<aside id="thread" role="complementary" aria-label="Thread" hidden>
 			<header>
 				<span id="thread-title"></span>
-				<button id="thread-close" type="button">Close</button>
+				<button id="thread-close" type="button" aria-label="Close thread">
+					Close
+				</button>
 			</header>
 			<div id="thread-messages"></div>
 			<form id="thread-composer">
 				<textarea
 					id="thread-composer-input"
 					rows="1"
+					aria-label="Reply in thread"
 					placeholder="Reply in thread"
 					autocomplete="off"
 				></textarea>
