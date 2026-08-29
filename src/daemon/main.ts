@@ -1085,7 +1085,9 @@ export async function bootDaemon(
 			const portEnv = env.OMA_CONSOLE_PORT;
 			if (portEnv !== undefined && portEnv !== "") {
 				if (!/^\d+$/.test(portEnv)) {
-					throw new Error(`Invalid OMA_CONSOLE_PORT: ${JSON.stringify(portEnv)}`);
+					throw new Error(
+						`Invalid OMA_CONSOLE_PORT: ${JSON.stringify(portEnv)}`,
+					);
 				}
 				const parsed = Number.parseInt(portEnv, 10);
 				if (parsed < 0 || parsed > 65535) {
