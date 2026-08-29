@@ -1024,6 +1024,35 @@ EPICS = [
         ],
         adrs=["ADR-011"],
     ),
+    Epic(
+        id="EP-11",
+        slug="operator-polish",
+        title="Operator polish: AAA console and the CLI surface",
+        outcome=(
+            "The web console looks and behaves like a product — a coherent visual system, "
+            "keyboard-complete operation, and accessibility that survives a screen reader — "
+            "and every daemon operation is reachable from shell commands with no TUI at all."
+        ),
+        why=(
+            "The console was built for correctness; it has one ARIA attribute and no visual "
+            "system. The plugin is equally operable only inside the OMP TUI today, which "
+            "makes the daemon unusable in scripts and plain terminals."
+        ),
+        scope=[
+            "A dependency-free design system for the console: tokens, dark theme, layout, message and state rendering.",
+            "AAA accessibility: landmarks, live regions, focus management, full keyboard operation, contrast, reduced motion.",
+            "A management CLI on the omp-agent binary: every daemon verb with clean errors and script-friendly output.",
+        ],
+        non_goals=[
+            "A build step or a framework; the console stays dependency-free by decision (T-603).",
+            "Touching the daemon protocol for the CLI's sake; it consumes the frozen 20 methods.",
+        ],
+        acceptance=[
+            "Every daemon operation is scriptable via `omp-agent <verb>` with non-zero exits on failure and a `--json` mode.",
+            "The console passes the browser suite's accessibility assertions: landmarks, keyboard flows, focus order, contrast.",
+            "The visual overhaul ships as one design system (tokens), not a restyle per component.",
+        ],
+    ),
 ]
 
 EPIC_FILE = {e.id: f"{e.id}-{e.slug}.md" for e in EPICS}
@@ -1060,6 +1089,9 @@ SPRINTS = [
     Sprint(id="SP-11", slug="production-wiring", title="Production wiring",
            theme="The console served for real, budgets fed by real usage, and the "
                  "hardening deferred to a named trigger."),
+    Sprint(id="SP-12", slug="operator-polish", title="Operator polish",
+           theme="AAA visuals and accessibility for the console, and a CLI that needs "
+                 "no TUI at all."),
 ]
 
 SPRINT_FILE = {s.id: f"{s.id}-{s.slug}.md" for s in SPRINTS}
@@ -2950,6 +2982,117 @@ TASKS += [
         ],
         depends_on=["T-401"],
         out_of_scope=["Sandboxing in-process workers — impossible; the shield rules make that visible rather than implied."],
+    ),
+]
+
+TASKS += [
+    # ── EP-11: operator polish ───────────────────────────────────────────────
+    Task(
+        id="T-1101", slug="console-visual-system", title="Console visual system and usability overhaul",
+        epic="EP-11", sprint="SP-12", status="Ready",
+        goal="The console presents like a product: one coherent design system behind every pane, state, and control.",
+        read_first=[
+            ("Console client", "src/console/app.js"),
+            ("Console guide", "docs/web-console.md"),
+            ("Browser suite", "tests/console-client.test.ts"),
+        ],
+        files=[
+            "src/console/index.html",
+            "src/console/app.js",
+            "src/console/style.css",
+            "tests/console-client.test.ts",
+            "docs/web-console.md",
+        ],
+        assets=[
+            ("src/console/style.css", "Edited", "Design tokens (type scale, spacing, color, dark theme) consumed by every rule — no per-component restyling."),
+            ("src/console/index.html", "Edited", "Semantic structure the tokens and landmarks hook into."),
+            ("src/console/app.js", "Edited", "Render paths produce the new structure; states (loading/empty/error/offline) are first-class."),
+            ("tests/console-client.test.ts", "Edited", "Visual-system assertions: tokens applied, states render, no inline ad-hoc styles."),
+            ("docs/web-console.md", "Edited", "The client section describes the system, not a screenshot in words."),
+        ],
+        steps=[
+            "Define the token layer first: typography scale, spacing rhythm, a dark color system with semantic names (surface, text, accent, danger, success, muted), and component states. Every rule consumes tokens; a hardcoded pixel/hex outside tokens fails the suite.",
+            "Message rendering: author identity with role tint, grouped consecutive messages from one author, timestamps, readable body measure, code/preview affordance.",
+            "States as first-class screens: connecting, empty channel, daemon offline, load failure — each with a next action.",
+            "Composer: multiline with send affordance and visible keyboard hint; channel list with unread-style affordance (visual only, no cursor semantics).",
+            "Thread pane gets the same system treatment rather than its own dialect.",
+        ],
+        acceptance=[
+            "All styling resolves through the token layer; the suite fails on a hardcoded color or pixel outside tokens.",
+            "Every state (connecting, empty, offline, error) renders with a next action, browser-proven.",
+            "The dependency-free constraint holds: no new runtime dependency, no build step.",
+        ],
+        depends_on=["T-603"],
+        out_of_scope=["The accessibility layer itself (ARIA, focus, keyboard), which is T-1102 built on this system."],
+    ),
+    Task(
+        id="T-1102", slug="console-accessibility", title="Console accessibility to AAA standard",
+        epic="EP-11", sprint="SP-12", status="Ready",
+        goal="The console is fully operable by keyboard, readable by a screen reader, and legible at AAA contrast.",
+        read_first=[
+            ("Console client", "src/console/app.js"),
+            ("Browser suite", "tests/console-client.test.ts"),
+        ],
+        files=[
+            "src/console/index.html",
+            "src/console/app.js",
+            "src/console/style.css",
+            "tests/console-client.test.ts",
+        ],
+        assets=[
+            ("src/console/index.html", "Edited", "Landmarks, skip links, semantic lists, labeled regions."),
+            ("src/console/app.js", "Edited", "ARIA roles/states on dynamic content, focus management on view changes, keyboard bindings for every action."),
+            ("src/console/style.css", "Edited", "Visible focus, AAA contrast tokens, reduced-motion variant."),
+            ("tests/console-client.test.ts", "Edited", "The a11y assertion battery below."),
+        ],
+        steps=[
+            "Landmarks and semantics: nav/main/complementary regions, channels as a listbox of options, messages as a log with polite live updates, composer a labeled textbox, thread pane a complementary region with a labeled close.",
+            "Full keyboard operation: channel switching, message scrolling, reaction toggle, reply open/close, post send, and focus that is always visible and never trapped.",
+            "Focus management: opening the thread pane moves focus in, closing returns it; a daemon-offline state moves focus to the retry affordance.",
+            "Contrast measured against AAA for body and interactive text; a prefers-reduced-motion variant removes non-essential animation.",
+        ],
+        acceptance=[
+            "The suite drives every flow keyboard-only in a real browser: no pointer event needed for any of the above.",
+            "Roles, names, and states asserted on the live DOM (listbox/option, log, status, alert).",
+            "Focus order is asserted on open/close of the thread pane and on the offline state.",
+            "Contrast is computed from the resolved styles and meets the declared ratio.",
+        ],
+        depends_on=["T-1101"],
+        out_of_scope=["Screen-reader verification with a real SR binary; the assertions are DOM-level, not auditory."],
+    ),
+    Task(
+        id="T-1103", slug="cli-management-surface", title="CLI management verbs: no TUI required",
+        epic="EP-11", sprint="SP-12", status="Ready",
+        goal="Every daemon operation runs from a shell: `omp-agent <verb>` talks to the daemon socket and exits usefully, with no OMP session at all.",
+        read_first=[
+            ("Daemon entry and CLI dispatch", "src/daemon/main.ts"),
+            ("Protocol", "src/shared/protocol.ts"),
+            ("Socket client patterns", "src/extension/widget.ts"),
+        ],
+        files=[
+            "src/daemon/cli.ts",
+            "src/daemon/main.ts",
+            "tests/daemon-cli.test.ts",
+        ],
+        assets=[
+            ("src/daemon/cli.ts", "New", "The verb handlers and the socket client; pure functions per verb so the suite can drive them directly."),
+            ("src/daemon/main.ts", "Edited", "Dispatches verbs to the CLI handlers; `daemon` stays the default."),
+            ("tests/daemon-cli.test.ts", "New", "Every verb against a real booted daemon; daemon-down errors; exit codes; --json shape."),
+        ],
+        steps=[
+            "Verbs: `status`, `agents`, `spawn <name> [--parent <p>]`, `kill <name> [--keep-children]`, `rooms`, `rooms read <room>`, `rooms post <room> <text>`, `schedule`, `schedule <id> on|off`, `logs <name> [n]`, `inject <name> <text>`, `bump <account> <usd>`, `console` (prints the console URL).",
+            "Resolve the socket from the active agent dir exactly as the TUI does; a down daemon exits 3 with 'daemon not running' on stderr, never a stack trace.",
+            "Exit codes: 0 ok, 2 usage, 3 daemon down, 4 daemon-side error. `--json` emits the protocol result verbatim for scripting.",
+            "Usage text lists every verb; an unknown verb exits 2 with usage.",
+        ],
+        acceptance=[
+            "Every verb round-trips against a real daemon in the suite.",
+            "Daemon down: exit 3 with the clear message on stderr and nothing on stdout.",
+            "--json parses and matches the socket result.",
+            "A scripting example (spawn two agents, post into a room, read it back) runs as one suite test.",
+        ],
+        depends_on=["T-502"],
+        out_of_scope=["The daemon's own `daemon` verb internals (already shipped), and any TUI behavior."],
     ),
 ]
 
