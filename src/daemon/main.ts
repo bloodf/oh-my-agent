@@ -1171,6 +1171,17 @@ export async function bootDaemon(
 			started.push(() => api.close());
 			consoleUrl = `${api.url}/?token=${encodeURIComponent(token)}`;
 			log(`console: ${consoleUrl}`);
+			// Persist the URL so a later `omp-agent console` can recover it
+			// without the launcher still being around to relay it.
+			await writeFile(join(stateDir, "console-url"), consoleUrl, {
+				encoding: "utf8",
+				mode: TOKEN_MODE,
+			});
+			await chmod(join(stateDir, "console-url"), TOKEN_MODE);
+		} else {
+			// A previous boot may have written a console URL; remove it so the
+			// CLI can tell "no console for this daemon" apart from a stale file.
+			await rm(join(stateDir, "console-url"), { force: true });
 		}
 		// Always called, console or not: the CLI launcher is holding a pipe open
 		// for this and needs to stop waiting either way.
@@ -1311,6 +1322,7 @@ export async function bootDaemon(
 				await hosting.close();
 				await rm(pidPath, { force: true });
 				await rm(socketPath, { force: true });
+				await rm(join(stateDir, "console-url"), { force: true });
 			},
 		};
 	} catch (error) {
@@ -1353,8 +1365,12 @@ if (import.meta.main) {
 	const argv = process.argv.slice(2);
 	const verb = argv[0] ?? "daemon";
 	if (verb !== "daemon") {
-		process.stderr.write("Usage: omp-agent daemon\n");
-		process.exit(2);
+		// The CLI handles its own dispatch, usage, and exit codes.
+		const { runCli } = await import("./cli");
+		const code = await runCli(argv, {
+			agentDir: process.env.PI_CODING_AGENT_DIR,
+		});
+		process.exit(code);
 	}
 
 	if (process.env[DETACHED_ENV] === "1") {
