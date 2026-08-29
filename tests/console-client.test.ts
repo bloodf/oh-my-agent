@@ -24,6 +24,20 @@
 /** Browser globals used inside `page.evaluate` callbacks (no DOM lib here). */
 declare const document: {
 	querySelector(selector: string): { click(): void } | null;
+	activeElement: { id: string } | null;
+	documentElement: unknown;
+	body: {
+		append(node: unknown): void;
+	};
+	createElement(tag: string): {
+		remove(): void;
+		style: { color: string };
+	};
+};
+declare function getComputedStyle(target: unknown): {
+	getPropertyValue(name: string): string;
+	backgroundColor: string;
+	color: string;
 };
 
 import {
@@ -35,7 +49,7 @@ import {
 	test,
 } from "bun:test";
 import { existsSync, readdirSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
@@ -993,6 +1007,631 @@ describe("membership controls", () => {
 			);
 			expect(notice.toLowerCase()).toContain("immediately");
 			expect(notice.toLowerCase()).not.toContain("rebuild");
+			expect(errors).toEqual([]);
+		},
+	);
+});
+
+// ── Visual system (T-1101) ───────────────────────────────────────────────────
+
+/**
+ * The token layer is a source-level contract as much as a rendered one: every
+ * color and every non-structural length must flow through `:root` custom
+ * properties, or "use the tokens" decays into a suggestion. Computed-style
+ * assertions cannot see which literal produced a pixel, so this half of the
+ * gate reads style.css itself — the one place where source text is the
+ * behavior under test.
+ */
+describe("design tokens", () => {
+	const styleSource = async (): Promise<string> =>
+		await readFile(join(import.meta.dir, "../src/console/style.css"), "utf8");
+
+	/** style.css with comments removed and the :root block(s) cut out. */
+	const outsideRoot = (css: string): string => {
+		const noComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+		let out = "";
+		let index = 0;
+		for (;;) {
+			const start = noComments.indexOf(":root", index);
+			if (start === -1) {
+				out += noComments.slice(index);
+				return out;
+			}
+			out += noComments.slice(index, start);
+			const open = noComments.indexOf("{", start);
+			if (open === -1) return out;
+			let depth = 1;
+			let cursor = open + 1;
+			while (cursor < noComments.length && depth > 0) {
+				if (noComments[cursor] === "{") depth += 1;
+				if (noComments[cursor] === "}") depth -= 1;
+				cursor += 1;
+			}
+			index = cursor;
+		}
+	};
+
+	const rootBlock = (css: string): string => {
+		const noComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+		const start = noComments.indexOf(":root");
+		if (start === -1) return "";
+		const open = noComments.indexOf("{", start);
+		let depth = 1;
+		let cursor = open + 1;
+		while (cursor < noComments.length && depth > 0) {
+			if (noComments[cursor] === "{") depth += 1;
+			if (noComments[cursor] === "}") depth -= 1;
+			cursor += 1;
+		}
+		return noComments.slice(open + 1, cursor - 1);
+	};
+
+	test("a :root block defines the semantic token vocabulary", async () => {
+		const root = rootBlock(await styleSource());
+		for (const token of [
+			"--surface-0",
+			"--surface-1",
+			"--surface-2",
+			"--text-primary",
+			"--text-muted",
+			"--accent",
+			"--danger",
+			"--success",
+			"--muted",
+			"--space-1",
+			"--space-2",
+			"--space-3",
+			"--font-size-0",
+			"--font-size-1",
+			"--role-agent",
+			"--role-you",
+			"--role-system",
+		]) {
+			expect(root).toContain(`${token}:`);
+		}
+	});
+
+	test("no raw color appears outside the :root token block", async () => {
+		const body = outsideRoot(await styleSource());
+		const rawColors = body.match(
+			/#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch|color-mix)\(|\b(?:white|black|red|blue|green|gray|grey|silver)\b/g,
+		);
+		expect(rawColors ?? []).toEqual([]);
+	});
+
+	test("length literals outside :root sit only on structural properties", async () => {
+		const body = outsideRoot(await styleSource());
+		// Structure may be sized directly; paint and rhythm must use tokens.
+		const structural =
+			/^(?:width|min-width|max-width|height|min-height|max-height|flex-basis|top|right|bottom|left|inset|line-height|border|border-top|border-right|border-bottom|border-left|border-width|outline|outline-width|outline-offset|letter-spacing|tab-size)$/;
+		const offenders: string[] = [];
+		for (const declaration of body.split(/[;{}]/)) {
+			const colon = declaration.indexOf(":");
+			if (colon === -1) continue;
+			const property = declaration.slice(0, colon).trim();
+			const value = declaration.slice(colon + 1);
+			if (!/-?\d*\.?\d+(?:px|rem|em|ch|vh|vw|pt)\b/.test(value)) continue;
+			if (structural.test(property)) continue;
+			offenders.push(declaration.trim());
+		}
+		expect(offenders).toEqual([]);
+	});
+
+	browserTest("tokens reach computed styles in the browser", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector("#messages");
+
+		const probe = await page.evaluate(() => {
+			const styles = getComputedStyle(document.documentElement);
+			const resolve = (name: string): string => {
+				const node = document.createElement("div");
+				node.style.color = `var(${name})`;
+				document.body.append(node);
+				const painted = getComputedStyle(node).color;
+				node.remove();
+				return painted;
+			};
+			return {
+				surface0: styles.getPropertyValue("--surface-0").trim(),
+				accent: styles.getPropertyValue("--accent").trim(),
+				bodyBackground: getComputedStyle(document.body).backgroundColor,
+				surface0Resolved: resolve("--surface-0"),
+				accentResolved: resolve("--accent"),
+			};
+		});
+		expect(probe.surface0).not.toBe("");
+		expect(probe.accent).not.toBe("");
+		// The page consumes the tokens: the body is painted with --surface-0,
+		// not left at the UA default (transparent over white).
+		expect(probe.bodyBackground).toBe(probe.surface0Resolved);
+		expect(probe.bodyBackground).not.toBe("rgba(0, 0, 0, 0)");
+		expect(probe.accentResolved).not.toBe(probe.surface0Resolved);
+		expect(errors).toEqual([]);
+	});
+});
+
+describe("message presentation", () => {
+	browserTest(
+		"authors carry role identity with distinct computed tints",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Agent line.",
+			});
+			await h.rooms.post({
+				room: "#reviews",
+				author: "@you",
+				body: "Operator line.",
+			});
+			await h.rooms.post({
+				room: "#reviews",
+				author: "system",
+				body: "System line.",
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"transcript",
+				() => transcriptText(page),
+				(t) => t.includes("System line."),
+			);
+
+			const classesFor = (body: string): Promise<string> =>
+				page.$$eval(
+					"#messages .message",
+					(nodes, needle) => {
+						const hit = nodes.find((n) =>
+							(n.textContent ?? "").includes(String(needle)),
+						);
+						return hit === undefined ? "" : hit.className;
+					},
+					body,
+				);
+			expect(await classesFor("Agent line.")).toContain("role-agent");
+			expect(await classesFor("Operator line.")).toContain("role-you");
+			expect(await classesFor("System line.")).toContain("role-system");
+
+			const tintFor = (body: string): Promise<string> =>
+				page.$$eval(
+					"#messages .message",
+					(nodes, needle) => {
+						const hit = nodes.find((n) =>
+							(n.textContent ?? "").includes(String(needle)),
+						);
+						const author = hit?.querySelector(".author");
+						if (author == null) return "";
+						return getComputedStyle(author).color;
+					},
+					body,
+				);
+			const agentTint = await tintFor("Agent line.");
+			const youTint = await tintFor("Operator line.");
+			expect(agentTint).not.toBe("");
+			expect(youTint).not.toBe("");
+			expect(agentTint).not.toBe(youTint);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"consecutive messages from one author group under one header",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "First of a pair.",
+			});
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Second of a pair.",
+			});
+			await h.rooms.post({
+				room: "#reviews",
+				author: "@you",
+				body: "Breaks the run.",
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"transcript",
+				() => transcriptText(page),
+				(t) => t.includes("Breaks the run."),
+			);
+
+			const rows = await page.$$eval("#messages .message", (nodes) =>
+				nodes.map((n) => ({
+					grouped: n.className.includes("grouped"),
+					authors: n.querySelectorAll(".author").length,
+					body: n.querySelector(".body")?.textContent ?? "",
+				})),
+			);
+			const first = rows.find((r) => r.body.includes("First of a pair."));
+			const second = rows.find((r) => r.body.includes("Second of a pair."));
+			const breaker = rows.find((r) => r.body.includes("Breaks the run."));
+			expect(first?.grouped).toBe(false);
+			expect(first?.authors).toBe(1);
+			expect(second?.grouped).toBe(true);
+			expect(second?.authors).toBe(0);
+			expect(breaker?.grouped).toBe(false);
+			expect(breaker?.authors).toBe(1);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest("messages carry a readable timestamp", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "Timestamped.",
+		});
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await waitFor(
+			"transcript",
+			() => transcriptText(page),
+			(t) => t.includes("Timestamped."),
+		);
+
+		const stamps = await page.$$eval("#messages .message .timestamp", (nodes) =>
+			nodes.map((n) => (n.textContent ?? "").trim()),
+		);
+		expect(stamps.length).toBeGreaterThan(0);
+		expect(stamps[0]).toMatch(/\d{1,2}:\d{2}/);
+		expect(errors).toEqual([]);
+	});
+
+	browserTest("fenced code blocks render as pre, text intact", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "Patch below:\n```\nconst x = 1;\n```\nApply it.",
+		});
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await waitFor(
+			"transcript",
+			() => transcriptText(page),
+			(t) => t.includes("Apply it."),
+		);
+
+		const pre = await page.$$eval("#messages .message pre", (nodes) =>
+			nodes.map((n) => (n.textContent ?? "").trim()),
+		);
+		expect(pre).toEqual(["const x = 1;"]);
+		// The body text around the fence survives outside the pre.
+		const text = await transcriptText(page);
+		expect(text).toContain("Patch below:");
+		expect(text).toContain("Apply it.");
+		expect(errors).toEqual([]);
+	});
+});
+
+// ── First-class states ───────────────────────────────────────────────────────
+
+/**
+ * A minimal degraded server: the real client files, an /api that misbehaves
+ * one chosen way. The daemon harness cannot produce these shapes (it is
+ * healthy by construction), and the states are precisely about what the
+ * client shows when the daemon is not.
+ */
+async function degradedServer(
+	apiBehavior: (url: URL) => Response | undefined | "hang",
+) {
+	const staticRoot = join(import.meta.dir, "../src/console");
+	const web = Bun.serve({
+		port: 0,
+		fetch: async (request) => {
+			const url = new URL(request.url);
+			if (url.pathname.startsWith("/api/")) {
+				const verdict = apiBehavior(url);
+				if (verdict === "hang") return new Promise<Response>(() => {});
+				if (verdict !== undefined) return verdict;
+				return new Response(
+					JSON.stringify({
+						error: { code: "unavailable", message: "daemon offline" },
+					}),
+					{
+						status: 502,
+						headers: { "content-type": "application/json" },
+					},
+				);
+			}
+			if (url.pathname === "/favicon.ico") {
+				return new Response(null, { status: 204 });
+			}
+			const name = url.pathname === "/" ? "/index.html" : url.pathname;
+			const file = Bun.file(join(staticRoot, `.${name}`));
+			if (!(await file.exists())) {
+				return new Response("not found", { status: 404 });
+			}
+			const extension = name.slice(name.lastIndexOf("."));
+			return new Response(file, {
+				headers: {
+					"content-type": MIME[extension] ?? "application/octet-stream",
+				},
+			});
+		},
+	});
+	cleanups.push(async function cleanupDegraded() {
+		await web.stop(true);
+	});
+	return { url: `http://127.0.0.1:${web.port}/?token=${TOKEN}` };
+}
+
+const stateOnPage = (page: Page) =>
+	page
+		.$eval("#state:not([hidden])", (node) => ({
+			state: node.getAttribute("data-state") ?? "",
+			text: node.textContent ?? "",
+			action: node.querySelector(".state-action")?.textContent ?? "",
+		}))
+		.catch(() => null);
+
+describe("states", () => {
+	browserTest("a hanging API shows the connecting state", async () => {
+		const server = await degradedServer(() => "hang");
+		const { page } = await openPage();
+		await page.goto(server.url, { waitUntil: "domcontentloaded" });
+
+		const shown = await waitFor(
+			"connecting state",
+			() => stateOnPage(page),
+			(s) => s !== null && s.state === "connecting",
+		);
+		expect(shown?.text.toLowerCase()).toContain("connecting");
+	});
+
+	browserTest(
+		"a dead API shows the offline state with a retry action",
+		async () => {
+			const server = await degradedServer(() => undefined);
+			const { page } = await openPage();
+			await page.goto(server.url, { waitUntil: "domcontentloaded" });
+
+			const shown = await waitFor(
+				"offline state",
+				() => stateOnPage(page),
+				(s) => s !== null && s.state === "offline",
+			);
+			expect(shown?.text.toLowerCase()).toContain("offline");
+			expect(shown?.action.toLowerCase()).toContain("retry");
+		},
+	);
+
+	browserTest(
+		"a transcript load failure shows its state with a retry action",
+		async () => {
+			const server = await degradedServer((url) => {
+				if (url.pathname === "/api/channels") {
+					return new Response(
+						JSON.stringify({
+							channels: [{ id: "#reviews", kind: "channel" }],
+						}),
+						{ headers: { "content-type": "application/json" } },
+					);
+				}
+				if (url.pathname === "/api/agents") {
+					return new Response(JSON.stringify({ agents: [] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				return new Response(
+					JSON.stringify({
+						error: { code: "boom", message: "store exploded" },
+					}),
+					{ status: 500, headers: { "content-type": "application/json" } },
+				);
+			});
+			const { page } = await openPage();
+			await page.goto(server.url, { waitUntil: "domcontentloaded" });
+
+			const shown = await waitFor(
+				"load-failure state",
+				() => stateOnPage(page),
+				(s) => s !== null && s.state === "load-failure",
+			);
+			expect(shown?.action.toLowerCase()).toContain("retry");
+		},
+	);
+
+	browserTest(
+		"an empty channel names itself and clears on the first post",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+
+			const shown = await waitFor(
+				"empty state",
+				() => stateOnPage(page),
+				(s) => s !== null && s.state === "empty",
+			);
+			expect(shown?.text.length ?? 0).toBeGreaterThan(0);
+			expect(shown?.action.length ?? 0).toBeGreaterThan(0);
+
+			// The empty state's next action targets the composer.
+			await page.click("#state .state-action");
+			const focused = await page.evaluate(
+				() => document.activeElement?.id ?? "",
+			);
+			expect(focused).toBe("composer-input");
+
+			await h.supervisor.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "No longer empty.",
+			});
+			await waitFor(
+				"empty state cleared",
+				() => stateOnPage(page),
+				(s) => s === null,
+			);
+			expect(await transcriptText(page)).toContain("No longer empty.");
+			expect(errors).toEqual([]);
+		},
+	);
+});
+
+// ── Composer ─────────────────────────────────────────────────────────────────
+
+describe("composer", () => {
+	browserTest(
+		"multiline composer: Enter sends, Shift+Enter breaks the line",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#composer-input");
+
+			const tag = await page.$eval("#composer-input", (n) => n.tagName);
+			expect(tag).toBe("TEXTAREA");
+
+			// The keyboard behavior is discoverable, not folklore.
+			const hint = await page.$eval(
+				"#composer .composer-hint",
+				(n) => n.textContent ?? "",
+			);
+			expect(hint).toContain("Enter");
+
+			await page.type("#composer-input", "Line one.");
+			await page.keyboard.down("Shift");
+			await page.keyboard.press("Enter");
+			await page.keyboard.up("Shift");
+			await page.type("#composer-input", "Line two.");
+			await page.keyboard.press("Enter");
+
+			await waitFor(
+				"multiline message",
+				() => transcriptText(page),
+				(t) => t.includes("Line one.") && t.includes("Line two."),
+			);
+			const bodies = await renderedMessages(page);
+			const sent = bodies.find((b) => b.includes("Line one."));
+			expect(sent).toContain("Line two.");
+			// One message, not two: Shift+Enter did not send.
+			expect(bodies.filter((b) => b.includes("Line")).length).toBe(1);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest("the thread composer speaks the same dialect", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const root = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Root question.",
+		});
+		await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "Threaded answer.",
+			parentId: root.id,
+		});
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await waitFor(
+			"transcript",
+			() => transcriptText(page),
+			(t) => t.includes("Root question."),
+		);
+		await page.click(`#messages .message[data-id="${root.id}"] .thread-open`);
+		await page.waitForSelector("#thread:not([hidden])");
+
+		const tag = await page.$eval("#thread-composer-input", (n) => n.tagName);
+		expect(tag).toBe("TEXTAREA");
+		const hint = await page.$eval(
+			"#thread-composer .composer-hint",
+			(n) => n.textContent ?? "",
+		);
+		expect(hint).toContain("Enter");
+
+		// Thread rows carry the same presentation system as the channel.
+		const threadRow = await page.$eval("#thread-messages .message", (n) => ({
+			className: n.className,
+			stamps: n.querySelectorAll(".timestamp").length,
+		}));
+		expect(threadRow.className).toContain("role-agent");
+		expect(threadRow.stamps).toBe(1);
+		expect(errors).toEqual([]);
+	});
+});
+
+// ── Unread affordance ────────────────────────────────────────────────────────
+
+describe("unread", () => {
+	browserTest(
+		"activity in a background channel marks it unread until visited",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#channels .channel");
+
+			await h.supervisor.post({
+				room: "#ops",
+				author: "reviewer",
+				body: "Background chatter.",
+			});
+
+			const unread = await waitFor(
+				"unread affordance on #ops",
+				() =>
+					page.$$eval("#channels .channel", (nodes) =>
+						nodes
+							.filter((n) => n.className.includes("unread"))
+							.map((n) => (n.textContent ?? "").trim()),
+					),
+				(list) => list.length > 0,
+			);
+			expect(unread.join(" ")).toContain("#ops");
+			// The open channel never marks itself.
+			expect(unread.join(" ")).not.toContain("#reviews");
+
+			// Visiting clears it.
+			await page.$$eval("#channels .channel", (nodes) => {
+				const target = nodes.find((n) =>
+					(n.textContent ?? "").includes("#ops"),
+				);
+				if (target !== undefined)
+					(target as unknown as { click(): void }).click();
+			});
+			await waitFor(
+				"unread cleared",
+				() =>
+					page.$$eval(
+						"#channels .channel",
+						(nodes) =>
+							nodes.filter((n) => n.className.includes("unread")).length,
+					),
+				(count) => count === 0,
+			);
 			expect(errors).toEqual([]);
 		},
 	);

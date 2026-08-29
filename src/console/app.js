@@ -69,6 +69,7 @@
 
 	const channelsEl = el("channels");
 	const messagesEl = el("messages");
+	const stateEl = el("state");
 	const currentChannelEl = el("current-channel");
 	const composerEl = el("composer");
 	const composerInput = el("composer-input");
@@ -203,6 +204,71 @@
 	// ── Rendering ────────────────────────────────────────────────────────────
 
 	/**
+	 * Role class for an author: the operator, the system, or an agent. The
+	 * tint itself lives in the token layer (style.css); this only names the
+	 * role so presentation stays in CSS.
+	 * @param {string} author
+	 */
+	const roleClass = (author) => {
+		if (author === HUMAN_AUTHOR) return "role-you";
+		if (author === "system") return "role-system";
+		return "role-agent";
+	};
+
+	/**
+	 * A readable wall-clock stamp for a message. Minutes are zero-padded;
+	 * hours follow the locale's clock.
+	 * @param {number} createdAt
+	 */
+	const timestamp = (createdAt) => {
+		const when = new Date(createdAt);
+		return `${when.getHours()}:${String(when.getMinutes()).padStart(2, "0")}`;
+	};
+
+	/**
+	 * Message body with fenced code lifted into <pre>. Everything goes
+	 * through textContent — the fence parser only decides which element a
+	 * line lands in, never how it is escaped.
+	 * @param {string} body
+	 */
+	const renderBody = (body) => {
+		const container = document.createElement("div");
+		container.className = "body";
+		const lines = body.split("\n");
+		/** @type {string[]} */
+		let prose = [];
+		/** @type {string[] | null} */
+		let fence = null;
+		const flushProse = () => {
+			if (prose.length === 0) return;
+			const paragraph = document.createElement("p");
+			paragraph.textContent = prose.join("\n");
+			container.append(paragraph);
+			prose = [];
+		};
+		for (const line of lines) {
+			if (line.trim().startsWith("```")) {
+				if (fence === null) {
+					flushProse();
+					fence = [];
+				} else {
+					const pre = document.createElement("pre");
+					pre.textContent = fence.join("\n");
+					container.append(pre);
+					fence = null;
+				}
+				continue;
+			}
+			if (fence !== null) fence.push(line);
+			else prose.push(line);
+		}
+		// An unclosed fence is still the author's text, not lost input.
+		if (fence !== null) prose = [...prose, "```", ...fence];
+		flushProse();
+		return container;
+	};
+
+	/**
 	 * Group reactions into chips of (emoji, count, mine).
 	 * @param {MessageReaction[]} reactions
 	 */
@@ -220,23 +286,34 @@
 
 	/**
 	 * One message row: author, body, reaction chips, thread affordance.
+	 * A grouped row continues its predecessor's run: same author, no header.
 	 * @param {RoomMessage} message
 	 * @param {boolean} inThread
+	 * @param {boolean} grouped
 	 */
-	const renderMessage = (message, inThread) => {
+	const renderMessage = (message, inThread, grouped) => {
 		const row = document.createElement("div");
-		row.className = "message";
+		row.className = `message ${roleClass(message.author)}${grouped ? " grouped" : ""}`;
 		row.dataset.id = String(message.id);
 
-		const author = document.createElement("span");
-		author.className = "author";
-		author.textContent = message.author;
-		row.append(author);
+		if (!grouped) {
+			const meta = document.createElement("div");
+			meta.className = "meta";
 
-		const body = document.createElement("span");
-		body.className = "body";
-		body.textContent = message.body;
-		row.append(body);
+			const author = document.createElement("span");
+			author.className = "author";
+			author.textContent = message.author;
+			meta.append(author);
+
+			const stamp = document.createElement("span");
+			stamp.className = "timestamp";
+			stamp.textContent = timestamp(message.createdAt);
+			meta.append(stamp);
+
+			row.append(meta);
+		}
+
+		row.append(renderBody(message.body));
 
 		const chips = document.createElement("span");
 		chips.className = "reactions";
@@ -268,9 +345,14 @@
 	/** @param {RoomMessage[]} messages */
 	const renderTranscript = (messages) => {
 		messagesEl.replaceChildren();
+		/** @type {string | null} */
+		let previousAuthor = null;
 		for (const message of messages) {
 			if (message.parentId !== null) continue;
-			messagesEl.append(renderMessage(message, false));
+			messagesEl.append(
+				renderMessage(message, false, message.author === previousAuthor),
+			);
+			previousAuthor = message.author;
 		}
 		messagesEl.scrollTop = messagesEl.scrollHeight;
 	};
@@ -279,11 +361,26 @@
 	const renderThread = (messages) => {
 		threadMessagesEl.replaceChildren();
 		if (openThreadRoot === null) return;
+		/** @type {string | null} */
+		let previousAuthor = null;
 		for (const message of messages) {
 			if (message.threadRootId !== openThreadRoot) continue;
-			threadMessagesEl.append(renderMessage(message, true));
+			threadMessagesEl.append(
+				renderMessage(message, true, message.author === previousAuthor),
+			);
+			previousAuthor = message.author;
 		}
 	};
+
+	/**
+	 * Rooms with activity the operator has not looked at. The open room never
+	 * enters the set; visiting a room removes it.
+	 * @type {Set<string>}
+	 */
+	const unreadRooms = new Set();
+
+	/** @type {RoomInfo[]} Last channel list, so unread can repaint alone. */
+	let lastChannels = [];
 
 	/** @param {RoomInfo[]} channels */
 	const renderChannels = (channels) => {
@@ -292,8 +389,10 @@
 			const item = document.createElement("li");
 			const button = document.createElement("button");
 			button.type = "button";
-			button.className =
-				channel.id === currentRoom ? "channel active" : "channel";
+			const classes = ["channel"];
+			if (channel.id === currentRoom) classes.push("active");
+			if (unreadRooms.has(channel.id)) classes.push("unread");
+			button.className = classes.join(" ");
 			button.textContent = channel.name ?? channel.id;
 			button.addEventListener("click", () => {
 				void selectRoom(channel.id);
@@ -341,16 +440,84 @@
 		}
 	};
 
+	// ── First-class states ───────────────────────────────────────────────────
+
+	const stateTitleEl = /** @type {HTMLElement} */ (
+		stateEl.querySelector(".state-title")
+	);
+	const stateDetailEl = /** @type {HTMLElement} */ (
+		stateEl.querySelector(".state-detail")
+	);
+	const stateActionEl = /** @type {HTMLButtonElement} */ (
+		stateEl.querySelector(".state-action")
+	);
+
+	/** @type {(() => void) | null} What the state's one action does now. */
+	let stateAction = null;
+
+	/**
+	 * Show one first-class state screen. The screen lives in index.html; this
+	 * only fills it in, so the markup contract stays in one file.
+	 * @param {"connecting" | "offline" | "load-failure" | "empty"} state
+	 * @param {string} title
+	 * @param {string} detail
+	 * @param {string} actionLabel empty string means no action.
+	 * @param {(() => void) | null} action
+	 */
+	const showState = (state, title, detail, actionLabel, action) => {
+		stateEl.dataset.state = state;
+		stateTitleEl.textContent = title;
+		stateDetailEl.textContent = detail;
+		stateActionEl.textContent = actionLabel;
+		stateActionEl.hidden = actionLabel.length === 0;
+		stateAction = action;
+		stateEl.hidden = false;
+	};
+
+	const clearState = () => {
+		stateEl.hidden = true;
+		stateAction = null;
+	};
+
+	stateActionEl.addEventListener("click", () => {
+		if (stateAction !== null) stateAction();
+	});
+
 	// ── State ────────────────────────────────────────────────────────────────
 
 	/** Refetch the open room and repaint transcript + thread pane. */
 	const refresh = async () => {
 		if (currentRoom === null) return;
-		const { messages } = await api(
-			`/api/channels/${encodeURIComponent(currentRoom)}/messages`,
-		);
-		renderTranscript(/** @type {RoomMessage[]} */ (messages));
-		renderThread(/** @type {RoomMessage[]} */ (messages));
+		/** @type {any} */
+		let payload;
+		try {
+			payload = await api(
+				`/api/channels/${encodeURIComponent(currentRoom)}/messages`,
+			);
+		} catch (error) {
+			showState(
+				"load-failure",
+				"Transcript failed to load",
+				error instanceof Error ? error.message : String(error),
+				"Retry",
+				() => void refresh(),
+			);
+			return;
+		}
+		const messages = /** @type {RoomMessage[]} */ (payload.messages);
+		renderTranscript(messages);
+		renderThread(messages);
+		if (messages.length === 0) {
+			showState(
+				"empty",
+				`${currentRoom} is quiet`,
+				"Nothing has been said here yet.",
+				"Write the first message",
+				() => composerInput.focus(),
+			);
+		} else {
+			clearState();
+		}
 	};
 
 	/** Refetch the agent list, so membership renders for the open channel. */
@@ -366,12 +533,15 @@
 	/** Refetch the channel list. */
 	const refreshChannels = async () => {
 		const { channels } = await api("/api/channels");
-		renderChannels(/** @type {RoomInfo[]} */ (channels));
+		lastChannels = /** @type {RoomInfo[]} */ (channels);
+		renderChannels(lastChannels);
 	};
 
 	/** @param {string} room */
 	const selectRoom = async (room) => {
 		currentRoom = room;
+		unreadRooms.delete(room);
+		renderChannels(lastChannels);
 		openThreadRoot = null;
 		threadEl.hidden = true;
 		currentChannelEl.textContent = room;
@@ -403,9 +573,11 @@
 	/** @param {number} rootId */
 	const openThread = async (rootId) => {
 		openThreadRoot = rootId;
-		threadEl.hidden = false;
 		threadTitleEl.textContent = "Thread";
+		// Paint before unhiding: the pane's visibility is the signal that the
+		// thread is ready, so revealing an empty list first is a lie.
 		await refresh();
+		threadEl.hidden = false;
 	};
 
 	/**
@@ -507,6 +679,27 @@
 
 	// ── Events ───────────────────────────────────────────────────────────────
 
+	/**
+	 * Enter sends, Shift+Enter breaks the line — the hint under each composer
+	 * promises exactly this, so both textareas share one handler.
+	 * @param {HTMLFormElement} form
+	 * @returns {(event: KeyboardEvent) => void}
+	 */
+	const sendOnEnter = (form) => (event) => {
+		if (event.key !== "Enter" || event.shiftKey) return;
+		event.preventDefault();
+		form.requestSubmit();
+	};
+
+	composerInput.addEventListener(
+		"keydown",
+		sendOnEnter(/** @type {HTMLFormElement} */ (composerEl)),
+	);
+	threadComposerInput.addEventListener(
+		"keydown",
+		sendOnEnter(/** @type {HTMLFormElement} */ (threadComposerEl)),
+	);
+
 	composerEl.addEventListener("submit", (event) => {
 		event.preventDefault();
 		const body = composerInput.value.trim();
@@ -571,8 +764,15 @@
 		socket.addEventListener("message", (event) => {
 			/** @type {ConsoleEvent} */
 			const frame = JSON.parse(String(event.data));
-			if (frame.type === "message" && frame.message.room === currentRoom) {
-				void refresh();
+			if (frame.type === "message") {
+				if (frame.message.room === currentRoom) {
+					void refresh();
+				} else {
+					// Activity somewhere the operator is not looking: mark it
+					// until the room is visited.
+					unreadRooms.add(frame.message.room);
+					renderChannels(lastChannels);
+				}
 			} else if (frame.type === "reaction" && frame.room === currentRoom) {
 				void refresh();
 			}
@@ -595,8 +795,28 @@
 	// ── Boot ─────────────────────────────────────────────────────────────────
 
 	const boot = async () => {
-		const { channels } = await api("/api/channels");
-		renderChannels(/** @type {RoomInfo[]} */ (channels));
+		// Connecting until the first fetch resolves; offline when it cannot.
+		// Both are the whole-console states — a per-room failure is the
+		// transcript's own load-failure screen, not this one.
+		showState("connecting", "Connecting…", "Reaching the daemon.", "", null);
+		/** @type {any} */
+		let payload;
+		try {
+			payload = await api("/api/channels");
+		} catch (error) {
+			showState(
+				"offline",
+				"Daemon offline",
+				error instanceof Error ? error.message : String(error),
+				"Retry",
+				() => void boot(),
+			);
+			return;
+		}
+		clearState();
+		const channels = /** @type {RoomInfo[]} */ (payload.channels);
+		lastChannels = channels;
+		renderChannels(channels);
 		if (currentRoom === null && channels.length > 0) {
 			currentRoom = channels[0].id;
 		}

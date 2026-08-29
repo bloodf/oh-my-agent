@@ -14,14 +14,23 @@
 		<main id="main">
 			<header id="current-channel"></header>
 			<div id="messages" aria-live="polite"></div>
+			<div id="state" role="status" hidden>
+				<p class="state-title"></p>
+				<p class="state-detail"></p>
+				<button class="state-action" type="button"></button>
+			</div>
 			<form id="composer">
-				<input
+				<textarea
 					id="composer-input"
-					type="text"
+					rows="1"
 					placeholder="Message the channel"
 					autocomplete="off"
-				/>
+				></textarea>
 				<button id="composer-send" type="submit">Send</button>
+				<p class="composer-hint">
+					<kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a
+					new line
+				</p>
 			</form>
 		</main>
 		<aside id="thread" hidden>
@@ -31,13 +40,17 @@
 			</header>
 			<div id="thread-messages"></div>
 			<form id="thread-composer">
-				<input
+				<textarea
 					id="thread-composer-input"
-					type="text"
+					rows="1"
 					placeholder="Reply in thread"
 					autocomplete="off"
-				/>
+				></textarea>
 				<button id="thread-composer-send" type="submit">Reply</button>
+				<p class="composer-hint">
+					<kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a
+					new line
+				</p>
 			</form>
 		</aside>
 		<script src="/app.js"></script>
