@@ -397,10 +397,14 @@ export async function runCli(
 	// Flags are parsed only up to the first positional: a literal "--json"
 	// inside a message body is payload, not a flag. "--" ends flag parsing
 	// explicitly for the same reason.
-	const flagEnd = argv.findIndex((arg) => arg === "--" || !arg.startsWith("--"));
+	const flagEnd = argv.findIndex(
+		(arg) => arg === "--" || !arg.startsWith("--"),
+	);
 	const flagPart = flagEnd === -1 ? argv : argv.slice(0, flagEnd);
 	const positional =
-		flagEnd === -1 ? [] : argv.slice(argv[flagEnd] === "--" ? flagEnd + 1 : flagEnd);
+		flagEnd === -1
+			? []
+			: argv.slice(argv[flagEnd] === "--" ? flagEnd + 1 : flagEnd);
 	const json = flagPart.includes("--json");
 	const args = positional;
 	const agentDir =
