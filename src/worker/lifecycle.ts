@@ -61,6 +61,8 @@ export interface WorkerHandle {
 	readonly state: WorkerState;
 	/** Live child's session id; undefined once parked or stopped. */
 	readonly sessionId: string | undefined;
+	/** Live child's OS pid; undefined once parked or stopped. */
+	readonly pid: number | undefined;
 	/** True when the child runs under a probed, compiled sandbox profile. */
 	readonly sandboxed: boolean;
 	readonly layout: WorkerLayout;
@@ -316,6 +318,9 @@ export async function startWorker(
 		},
 		get sessionId() {
 			return sessionId;
+		},
+		get pid() {
+			return client?.pid;
 		},
 		layout,
 		env: layout.env,

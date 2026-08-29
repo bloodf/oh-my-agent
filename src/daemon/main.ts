@@ -252,6 +252,16 @@ export async function bootDaemon(
 		const schedules = new Map<string, ScheduleRecord>();
 		const definitions = new Map<string, PeerDefinition>();
 
+		/** Update runtime-only registry fields without disturbing persisted identity. */
+		const markAgentRuntime = (
+			name: string,
+			status: "running" | "parked" | "stopped",
+			workerPid: number | null,
+		): void => {
+			const row = db.listAgents().find((agent) => agent.name === name);
+			if (row) db.upsertAgent({ ...row, status, workerPid });
+		};
+
 		const supervisor = new Supervisor({
 			rooms,
 			scheduler,
@@ -286,6 +296,7 @@ export async function bootDaemon(
 				// worker too.
 				const record = peers.get(peerName);
 				if (record) peers.set(peerName, { ...record, worker: fresh });
+				markAgentRuntime(peerName, fresh.state, fresh.pid ?? null);
 				return fresh;
 			},
 		});
@@ -328,7 +339,7 @@ export async function bootDaemon(
 		const recordRuns = (
 			worker: SupervisedWorker,
 		): SupervisedWorker &
-			Partial<Pick<WorkerHandle, "sandboxed" | "fingerprint">> => ({
+			Partial<Pick<WorkerHandle, "sandboxed" | "fingerprint" | "pid">> => ({
 			get name() {
 				return worker.name;
 			},
@@ -340,6 +351,12 @@ export async function bootDaemon(
 			// downgrades every wire answer to "unsandboxed".
 			get sandboxed() {
 				return (worker as Partial<Pick<WorkerHandle, "sandboxed">>).sandboxed;
+			},
+			// Pass the live pid through too: the registry write and the status
+			// mapping both read it off this wrapper, and dropping it here would
+			// make every wire/registry answer say "no process" for a live worker.
+			get pid() {
+				return (worker as Partial<Pick<WorkerHandle, "pid">>).pid;
 			},
 			// Pass the definition fingerprint through too: the staleness check
 			// compares it against the store, and a wrapper that drops it disables
@@ -367,9 +384,22 @@ export async function bootDaemon(
 					throw error;
 				}
 			},
-			park: () => worker.park(),
-			resume: () => worker.resume(),
-			stop: () => worker.stop(),
+			park: async () => {
+				await worker.park();
+				markAgentRuntime(worker.name, worker.state, null);
+			},
+			resume: async () => {
+				await worker.resume();
+				markAgentRuntime(
+					worker.name,
+					worker.state,
+					(worker as Partial<Pick<WorkerHandle, "pid">>).pid ?? null,
+				);
+			},
+			stop: async () => {
+				await worker.stop();
+				markAgentRuntime(worker.name, "stopped", null);
+			},
 		});
 
 		/**
@@ -614,7 +644,7 @@ export async function bootDaemon(
 				name,
 				definitionPath: definitionPathFor(definition),
 				status: worker.state,
-				workerPid: null,
+				workerPid: worker.pid ?? null,
 				cwd: projectDir,
 				startedAt: now(),
 				parent: parent ?? null,
@@ -648,7 +678,7 @@ export async function bootDaemon(
 				} catch (error) {
 					log(`stopping ${peerName}: ${String(error)}`);
 				}
-				db.markAgentStatus(peerName, "stopped");
+				markAgentRuntime(peerName, "stopped", null);
 				if (peerName === name) continue;
 				// A cascaded child keeps its edge: the subtree is stopped, not
 				// rearranged, so a later restart rebuilds the same shape.
@@ -767,7 +797,7 @@ export async function bootDaemon(
 		// Which ancestor broke is said in the log, where the operator looks.
 		for (const orphan of db.listOrphans(definitions.keys())) {
 			orphans.set(orphan.name, parents.get(orphan.name) ?? orphan.missing);
-			db.markAgentStatus(orphan.name, "stopped");
+			markAgentRuntime(orphan.name, "stopped", null);
 			log(
 				`peer ${orphan.name} not started: its ancestor ${orphan.missing} is gone from the registry`,
 			);
@@ -1005,7 +1035,8 @@ export async function bootDaemon(
 				if (interrupted > 0) {
 					log(`closed ${interrupted} interrupted run(s) at shutdown`);
 				}
-				for (const name of peers.keys()) db.markAgentStatus(name, "stopped");
+				for (const name of peers.keys())
+					markAgentRuntime(name, "stopped", null);
 				recording = false;
 				db.close();
 

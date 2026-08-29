@@ -53,5 +53,8 @@
 		"extensions": [
 			"src/extension/index.ts"
 		]
+	},
+	"patchedDependencies": {
+		"@oh-my-pi/pi-coding-agent@18.0.7": "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"
 	}
 }

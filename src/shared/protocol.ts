@@ -63,6 +63,8 @@ export interface AgentStatus {
 	account: string;
 	model?: string;
 	sandboxed?: boolean;
+	/** Live worker's OS pid; absent when parked, stopped, or a stub. */
+	pid?: number;
 	parent?: string;
 	children?: string[];
 }

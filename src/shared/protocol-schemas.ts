@@ -117,6 +117,7 @@ function explainAgentStatus(value: unknown): string | null {
 		return "model";
 	if (value.sandboxed !== undefined && typeof value.sandboxed !== "boolean")
 		return "sandboxed";
+	if (value.pid !== undefined && !isFiniteNumber(value.pid)) return "pid";
 	if (value.parent !== undefined && typeof value.parent !== "string")
 		return "parent";
 	if (value.children !== undefined) {

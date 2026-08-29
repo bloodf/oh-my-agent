@@ -136,7 +136,7 @@ export const HUMAN_AUTHOR = "@you";
 /** A peer the daemon has registered with the supervisor. */
 export interface PeerRecord {
 	worker: SupervisedWorker &
-		Partial<Pick<WorkerHandle, "sandboxed" | "stderr">>;
+		Partial<Pick<WorkerHandle, "sandboxed" | "stderr" | "pid">>;
 	accountId: string;
 	model?: string;
 	rooms: string[];
@@ -348,6 +348,7 @@ function toAgentStatuses(
 		account: record.accountId,
 		...(record.model === undefined ? {} : { model: record.model }),
 		sandboxed: record.worker.sandboxed,
+		...(record.worker.pid === undefined ? {} : { pid: record.worker.pid }),
 		...(record.parent === undefined ? {} : { parent: record.parent }),
 		children: childrenOf(name),
 	}));

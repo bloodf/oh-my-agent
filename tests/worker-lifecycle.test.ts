@@ -233,6 +233,25 @@ describe("worker lifecycle", () => {
 		expect(handle.sessionId).toBeTruthy();
 	});
 
+	test("reports the live child pid and clears it after stop", async () => {
+		const handle = await start();
+		const pid = handle.pid;
+
+		expect(pid).toBeGreaterThan(0);
+		process.kill(pid as number, 0);
+
+		await handle.stop();
+
+		expect(handle.pid).toBeUndefined();
+		let alive = true;
+		try {
+			process.kill(pid as number, 0);
+		} catch {
+			alive = false;
+		}
+		expect(alive).toBe(false);
+	});
+
 	test("runs inside the materialized worker dir", async () => {
 		const handle = await start();
 
@@ -264,6 +283,7 @@ describe("worker lifecycle", () => {
 		expect(handle.state).toBe("parked");
 		expect(handle.fingerprint).toBe(fingerprint);
 		expect(handle.sessionId).toBeUndefined();
+		expect(handle.pid).toBeUndefined();
 	});
 
 	test("a parked worker resumes as a fresh process", async () => {
@@ -276,6 +296,7 @@ describe("worker lifecycle", () => {
 		expect(handle.state).toBe("running");
 		expect(handle.sessionId).toBeTruthy();
 		expect(handle.sessionId).not.toBe(firstSession);
+		expect(handle.pid).toBeGreaterThan(0);
 	});
 
 	test("stop is idempotent and terminal", async () => {

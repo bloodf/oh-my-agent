@@ -30,6 +30,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { DaemonDb } from "../src/daemon/db";
 import type { DaemonHandle, WorkerFactory } from "../src/daemon/main";
 import { bootDaemon } from "../src/daemon/main";
 import { type PeerRecord, startControlSocket } from "../src/daemon/socket";
@@ -73,6 +74,15 @@ async function tempAgentDir(): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), "oma-main-"));
 	cleanups.push(() => rm(dir, { recursive: true, force: true }));
 	return dir;
+}
+
+async function readAgents(agentDir: string) {
+	const db = await DaemonDb.open(join(agentDir, "oh-my-agent", "daemon.db"));
+	try {
+		return db.listAgents();
+	} finally {
+		db.close();
+	}
 }
 
 /**
@@ -354,6 +364,86 @@ describe("bootDaemon — composition and the control socket", () => {
 		expect(sandboxState(agentStatus.agents)).toEqual(expected);
 	});
 
+	test("status reports a running pid and omits it for a parked stub", async () => {
+		const dir = await tempAgentDir();
+		const rooms = await RoomStore.open(join(dir, "pid-status.db"));
+		cleanups.push(() => rooms.close());
+		const worker = (
+			name: string,
+			state: SupervisedWorker["state"],
+			pid?: number,
+		): PeerRecord["worker"] =>
+			({
+				name,
+				state,
+				...(pid === undefined ? {} : { pid }),
+				prompt: async () => {},
+				park: async () => {},
+				resume: async () => {},
+				stop: async () => {},
+			}) as PeerRecord["worker"];
+		const socket = await startControlSocket({
+			socketPath: join(dir, "pid-status.sock"),
+			context: {
+				rooms,
+				supervisor: undefined as unknown as Supervisor,
+				peers: new Map([
+					[
+						"running",
+						{
+							worker: worker("running", "running", 4242),
+							accountId: "acct-1",
+							rooms: [],
+						},
+					],
+					[
+						"parked",
+						{
+							worker: worker("parked", "parked"),
+							accountId: "acct-1",
+							rooms: [],
+						},
+					],
+				]),
+				knownRooms: new Map(),
+				schedules: new Map(),
+				startedAt: Date.now(),
+				now: Date.now,
+				ensureRoom: async () => {},
+				spawnPeer: async () => ({ name: "none", state: "stopped" }),
+				armSchedule: () => undefined,
+				bumpAccount: async () => [],
+			},
+		});
+		cleanups.push(() => socket.close());
+
+		for (const method of ["status", "agent_status"] as const) {
+			const result = await call<StatusResult | AgentStatusResult>(
+				socket.socketPath,
+				method,
+			);
+			const running = result.agents.find((agent) => agent.name === "running");
+			const parked = result.agents.find((agent) => agent.name === "parked");
+			expect(running?.pid).toBe(4242);
+			expect(parked).not.toHaveProperty("pid");
+		}
+	});
+
+	test("pid result validation is additive and type-safe", () => {
+		const agent = { name: "reviewer", state: "running", account: "acct-1" };
+		expect(
+			METHODS.agent_status.validateResult({
+				agents: [{ ...agent, pid: 4242 }],
+			}).ok,
+		).toBe(true);
+
+		const invalid = METHODS.agent_status.validateResult({
+			agents: [{ ...agent, pid: "4242" }],
+		});
+		expect(invalid.ok).toBe(false);
+		if (!invalid.ok) expect(invalid.field).toBe("agents[0].pid");
+	});
+
 	test("sandboxed result validation is additive and type-safe", () => {
 		const agent = { name: "reviewer", state: "running", account: "acct-1" };
 		expect(METHODS.agent_status.validateResult({ agents: [agent] }).ok).toBe(
@@ -616,12 +706,17 @@ describe("bootDaemon — composition and the control socket", () => {
 
 		// A factory that fingerprints each build from the definition it was
 		// handed, so the supervisor's staleness check has something to compare.
-		const builds: { prompts: string[]; stopped: boolean }[] = [];
+		const builds: { prompts: string[]; stopped: boolean; pid: number }[] = [];
 		const factory: WorkerFactory = async ({ peer }) => {
-			const record = { prompts: [] as string[], stopped: false };
+			const record = {
+				prompts: [] as string[],
+				stopped: false,
+				pid: 4100 + builds.length + 1,
+			};
 			builds.push(record);
 			return {
 				name: peer.name,
+				pid: record.pid,
 				fingerprint: fingerprintPeerDefinition(peer),
 				get state() {
 					return record.stopped ? "stopped" : "running";
@@ -644,6 +739,8 @@ describe("bootDaemon — composition and the control socket", () => {
 			workerFactory: factory,
 		});
 		cleanups.push(() => handle.close());
+		const firstPid = builds[0]?.pid;
+		expect((await readAgents(agentDir))[0]?.workerPid).toBe(firstPid);
 
 		await call<ChatSendResult>(handle.socketPath, "chat_send", {
 			room: "#reviews",
@@ -663,6 +760,9 @@ describe("bootDaemon — composition and the control socket", () => {
 		expect(builds).toHaveLength(2);
 		expect(builds[0]?.stopped).toBe(true);
 		expect(builds[1]?.prompts[0]).toContain("second message");
+		const secondPid = builds[1]?.pid;
+		expect(secondPid).not.toBe(firstPid);
+		expect((await readAgents(agentDir))[0]?.workerPid).toBe(secondPid);
 	});
 
 	test("chat_wait returns when a message lands after the call started", async () => {
@@ -1191,6 +1291,29 @@ describe("bootDaemon — shutdown", () => {
 		await handle.close();
 
 		expect(workers.get("reviewer")?.state()).toBe("stopped");
+	});
+
+	test("close clears the worker pid from the agents row", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: await tempAgentDir(),
+			workerFactory: async ({ peer }) => ({
+				name: peer.name,
+				pid: 4242,
+				state: "running",
+				prompt: async () => {},
+				park: async () => {},
+				resume: async () => {},
+				stop: async () => {},
+			}),
+		});
+
+		expect((await readAgents(agentDir))[0]?.workerPid).toBe(4242);
+		await handle.close();
+		expect((await readAgents(agentDir))[0]?.workerPid).toBeNull();
 	});
 
 	test("a parked chat_wait stops polling once the socket closes", async () => {

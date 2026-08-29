@@ -1,0 +1,30 @@
+diff --git a/dist/types/modes/rpc/rpc-client.d.ts b/dist/types/modes/rpc/rpc-client.d.ts
+index daa55c9c34baa26865e229bb9db0bb50d594e0e7..c17c9fa178c5039a9ea6bbf3e8155058016ccd3f 100644
+--- a/dist/types/modes/rpc/rpc-client.d.ts
++++ b/dist/types/modes/rpc/rpc-client.d.ts
+@@ -71,6 +71,9 @@ export declare class RpcClient {
+      * Stop the RPC agent process.
+      */
+     stop(): Promise<void>;
++
++    /** The pid of the spawned agent process, or undefined once stopped. */
++    readonly pid: number | undefined;
+     /**
+      * Stop the RPC agent process and clean up resources.
+      */
+diff --git a/src/modes/rpc/rpc-client.ts b/src/modes/rpc/rpc-client.ts
+index d4367121d9dbcd2e0f9f4efd6cfd0e0dc355b7c8..f6ecd157dcdede8991c9d8c0261c13091cc19190 100644
+--- a/src/modes/rpc/rpc-client.ts
++++ b/src/modes/rpc/rpc-client.ts
+@@ -246,6 +246,11 @@ function isPageFallbackError(error: unknown): boolean {
+ 
+ export class RpcClient {
+ 	#process: ptree.ChildProcess | null = null;
++
++	/** The pid of the spawned agent process, or undefined once stopped. */
++	get pid(): number | undefined {
++		return this.#process?.pid;
++	}
+ 	#reaping: Promise<void> | null = null;
+ 	#eventListeners: RpcEventListener[] = [];
+ 	#sessionEventListeners: RpcSessionEventListener[] = [];
