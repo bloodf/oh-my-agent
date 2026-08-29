@@ -110,6 +110,19 @@ export interface BootDaemonOptions {
 	now?: () => number;
 	logger?: (message: string) => void;
 	/**
+	 * Upstream broker transport, injected so a test can serve fixture snapshot
+	 * and usage payloads. Shared with the credential gateway, which already
+	 * exposes this seam. Defaults to the global `fetch`.
+	 */
+	fetchUpstream?: (input: string, init?: RequestInit) => Promise<Response>;
+	/** How often the usage loop polls, in ms. Defaults to 60s. */
+	usagePollMs?: number;
+	/**
+	 * Handed the usage poller once armed, so a test can step it deterministically
+	 * instead of waiting on the interval. Not used in production.
+	 */
+	onUsagePoller?: (poller: { pollOnce(): Promise<void> }) => void;
+	/**
 	 * Called once with the console URL, or with `undefined` when no console was
 	 * mounted. The detached CLI relays this to the launcher's terminal, which
 	 * is the only place an operator can actually read it.
@@ -270,9 +283,11 @@ export async function bootDaemon(
 		const hosting = await resolveBrokerHosting({ agentDir, env });
 		started.push(() => hosting.close());
 
+		const fetchUpstream = options.fetchUpstream ?? fetch;
 		const gateway = await startCredentialGateway({
 			upstreamUrl: hosting.url,
 			adminToken: hosting.adminToken,
+			fetchUpstream,
 		});
 		started.push(() => gateway.close());
 
@@ -346,7 +361,9 @@ export async function bootDaemon(
 							url: gateway.url,
 							token: gateway.issueWorkerToken({
 								workerId: peerName,
-								credentialIds: [],
+								credentialIds: credentialIdsFor(
+									peers.get(peerName)?.accountId ?? accountIdFor(definition),
+								),
 							}).token,
 						},
 						sourceSpawnAgents: await spawnSourcesFor(definition),
@@ -388,6 +405,44 @@ export async function bootDaemon(
 			definitions.set(definition.name, definition);
 		}
 		const discoveredAgentNames = [...definitions.keys()];
+
+		/**
+		 * The account→credential binding, read once from the broker snapshot.
+		 *
+		 * An account id is the model's provider key (`accountIdFor`), and the
+		 * broker enumerates credentials no finer than provider, so a worker on an
+		 * account is bound to every credential of that provider — the level that
+		 * exists. Read at boot: credentials added mid-run are picked up on the next
+		 * restart. A snapshot that cannot be read leaves the map empty rather than
+		 * failing the boot, so a broker blip does not strand the daemon; the cost
+		 * is a worker that sees nothing until the next boot reads a good snapshot.
+		 *
+		 * ponytail: provider-granularity binding; upgrade path is a broker that
+		 * enumerates per-account credential ids, at which point this filters on the
+		 * snapshot's `credential.accountId` instead of `provider`.
+		 */
+		const providerCredentials = new Map<string, number[]>();
+		try {
+			const res = await fetchUpstream(`${hosting.url}/v1/snapshot`, {
+				headers: { Authorization: `Bearer ${hosting.adminToken}` },
+			});
+			if (res.ok) {
+				const body = (await res.json()) as {
+					credentials?: { id: number; provider: string }[];
+				};
+				for (const entry of body.credentials ?? []) {
+					const ids = providerCredentials.get(entry.provider) ?? [];
+					ids.push(entry.id);
+					providerCredentials.set(entry.provider, ids);
+				}
+			} else {
+				log(`usage binding: snapshot read failed: ${res.status}`);
+			}
+		} catch (error) {
+			log(`usage binding: snapshot read failed: ${String(error)}`);
+		}
+		const credentialIdsFor = (accountId: string): number[] =>
+			providerCredentials.get(accountId) ?? [];
 
 		/**
 		 * Wrap a worker so every delivered turn leaves exactly one run row.
@@ -643,12 +698,9 @@ export async function bootDaemon(
 					discoveredAgentNames,
 					inferenceGateway: {
 						url: gateway.url,
-						// Bound to no credential ids yet: the account-to-credential
-						// mapping is T-506's, and an unbound token sees nothing rather
-						// than everything.
 						token: gateway.issueWorkerToken({
 							workerId: name,
-							credentialIds: [],
+							credentialIds: credentialIdsFor(accountId),
 						}).token,
 					},
 					sourceSpawnAgents: await spawnSourcesFor(definition),
@@ -980,8 +1032,13 @@ export async function bootDaemon(
 
 			// The supervisor's bump raises the ceiling, resets the meter latch,
 			// posts the resume, and delivers the backlog; the registry's raw
-			// bump alone would leave the old ceiling in the room message.
+			// bump alone would leave the old ceiling in the room message. Keep the
+			// daemon's copy in sync too: the usage poller divides cumulative spend
+			// by this ceiling, so a stale denominator would re-park the account on
+			// its first post-bump poll.
 			supervisor.bumpBudget(accountId, budgetUsd);
+			const config = accountConfigs.get(accountId);
+			if (config) accountConfigs.set(accountId, { ...config, budgetUsd });
 			await supervisor.settled();
 
 			return parkedBefore.filter(
@@ -1119,6 +1176,88 @@ export async function bootDaemon(
 		// for this and needs to stop waiting either way.
 		options.announce?.(consoleUrl);
 
+		/** One scoped gateway bearer per metered account, minted on first poll. */
+		const usageTokens = new Map<string, string>();
+		const usageTokenFor = (accountId: string): string => {
+			const existing = usageTokens.get(accountId);
+			if (existing) return existing;
+			const token = gateway.issueWorkerToken({
+				workerId: `usage-meter:${accountId}`,
+				credentialIds: credentialIdsFor(accountId),
+			}).token;
+			usageTokens.set(accountId, token);
+			return token;
+		};
+
+		const pollOnce = async (): Promise<void> => {
+			for (const [accountId, config] of accountConfigs) {
+				if (config.mode !== "metered" || config.budgetUsd === undefined)
+					continue;
+				const hasRunningPeer = [...peers.values()].some(
+					(record) =>
+						record.accountId === accountId && record.worker.state === "running",
+				);
+				if (!hasRunningPeer) continue;
+
+				try {
+					const res = await fetch(
+						`${gateway.url}/v1/usage?provider=${encodeURIComponent(accountId)}`,
+						{
+							headers: {
+								Authorization: `Bearer ${usageTokenFor(accountId)}`,
+							},
+						},
+					);
+					if (!res.ok) throw new Error(`gateway usage failed: ${res.status}`);
+					const body = (await res.json()) as {
+						reports?: {
+							limits?: { amount?: { unit?: string; used?: number } }[];
+						}[];
+					};
+					// ponytail: provider reports can expose overlapping spend windows;
+					// take the largest USD window to avoid double-counting. Upgrade when
+					// account budgets can target a named provider window.
+					let dollarsBurned = 0;
+					for (const report of body.reports ?? []) {
+						for (const limit of report.limits ?? []) {
+							const used = limit.amount?.used;
+							if (
+								limit.amount?.unit === "usd" &&
+								typeof used === "number" &&
+								Number.isFinite(used)
+							) {
+								dollarsBurned = Math.max(dollarsBurned, used);
+							}
+						}
+					}
+					supervisor.registry.updateMeter(
+						accountId,
+						Math.min(1, Math.max(0, dollarsBurned / config.budgetUsd)),
+					);
+					await supervisor.settled();
+				} catch (error) {
+					log(`usage ${accountId}: ${String(error)}`);
+				}
+			}
+		};
+		// Single-flight: a slow poll must not overlap the next tick, and shutdown
+		// has to await whatever is in flight before tearing down the gateway.
+		let usageInFlight: Promise<void> | undefined;
+		const tickUsage = (): void => {
+			if (usageInFlight) return;
+			usageInFlight = pollOnce().finally(() => {
+				usageInFlight = undefined;
+			});
+		};
+		const usagePollMs = options.usagePollMs ?? 60_000;
+		const usagePollTimer = setInterval(tickUsage, usagePollMs);
+		const stopUsageLoop = async (): Promise<void> => {
+			clearInterval(usagePollTimer);
+			await usageInFlight;
+		};
+		started.push(stopUsageLoop);
+		options.onUsagePoller?.({ pollOnce });
+
 		let closed = false;
 		return {
 			socketPath,
@@ -1127,6 +1266,12 @@ export async function bootDaemon(
 			close: async () => {
 				if (closed) return;
 				closed = true;
+
+				// The usage loop first: it fetches through the gateway and posts
+				// through the supervisor, so a poll in flight after either closes is a
+				// call against a torn-down dependency. Await the in-flight tick, not
+				// just the timer, before anything below tears those down.
+				await stopUsageLoop();
 
 				// Reverse order: the console and the socket first, so no new request
 				// arrives; then the workers, then the machinery they depend on, and
