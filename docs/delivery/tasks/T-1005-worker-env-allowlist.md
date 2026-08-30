@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-10](../epics/EP-10-production-wiring.md) | [SP-11](../sprints/SP-11-production-wiring.md) | Planned | [asset-map](../asset-map.md) |
+| [EP-10](../epics/EP-10-production-wiring.md) | [SP-11](../sprints/SP-11-production-wiring.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -38,9 +38,16 @@ A worker's process env contains only what its layout declares — provider keys 
 
 ## Acceptance
 
-- [ ] A host exporting provider keys produces a worker env without them.
-- [ ] The declared passthroughs keep the child functional (the real-child suites stay green).
-- [ ] The sandbox launch path is covered by the same assertions.
+- [x] A host exporting provider keys produces a worker env without them.
+- [x] The declared passthroughs keep the child functional (the real-child suites stay green).
+- [x] The sandbox launch path is covered by the same assertions.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Allowlisted worker env with per-var justification | [`src/shared/env-scrub.ts`](../../../src/shared/env-scrub.ts) |
+| Poisoned-host proofs on both launch paths, revert-verified | [`tests/worker-lifecycle.test.ts`](../../../tests/worker-lifecycle.test.ts) |
 
 ## Out of scope
 

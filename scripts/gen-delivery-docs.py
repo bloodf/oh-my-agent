@@ -2894,6 +2894,7 @@ TASKS += [
             "src/extension/widget.ts",
             "src/shared/protocol.ts",
             "tests/socket-identity.test.ts",
+            "tests/fixtures/control-client.ts",
         ],
         assets=[
             ("src/daemon/socket.ts", "Edited", "Per-connection bearer: workers get their scoped token, the TUI/console the operator token."),
@@ -2902,6 +2903,7 @@ TASKS += [
             ("src/extension/widget.ts", "Edited", "Reads the operator token from the state file."),
             ("src/shared/protocol.ts", "Edited", "The auth failure shape."),
             ("tests/socket-identity.test.ts", "New", "Unauthenticated calls refused; a worker's kill of a peer it does not own is refused."),
+            ("tests/fixtures/control-client.ts", "New", "Shared token-reading control client every socket-calling harness uses (ADR-008)."),
         ],
         steps=[
             "Pick this up WHEN: the console or socket binds beyond loopback, or parentage needs to be authoritative (ADR-011's stated precondition).",

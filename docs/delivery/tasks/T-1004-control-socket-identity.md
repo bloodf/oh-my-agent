@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-10](../epics/EP-10-production-wiring.md) | [SP-11](../sprints/SP-11-production-wiring.md) | Planned | [asset-map](../asset-map.md) |
+| [EP-10](../epics/EP-10-production-wiring.md) | [SP-11](../sprints/SP-11-production-wiring.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -22,6 +22,7 @@ When the control socket ever needs to distinguish callers, each client presents 
 - `src/extension/widget.ts`
 - `src/shared/protocol.ts`
 - `tests/socket-identity.test.ts`
+- `tests/fixtures/control-client.ts`
 
 ## Modules and assets in play
 
@@ -32,7 +33,8 @@ When the control socket ever needs to distinguish callers, each client presents 
 | [`src/worker/toolbelt.ts`](../../../src/worker/toolbelt.ts) | Edited | Presents the worker's token from its env. |
 | [`src/extension/widget.ts`](../../../src/extension/widget.ts) | Edited | Reads the operator token from the state file. |
 | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Edited | The auth failure shape. |
-| `tests/socket-identity.test.ts` (to be created) | New | Unauthenticated calls refused; a worker's kill of a peer it does not own is refused. |
+| [`tests/socket-identity.test.ts`](../../../tests/socket-identity.test.ts) | New | Unauthenticated calls refused; a worker's kill of a peer it does not own is refused. |
+| [`tests/fixtures/control-client.ts`](../../../tests/fixtures/control-client.ts) | New | Shared token-reading control client every socket-calling harness uses (ADR-008). |
 
 ## Steps
 
@@ -43,9 +45,16 @@ When the control socket ever needs to distinguish callers, each client presents 
 
 ## Acceptance
 
-- [ ] An unauthenticated socket call is refused with the declared error shape.
-- [ ] A worker token cannot kill or inject into a peer it does not own.
-- [ ] The operator token path keeps today's TUI/console flows working unchanged.
+- [x] An unauthenticated socket call is refused with the declared error shape.
+- [x] A worker token cannot kill or inject into a peer it does not own.
+- [x] The operator token path keeps today's TUI/console flows working unchanged.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Bearer identity on the socket with per-worker revocation | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) |
+| Identity suite plus every harness presenting its token | [`tests/socket-identity.test.ts`](../../../tests/socket-identity.test.ts) |
 
 ## Out of scope
 

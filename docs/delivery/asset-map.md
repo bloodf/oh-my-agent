@@ -68,6 +68,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/daemon-persistence.test.ts` | yes | [T-508](tasks/T-508-daemon-persistence.md) | — |
 | `tests/end-to-end.test.ts` | yes | [T-405](tasks/T-405-supervisor.md) | — |
 | `tests/extension.test.ts` | yes | [T-504](tasks/T-504-tui-surface.md), [T-511](tasks/T-511-operator-steering.md), [T-901](tasks/T-901-tui-tree.md), [T-902](tasks/T-902-tui-manager.md), [T-903](tasks/T-903-tui-editing.md) | — |
+| `tests/fixtures/control-client.ts` | yes | [T-1004](tasks/T-1004-control-socket-identity.md) | — |
 | `tests/fixtures/fake-broker.ts` | yes | [T-002](tasks/T-002-test-harness.md) | — |
 | `tests/fixtures/hermetic-env.ts` | yes | [T-007](tasks/T-007-hermetic-child-environments.md), [T-205](tasks/T-205-worker-env-scrub.md) | — |
 | `tests/fixtures/temp-agent-dir.ts` | yes | [T-002](tasks/T-002-test-harness.md) | [T-007](tasks/T-007-hermetic-child-environments.md) |
@@ -83,7 +84,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/scheduler.test.ts` | yes | [T-403](tasks/T-403-scheduler.md) | — |
 | `tests/seatbelt-wiring.test.ts` | yes | [T-204](tasks/T-204-shared-policy-builder.md) | — |
 | `tests/skills.test.ts` | yes | [T-804](tasks/T-804-authoring-skills.md) | — |
-| `tests/socket-identity.test.ts` | not yet | [T-1004](tasks/T-1004-control-socket-identity.md) | — |
+| `tests/socket-identity.test.ts` | yes | [T-1004](tasks/T-1004-control-socket-identity.md) | — |
 | `tests/supervisor.test.ts` | yes | [T-405](tasks/T-405-supervisor.md), [T-505](tasks/T-505-definition-staleness.md), [T-506](tasks/T-506-metered-budget-wiring.md), [T-509](tasks/T-509-wake-filters.md) | — |
 | `tests/toolbelt.test.ts` | yes | [T-503](tasks/T-503-agent-toolbelt.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md), [T-604](tasks/T-604-reaction-toolbelt.md), [T-803](tasks/T-803-toolbelt-authoring.md) | — |
 | `tests/usage-meter.test.ts` | yes | [T-1002](tasks/T-1002-usage-feeds-the-meter.md) | — |
