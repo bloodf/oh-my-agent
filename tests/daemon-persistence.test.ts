@@ -31,7 +31,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { DaemonDb } from "../src/daemon/db";
 import type { DaemonHandle, WorkerFactory } from "../src/daemon/main";
@@ -41,6 +41,7 @@ import type {
 	SchedulesArmResult,
 	SchedulesListResult,
 } from "../src/shared/protocol";
+import { controlCall, operatorToken } from "./fixtures/control-client";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -217,19 +218,17 @@ async function boot(
 	return { ...stub, handle, agentDir, logs };
 }
 
-/** One JSON-RPC round trip over the daemon's unix socket. */
+/** One authenticated JSON-RPC round trip over the daemon's unix socket. */
 async function call<T>(
 	socketPath: string,
 	method: string,
-	params?: unknown,
+	params: unknown = {},
 ): Promise<T> {
-	const res = await fetch("http://localhost/rpc", {
-		unix: socketPath,
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-	});
-	const frame = (await res.json()) as { result?: T; error?: unknown };
+	const token = await operatorToken(dirname(socketPath));
+	const frame = (await controlCall(socketPath, method, params, token, 1)) as {
+		result?: T;
+		error?: unknown;
+	};
 	if (frame.error) {
 		throw new Error(`${method} failed: ${JSON.stringify(frame.error)}`);
 	}

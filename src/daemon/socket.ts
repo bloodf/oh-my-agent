@@ -4,8 +4,8 @@
  * reach the daemon through, so none of them touches daemon state or the
  * database directly.
  *
- * Public API: `startControlSocket(options): Promise<ControlSocket>`, the
- * `DaemonContext` a composed daemon supplies, and `InvalidParamsError`.
+ * Public API: `startControlSocket(options): Promise<ControlSocket>`, identity
+ * types, the `DaemonContext`, and `InvalidParamsError`.
  *
  * Upstream deps: `../shared/protocol` (frames, error builders, version),
  * `../shared/protocol-schemas` (`METHODS`), `../rooms/store`,
@@ -14,11 +14,10 @@
  * Downstream consumers: `./main`, which owns composition and lifetime; every
  * operator client speaks to this socket rather than to those objects.
  *
- * Failure modes: protocol problems are data, never exceptions — an unknown
- * method answers `methodNotFound`, malformed params answer `invalidParams` with
- * the offending field, and an unparseable body answers a parse error. All three
- * carry `protocolVersion`. A handler that throws answers an internal error
- * rather than killing the server.
+ * Failure modes: protocol problems are data, never exceptions. Missing or
+ * unknown bearers answer `unauthorized`; authenticated callers outside their
+ * method scope answer `forbidden`; malformed calls retain their declared
+ * protocol errors. Handler throws answer an internal error.
  *
  * Performance: one dispatch per request. `chat_wait` parks on a polling loop;
  * reaction state checks scan public message listings across known rooms.
@@ -78,9 +77,11 @@ import type {
 } from "../shared/protocol";
 import {
 	ERROR_CODE,
+	forbidden,
 	invalidParams,
 	methodNotFound,
 	PROTOCOL_VERSION,
+	unauthorized,
 } from "../shared/protocol";
 import { METHODS } from "../shared/protocol-schemas";
 import type { WorkerHandle } from "../worker/lifecycle";
@@ -245,9 +246,14 @@ export interface ControlSocket {
 	close(): Promise<void>;
 }
 
+export type ControlIdentity =
+	| { kind: "operator" }
+	| { kind: "worker"; peerName: string };
+
 export interface StartControlSocketOptions {
 	socketPath: string;
 	context: DaemonContext;
+	identities?: ReadonlyMap<string, ControlIdentity>;
 }
 
 /**
@@ -381,7 +387,7 @@ function failure(id: JsonRpcId, code: number, message: string): JsonRpcFailure {
 export async function startControlSocket(
 	options: StartControlSocketOptions,
 ): Promise<ControlSocket> {
-	const { socketPath, context } = options;
+	const { socketPath, context, identities = new Map() } = options;
 
 	let closing = false;
 
@@ -842,7 +848,59 @@ export async function startControlSocket(
 		},
 	};
 
-	const dispatch = async (body: string): Promise<Response> => {
+	const workerMethods: Partial<Record<MethodName, true>> = {
+		chat_send: true,
+		chat_read: true,
+		chat_wait: true,
+		chat_react: true,
+		chat_unreact: true,
+		agent_status: true,
+		agent_spawn: true,
+		task_handoff: true,
+		logs_tail: true,
+	};
+
+	const authorize = (
+		id: JsonRpcId,
+		identity: ControlIdentity,
+		method: MethodName,
+		params: unknown,
+	): JsonRpcFailure | undefined => {
+		if (identity.kind === "operator") return undefined;
+		if (workerMethods[method] !== true) {
+			return forbidden(id, `Workers may not call ${method}`);
+		}
+		if (
+			method === "agent_spawn" &&
+			(typeof params !== "object" ||
+				params === null ||
+				!("parent" in params) ||
+				params.parent !== identity.peerName)
+		) {
+			return forbidden(
+				id,
+				`Worker ${identity.peerName} may only spawn with itself as parent`,
+			);
+		}
+		if (
+			method === "logs_tail" &&
+			typeof params === "object" &&
+			params !== null &&
+			"name" in params &&
+			params.name !== identity.peerName
+		) {
+			return forbidden(
+				id,
+				`Worker ${identity.peerName} may only read its own logs`,
+			);
+		}
+		return undefined;
+	};
+
+	const dispatch = async (
+		body: string,
+		identity: ControlIdentity,
+	): Promise<Response> => {
 		let frame: unknown;
 		try {
 			frame = JSON.parse(body);
@@ -888,6 +946,9 @@ export async function startControlSocket(
 				? { name: params.name, changes: validated.value }
 				: validated.value;
 
+		const denied = authorize(id, identity, name, value);
+		if (denied) return Response.json(denied);
+
 		// One cast, at the validated boundary: `METHODS[name]` has just proven the
 		// payload matches this method's params, but the registry's return type is
 		// method-agnostic, so the compiler cannot pair them up on its own.
@@ -925,7 +986,15 @@ export async function startControlSocket(
 			if (request.method !== "POST") {
 				return new Response("Method Not Allowed", { status: 405 });
 			}
-			return await dispatch(await request.text());
+			const authorization = request.headers.get("Authorization");
+			const token = authorization?.startsWith("Bearer ")
+				? authorization.slice("Bearer ".length)
+				: undefined;
+			const identity = token === undefined ? undefined : identities.get(token);
+			if (identity === undefined) {
+				return Response.json(unauthorized(0));
+			}
+			return await dispatch(await request.text(), identity);
 		},
 		// Cast: the unix variant's type pins `idleTimeout` to `undefined`, so the
 		// supported runtime option is unexpressible without going through unknown.

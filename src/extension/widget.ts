@@ -22,6 +22,9 @@
  * single `chat_wait` with a zero timeout over every known room rather than
  * one read per room.
  */
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+
 import type {
 	ChatWaitResult,
 	JsonRpcFailure,
@@ -60,10 +63,16 @@ export function createDaemonClient(socketPath: string): DaemonClient {
 			let response: Response;
 			try {
 				nextId += 1;
+				const token = (
+					await readFile(join(dirname(socketPath), "console-token"), "utf8")
+				).trim();
 				response = await fetch("http://localhost/rpc", {
 					unix: socketPath,
 					method: "POST",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Authorization: `Bearer ${token}`,
+					},
 					body: JSON.stringify({
 						jsonrpc: "2.0",
 						id: nextId,

@@ -18,7 +18,7 @@
  * @Environment bun
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -65,6 +65,10 @@ import {
 } from "../src/extension/widget";
 import { RoomStore } from "../src/rooms/store";
 import type { ScheduleInfo } from "../src/shared/protocol";
+import {
+	operatorIdentities,
+	TEST_OPERATOR_TOKEN,
+} from "./fixtures/control-client";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -356,8 +360,15 @@ async function startDaemon(
 	};
 
 	const socketPath = join(dir, "daemon.sock");
-	const socket = await startControlSocket({ socketPath, context });
+	const socket = await startControlSocket({
+		socketPath,
+		context,
+		identities: operatorIdentities(),
+	});
 	cleanups.push(() => socket.close());
+	// `createDaemonClient` reads the operator bearer from a `console-token`
+	// file next to the socket, the same layout `bootDaemon` mints at boot.
+	await writeFile(join(dir, "console-token"), TEST_OPERATOR_TOKEN, "utf8");
 	return {
 		socket,
 		client: createDaemonClient(socketPath),
@@ -1445,6 +1456,10 @@ describe("daemon client validation", () => {
 		cleanups.push(async () => {
 			await server.stop(true);
 		});
+		// createDaemonClient reads the operator bearer from a console-token file
+		// next to the socket; the stub server above ignores auth entirely, so any
+		// value satisfies it.
+		await writeFile(join(dir, "console-token"), TEST_OPERATOR_TOKEN, "utf8");
 
 		const client = createDaemonClient(socketPath);
 		await expect(client.call("status", {})).rejects.toThrow(/agents/);

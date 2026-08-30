@@ -28,7 +28,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { DaemonDb } from "../src/daemon/db";
 import type { DaemonHandle, WorkerFactory } from "../src/daemon/main";
@@ -60,6 +60,12 @@ import type {
 } from "../src/shared/protocol";
 import { ERROR_CODE, PROTOCOL_VERSION } from "../src/shared/protocol";
 import { METHODS } from "../src/shared/protocol-schemas";
+import {
+	controlCall,
+	operatorIdentities,
+	operatorToken,
+	TEST_OPERATOR_TOKEN,
+} from "./fixtures/control-client";
 import { hermeticChildEnv } from "./fixtures/hermetic-env";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -194,20 +200,20 @@ async function boot(
 	return { handle, agentDir, workers: stub.workers };
 }
 
-/** One JSON-RPC round trip over the daemon's unix socket. */
+/** One authenticated JSON-RPC round trip over the daemon's unix socket. */
 async function rpc(
 	socketPath: string,
 	method: string,
-	params?: unknown,
+	params: unknown = {},
 	id: number | string = 1,
 ): Promise<JsonRpcSuccess | JsonRpcFailure> {
-	const res = await fetch("http://localhost/rpc", {
-		unix: socketPath,
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-	});
-	return (await res.json()) as JsonRpcSuccess | JsonRpcFailure;
+	const stateDir = dirname(socketPath);
+	const token = stateDir.endsWith("oh-my-agent")
+		? await operatorToken(stateDir)
+		: TEST_OPERATOR_TOKEN;
+	return (await controlCall(socketPath, method, params, token, id)) as
+		| JsonRpcSuccess
+		| JsonRpcFailure;
 }
 
 /**
@@ -343,6 +349,7 @@ describe("bootDaemon — composition and the control socket", () => {
 				armSchedule: () => undefined,
 				bumpAccount: async () => [],
 			},
+			identities: operatorIdentities(),
 		});
 		cleanups.push(() => socket.close());
 		const expected = [
@@ -414,6 +421,7 @@ describe("bootDaemon — composition and the control socket", () => {
 				armSchedule: () => undefined,
 				bumpAccount: async () => [],
 			},
+			identities: operatorIdentities(),
 		});
 		cleanups.push(() => socket.close());
 
@@ -945,6 +953,7 @@ describe("bootDaemon — composition and the control socket", () => {
 				armSchedule: () => undefined,
 				bumpAccount: async () => [],
 			},
+			identities: operatorIdentities(),
 		});
 		cleanups.push(() => socket.close());
 
@@ -1006,6 +1015,7 @@ describe("bootDaemon — composition and the control socket", () => {
 				armSchedule: () => undefined,
 				bumpAccount: async () => [],
 			},
+			identities: operatorIdentities(),
 		});
 		cleanups.push(() => socket.close());
 
@@ -1112,9 +1122,11 @@ describe("bootDaemon — protocol errors", () => {
 
 	test("omitted params validate as an empty object for no-param methods", async () => {
 		const { handle } = await boot();
+		const token = await operatorToken(dirname(handle.socketPath));
 		const res = await fetch("http://localhost/rpc", {
 			unix: handle.socketPath,
 			method: "POST",
+			headers: { Authorization: `Bearer ${token}` },
 			body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "status" }),
 		});
 		const frame = (await res.json()) as JsonRpcSuccess | JsonRpcFailure;
@@ -1123,9 +1135,11 @@ describe("bootDaemon — protocol errors", () => {
 
 	test("an unparseable frame answers a parse error", async () => {
 		const { handle } = await boot();
+		const token = await operatorToken(dirname(handle.socketPath));
 		const res = await fetch("http://localhost/rpc", {
 			unix: handle.socketPath,
 			method: "POST",
+			headers: { Authorization: `Bearer ${token}` },
 			body: "{not json",
 		});
 		const failure = expectFailure(
@@ -1363,6 +1377,7 @@ describe("bootDaemon — shutdown", () => {
 				armSchedule: () => undefined,
 				bumpAccount: async () => [],
 			},
+			identities: operatorIdentities(),
 		});
 
 		const parked = rpc(socket.socketPath, "chat_wait", {

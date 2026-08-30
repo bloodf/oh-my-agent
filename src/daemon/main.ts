@@ -64,7 +64,12 @@ import { materializeWorker } from "./materializer";
 import type { PeerDefinitionFields } from "./peer-store";
 import { createPeerStore, resolvePeerStoreRoots } from "./peer-store";
 import { nextCronTime, Scheduler } from "./scheduler";
-import type { DaemonContext, PeerRecord, ScheduleRecord } from "./socket";
+import type {
+	ControlIdentity,
+	DaemonContext,
+	PeerRecord,
+	ScheduleRecord,
+} from "./socket";
 import { HUMAN_AUTHOR, InvalidParamsError, startControlSocket } from "./socket";
 import type { SupervisedWorker } from "./supervisor";
 import { Supervisor } from "./supervisor";
@@ -89,6 +94,8 @@ export interface WorkerFactoryOptions {
 	sourceSpawnAgents: Record<string, string>;
 	/** Absolute path of the daemon control socket, exported to the worker env. */
 	socketPath: string;
+	/** Bearer credential for this worker's control-socket identity. */
+	controlToken: string;
 }
 
 /**
@@ -253,6 +260,7 @@ const defaultWorkerFactory: WorkerFactory = async (options) => {
 	// Point the toolbelt at the daemon explicitly; the path heuristic in
 	// src/worker/toolbelt.ts remains the fallback for non-standard layouts.
 	layout.env.OH_MY_AGENT_SOCKET = options.socketPath;
+	layout.env.OH_MY_AGENT_CONTROL_TOKEN = options.controlToken;
 	return await startWorker({ peer: options.peer, layout, cwd: options.cwd });
 };
 
@@ -328,6 +336,25 @@ export async function bootDaemon(
 		const knownRooms = new Map<string, RoomInfo>();
 		const schedules = new Map<string, ScheduleRecord>();
 		const definitions = new Map<string, PeerDefinition>();
+		const operatorToken = await loadConsoleToken(stateDir);
+		const identities = new Map<string, ControlIdentity>([
+			[operatorToken, { kind: "operator" }],
+		]);
+		const workerTokens = new Map<string, string>();
+		const mintControlToken = (): string =>
+			randomBytes(32).toString("base64url");
+		const activateControlToken = (peerName: string, token: string): void => {
+			const previous = workerTokens.get(peerName);
+			workerTokens.set(peerName, token);
+			identities.set(token, { kind: "worker", peerName });
+			if (previous !== undefined) identities.delete(previous);
+		};
+		const revokeControlToken = (peerName: string): void => {
+			const token = workerTokens.get(peerName);
+			if (token === undefined) return;
+			workerTokens.delete(peerName);
+			identities.delete(token);
+		};
 
 		/** Update runtime-only registry fields without disturbing persisted identity. */
 		const markAgentRuntime = (
@@ -351,6 +378,7 @@ export async function bootDaemon(
 				log(
 					`rebuilding ${peerName}: definition changed (was ${previousFingerprint.slice(0, 12)}…)`,
 				);
+				const controlToken = mintControlToken();
 				const fresh = recordRuns(
 					await workerFactory({
 						peer: definition,
@@ -368,8 +396,10 @@ export async function bootDaemon(
 						},
 						sourceSpawnAgents: await spawnSourcesFor(definition),
 						socketPath,
+						controlToken,
 					}),
 				);
+				activateControlToken(peerName, controlToken);
 				// The supervisor swaps its own Peer record on return; the daemon's
 				// parallel map backs status/stop, so it must point at the live
 				// worker too.
@@ -690,6 +720,7 @@ export async function bootDaemon(
 				rooms: peerRooms,
 			};
 
+			const controlToken = mintControlToken();
 			const worker = recordRuns(
 				await workerFactory({
 					peer: materialized,
@@ -705,8 +736,10 @@ export async function bootDaemon(
 					},
 					sourceSpawnAgents: await spawnSourcesFor(definition),
 					socketPath,
+					controlToken,
 				}),
 			);
+			activateControlToken(name, controlToken);
 
 			for (const room of peerRooms) await ensureRoom(room);
 
@@ -792,6 +825,7 @@ export async function bootDaemon(
 				} catch (error) {
 					log(`stopping ${peerName}: ${String(error)}`);
 				}
+				revokeControlToken(peerName);
 				markAgentRuntime(peerName, "stopped", null);
 				if (peerName === name) continue;
 				// A cascaded child keeps its edge: the subtree is stopped, not
@@ -1121,7 +1155,11 @@ export async function bootDaemon(
 			bumpAccount,
 		};
 
-		const socket = await startControlSocket({ socketPath, context });
+		const socket = await startControlSocket({
+			socketPath,
+			context,
+			identities,
+		});
 		started.push(() => socket.close());
 
 		/**
@@ -1135,7 +1173,7 @@ export async function bootDaemon(
 		let consoleApi: ConsoleApi | undefined;
 		let consoleUrl: string | undefined;
 		if (env.OMA_CONSOLE !== "0") {
-			const token = await loadConsoleToken(stateDir);
+			const token = operatorToken;
 			// A typo'd port must not quietly become a random one: set means valid,
 			// and anything else refuses the boot (the materializer's standard).
 			let consolePort = 0;

@@ -19,10 +19,15 @@ import { parsePeerDefinition } from "../src/shared/agent-definition";
 import type { AgentSpawnResult } from "../src/shared/protocol";
 import { resolveOmpCli } from "../src/worker/lifecycle";
 import toolbeltExtension from "../src/worker/toolbelt";
+import {
+	operatorIdentities,
+	TEST_OPERATOR_TOKEN,
+} from "./fixtures/control-client";
 
 const cleanups: Array<() => Promise<void>> = [];
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const originalSocketPath = process.env.OH_MY_AGENT_SOCKET;
+const originalControlToken = process.env.OH_MY_AGENT_CONTROL_TOKEN;
 
 interface ToolResult {
 	content: Array<{ type: string; text?: string }>;
@@ -35,6 +40,9 @@ afterEach(async () => {
 	else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
 	if (originalSocketPath === undefined) delete process.env.OH_MY_AGENT_SOCKET;
 	else process.env.OH_MY_AGENT_SOCKET = originalSocketPath;
+	if (originalControlToken === undefined)
+		delete process.env.OH_MY_AGENT_CONTROL_TOKEN;
+	else process.env.OH_MY_AGENT_CONTROL_TOKEN = originalControlToken;
 	while (cleanups.length > 0) await cleanups.pop()?.();
 });
 
@@ -124,7 +132,11 @@ async function harness(): Promise<{
 		armSchedule: () => undefined,
 		bumpAccount: async () => [],
 	};
-	const socket = await startControlSocket({ socketPath, context });
+	const socket = await startControlSocket({
+		socketPath,
+		context,
+		identities: operatorIdentities(),
+	});
 	cleanups.push(async () => {
 		await socket.close();
 		rooms.close();
@@ -133,6 +145,7 @@ async function harness(): Promise<{
 
 	process.env.PI_CODING_AGENT_DIR = agentDir;
 	delete process.env.OH_MY_AGENT_SOCKET;
+	process.env.OH_MY_AGENT_CONTROL_TOKEN = TEST_OPERATOR_TOKEN;
 	const tools = new Map<string, ToolDefinition>();
 	toolbeltExtension({
 		zod,
@@ -459,6 +472,7 @@ describe("worker toolbelt", () => {
 		});
 		process.env.OH_MY_AGENT_SOCKET = socketPath;
 		process.env.PI_CODING_AGENT_DIR = agentDir;
+		process.env.OH_MY_AGENT_CONTROL_TOKEN = TEST_OPERATOR_TOKEN;
 		const tools = new Map<string, ToolDefinition>();
 		toolbeltExtension({
 			zod,
@@ -555,7 +569,10 @@ describe("worker toolbelt", () => {
 				await fetch("http://localhost/rpc", {
 					unix: socketPath,
 					method: "POST",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
+					},
 					body: JSON.stringify({
 						jsonrpc: "2.0",
 						id: "negative-control",
@@ -621,6 +638,7 @@ describe("worker toolbelt", () => {
 		});
 		process.env.OH_MY_AGENT_SOCKET = socketPath;
 		process.env.PI_CODING_AGENT_DIR = agentDir;
+		process.env.OH_MY_AGENT_CONTROL_TOKEN = TEST_OPERATOR_TOKEN;
 
 		const tools = new Map<string, ToolDefinition>();
 		toolbeltExtension({

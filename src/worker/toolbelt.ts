@@ -157,6 +157,7 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 		(materializedWorker
 			? resolve(agentDir, "../../../../../daemon.sock")
 			: join(agentDir, "oh-my-agent", "daemon.sock"));
+	const controlToken = process.env.OH_MY_AGENT_CONTROL_TOKEN;
 	let requestId = 0;
 
 	const callValidated = async <TParams, TResult>(
@@ -177,7 +178,12 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 			const response = await fetch("http://localhost/rpc", {
 				unix: socketPath,
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: {
+					"Content-Type": "application/json",
+					...(controlToken === undefined
+						? {}
+						: { Authorization: `Bearer ${controlToken}` }),
+				},
 				body: JSON.stringify({
 					jsonrpc: "2.0",
 					id: ++requestId,

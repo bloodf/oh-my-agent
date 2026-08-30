@@ -36,6 +36,7 @@ import { METHODS } from "../shared/protocol-schemas";
 
 const STATE_DIR = "oh-my-agent";
 const CONSOLE_URL_FILE = "console-url";
+const CONSOLE_TOKEN_FILE = "console-token";
 
 export const DAEMON_UNAVAILABLE =
 	"oh-my-agent daemon not running — start it with `omp-agent daemon`.";
@@ -86,7 +87,16 @@ Verbs:
 `;
 
 /** Equivalent to the extension client, kept local so daemon never imports UI. */
-export function createCliClient(socketPath: string): DaemonClient {
+export function createCliClient(
+	socketPath: string,
+	operatorToken?: string,
+): DaemonClient {
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	if (operatorToken !== undefined && operatorToken.length > 0) {
+		headers.Authorization = `Bearer ${operatorToken}`;
+	}
 	let nextId = 0;
 	return {
 		async call<T>(method: MethodName, params?: unknown): Promise<T> {
@@ -106,7 +116,7 @@ export function createCliClient(socketPath: string): DaemonClient {
 				response = await fetch("http://localhost/rpc", {
 					unix: socketPath,
 					method: "POST",
-					headers: { "Content-Type": "application/json" },
+					headers,
 					body: JSON.stringify({
 						jsonrpc: "2.0",
 						id: nextId,
@@ -410,7 +420,19 @@ export async function runCli(
 	const agentDir =
 		opts.agentDir ?? process.env.PI_CODING_AGENT_DIR ?? getAgentDir();
 	const stateDir = join(agentDir, STATE_DIR);
-	const client = createCliClient(join(stateDir, "daemon.sock"));
+	// A missing token (daemon never booted, or booted before T-1004) is not
+	// this CLI's problem to diagnose: an absent socket answers
+	// DaemonUnavailableError regardless, and a live socket answers its own
+	// Unauthorized, which is the daemon's word on the matter either way.
+	let operatorToken: string | undefined;
+	try {
+		operatorToken = (
+			await readFile(join(stateDir, CONSOLE_TOKEN_FILE), "utf8")
+		).trim();
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+	const client = createCliClient(join(stateDir, "daemon.sock"), operatorToken);
 	const io = opts.io ?? {
 		stdout: (text: string) => process.stdout.write(text),
 		stderr: (text: string) => process.stderr.write(text),

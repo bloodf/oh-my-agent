@@ -24,11 +24,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { DaemonHandle, WorkerFactory } from "../src/daemon/main";
 import { bootDaemon } from "../src/daemon/main";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
+import { controlCall, operatorToken } from "./fixtures/control-client";
 
 // ── Cleanup ──────────────────────────────────────────────────────────────────
 
@@ -387,17 +388,12 @@ async function bumpTo(socketPath: string, budgetUsd: number): Promise<string> {
 	return account;
 }
 
-/** One JSON-RPC round trip over the daemon's unix socket. */
+/** One authenticated JSON-RPC round trip over the daemon's unix socket. */
 async function rpc(
 	socketPath: string,
 	method: string,
-	params?: unknown,
+	params: unknown = {},
 ): Promise<unknown> {
-	const res = await fetch("http://localhost/rpc", {
-		unix: socketPath,
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-	});
-	return await res.json();
+	const token = await operatorToken(dirname(socketPath));
+	return await controlCall(socketPath, method, params, token, 1);
 }

@@ -15,7 +15,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { runCli } from "../src/daemon/cli";
 import type { WorkerFactory } from "../src/daemon/main";
@@ -30,6 +30,7 @@ import type {
 	StatusResult,
 } from "../src/shared/protocol";
 import { METHODS } from "../src/shared/protocol-schemas";
+import { controlCall, operatorToken } from "./fixtures/control-client";
 import { hermeticChildEnv } from "./fixtures/hermetic-env";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -155,16 +156,16 @@ async function bootWith(
 async function call<T>(
 	socketPath: string,
 	method: MethodName,
-	params?: unknown,
+	params: unknown = {},
 	id: number | string = 1,
 ): Promise<T> {
-	const res = await fetch("http://localhost/rpc", {
-		unix: socketPath,
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-	});
-	const frame = (await res.json()) as JsonRpcSuccess | JsonRpcFailure;
+	const frame = (await controlCall(
+		socketPath,
+		method,
+		params,
+		await operatorToken(dirname(socketPath)),
+		id,
+	)) as JsonRpcSuccess | JsonRpcFailure;
 	if ("error" in frame) {
 		throw new Error(`${method} failed: ${JSON.stringify(frame.error)}`);
 	}
@@ -429,6 +430,31 @@ describe("omp-agent CLI — scripting: parent/child tree, post and read", () => 
 	});
 });
 
+// ── bearer failures ───────────────────────────────────────────────────────────
+
+describe("omp-agent CLI — operator bearer", () => {
+	test("a live daemon with a missing token file returns its Unauthorized error", async () => {
+		const agentDir = await tempAgentDir();
+		const { handle } = await bootWith(agentDir);
+		await rm(join(dirname(handle.socketPath), "console-token"));
+
+		const result = await runCapture(["status"], { agentDir });
+		expect(result.code).toBe(4);
+		expect(result.io.stdout).toBe("");
+		expect(result.io.stderr).toBe("Unauthorized\n");
+	});
+
+	test("a dead socket with no token file remains daemon-down", async () => {
+		const agentDir = await tempAgentDir();
+		const result = await runCapture(["status"], { agentDir });
+		expect(result.code).toBe(3);
+		expect(result.io.stdout).toBe("");
+		expect(result.io.stderr).toContain(
+			"oh-my-agent daemon not running — start it with `omp-agent daemon`.",
+		);
+	});
+});
+
 // ── End-to-end via Bun.spawn on the real binary ─────────────────────────────
 
 describe("omp-agent CLI — end-to-end via the real binary", () => {
@@ -480,18 +506,13 @@ describe("omp-agent CLI — kill --keep-children", () => {
 
 		// A non-boolean keep_children still fails server-side — proving the
 		// CLI does not invent client-side rejection of the field.
-		const malformed = await fetch("http://localhost/rpc", {
-			unix: handle.socketPath,
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				jsonrpc: "2.0",
-				id: 99,
-				method: "kill",
-				params: { name: "reviewer", keep_children: "yes" },
-			}),
-		});
-		const frame = (await malformed.json()) as JsonRpcFailure;
+		const frame = (await controlCall(
+			handle.socketPath,
+			"kill",
+			{ name: "reviewer", keep_children: "yes" },
+			await operatorToken(dirname(handle.socketPath)),
+			99,
+		)) as JsonRpcFailure;
 		expect("error" in frame).toBe(true);
 		if ("error" in frame) {
 			expect(frame.error.data.field).toBe("keep_children");

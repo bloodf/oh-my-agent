@@ -5,9 +5,9 @@
  *   so the wire shape can never fork into three private dialects.
  *
  * Public API: `PROTOCOL_VERSION`, `METHOD_NAMES`, per-method params/result
- * types, the JSON-RPC envelope types, `ERROR_CODE`, and the `methodNotFound`
- * / `invalidParams` error builders. Runtime validation lives in
- * `./protocol-schemas`.
+ * types, the JSON-RPC envelope types, `ERROR_CODE`, and the `methodNotFound`,
+ * `invalidParams`, `unauthorized`, and `forbidden` error builders. Runtime
+ * validation lives in `./protocol-schemas`.
  *
  * Upstream deps: `./agent-definition` (type only, for the parsed definition
  * data shape). This module stays free of transport, I/O, and daemon state.
@@ -15,11 +15,11 @@
  * Downstream consumers: the daemon socket server, the worker toolbelt, the
  * TUI extension, and the web console API.
  *
- * Failure modes: protocol errors are data, not exceptions — `methodNotFound`
- * and `invalidParams` build JSON-RPC failure frames that always carry
- * `data.protocolVersion`, so a mismatched client learns why. New methods are
- * additive and do not bump `PROTOCOL_VERSION`: old daemons already answer an
- * unknown method with their version, which is the designed mismatch path.
+ * Failure modes: protocol errors are data, not exceptions. Error builders
+ * always carry `data.protocolVersion`, so a mismatched client learns why.
+ * Authentication and authorization failures use distinct declared codes. New
+ * methods are additive and do not bump `PROTOCOL_VERSION`: old daemons already
+ * answer an unknown method with their version, which is the mismatch path.
  *
  * Performance: type declarations only; zero runtime cost beyond the small
  * error builders.
@@ -296,6 +296,8 @@ export const ERROR_CODE = {
 	METHOD_NOT_FOUND: -32601,
 	INVALID_PARAMS: -32602,
 	INTERNAL_ERROR: -32603,
+	UNAUTHORIZED: -32001,
+	FORBIDDEN: -32003,
 } as const;
 
 export interface ProtocolError {
@@ -331,6 +333,30 @@ export function invalidParams(
 			code: ERROR_CODE.INVALID_PARAMS,
 			message,
 			data: { protocolVersion: PROTOCOL_VERSION, field },
+		},
+	};
+}
+
+export function unauthorized(id: JsonRpcId): JsonRpcFailure {
+	return {
+		jsonrpc: "2.0",
+		id,
+		error: {
+			code: ERROR_CODE.UNAUTHORIZED,
+			message: "Unauthorized",
+			data: { protocolVersion: PROTOCOL_VERSION },
+		},
+	};
+}
+
+export function forbidden(id: JsonRpcId, message: string): JsonRpcFailure {
+	return {
+		jsonrpc: "2.0",
+		id,
+		error: {
+			code: ERROR_CODE.FORBIDDEN,
+			message,
+			data: { protocolVersion: PROTOCOL_VERSION },
 		},
 	};
 }

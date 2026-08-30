@@ -527,8 +527,10 @@ describe("console lifetime", () => {
 		expect(booted.logs.filter((line) => /https?:\/\//.test(line))).toHaveLength(
 			0,
 		);
-		// No console means no operator token to leak or manage.
-		expect(await Bun.file(booted.tokenPath).exists()).toBe(false);
+		// The control socket now requires a bearer (T-1004), so the token is
+		// always written — it is no longer a console-specific concern. Only the
+		// printed URL is gated on OMA_CONSOLE.
+		expect(await Bun.file(booted.tokenPath).exists()).toBe(true);
 		// The daemon itself still came up. `existsSync`, not `Bun.file().exists()`:
 		// the latter answers false for a unix socket, which is not a regular file.
 		expect(existsSync(booted.handle.socketPath)).toBe(true);
