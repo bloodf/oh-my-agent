@@ -88,6 +88,6 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/supervisor.test.ts` | yes | [T-405](tasks/T-405-supervisor.md), [T-505](tasks/T-505-definition-staleness.md), [T-506](tasks/T-506-metered-budget-wiring.md), [T-509](tasks/T-509-wake-filters.md) | — |
 | `tests/toolbelt.test.ts` | yes | [T-503](tasks/T-503-agent-toolbelt.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md), [T-604](tasks/T-604-reaction-toolbelt.md), [T-803](tasks/T-803-toolbelt-authoring.md) | — |
 | `tests/usage-meter.test.ts` | yes | [T-1002](tasks/T-1002-usage-feeds-the-meter.md) | — |
-| `tests/worker-inprocess.test.ts` | not yet | [T-1006](tasks/T-1006-in-process-worker-path.md) | — |
+| `tests/worker-inprocess.test.ts` | yes | [T-1006](tasks/T-1006-in-process-worker-path.md) | — |
 | `tests/worker-lifecycle.test.ts` | yes | [T-401](tasks/T-401-worker-lifecycle.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md) | — |
 | `tsconfig.json` | yes | [T-001](tasks/T-001-package-scaffold.md) | — |

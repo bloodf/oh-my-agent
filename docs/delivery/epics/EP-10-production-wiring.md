@@ -1,6 +1,6 @@
 # EP-10 — Production wiring: serving, usage, and deferred hardening
 
-**Status:** Planned
+**Status:** Done
 
 *Derived from the tasks below.*
 
@@ -26,9 +26,9 @@ Three subsystems were built and tested without a production seam: the console AP
 
 ## Acceptance
 
-- [ ] A browser reaches the console served by the daemon itself, with the token flow documented in docs/web-console.md.
-- [ ] A metered account's meter moves with real usage, and the 80%/park/bump path fires on it.
-- [ ] Status and the registry report a real pid for a running worker.
+- [x] A browser reaches the console served by the daemon itself, with the token flow documented in docs/web-console.md.
+- [x] A metered account's meter moves with real usage, and the 80%/park/bump path fires on it.
+- [x] Status and the registry report a real pid for a running worker.
 
 ## Decisions
 
@@ -43,4 +43,4 @@ Three subsystems were built and tested without a production seam: the console AP
 | [T-1003](../tasks/T-1003-worker-pid-on-the-wire.md) | Worker pid in status and the registry | Done |
 | [T-1004](../tasks/T-1004-control-socket-identity.md) | Connection identity on the control socket | Done |
 | [T-1005](../tasks/T-1005-worker-env-allowlist.md) | Allowlist the worker environment | Done |
-| [T-1006](../tasks/T-1006-in-process-worker-path.md) | In-process worker path for cheap agents | Planned |
+| [T-1006](../tasks/T-1006-in-process-worker-path.md) | In-process worker path for cheap agents | Done |

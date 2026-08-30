@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-10](../epics/EP-10-production-wiring.md) | [SP-11](../sprints/SP-11-production-wiring.md) | Planned | [asset-map](../asset-map.md) |
+| [EP-10](../epics/EP-10-production-wiring.md) | [SP-11](../sprints/SP-11-production-wiring.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -26,7 +26,7 @@ Short-lived or cheap agents run in-process via the SDK behind the same worker in
 |---|---|---|
 | [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) | Edited | An in-process backend satisfying SupervisedWorker behind the existing interface. |
 | [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | The spawn path selects the backend from the definition or a daemon flag. |
-| `tests/worker-inprocess.test.ts` (to be created) | New | The same supervisor contract suite drives both backends. |
+| [`tests/worker-inprocess.test.ts`](../../../tests/worker-inprocess.test.ts) | New | The same supervisor contract suite drives both backends. |
 
 ## Steps
 
@@ -36,9 +36,16 @@ Short-lived or cheap agents run in-process via the SDK behind the same worker in
 
 ## Acceptance
 
-- [ ] Both backends pass the same supervisor contract suite.
-- [ ] An in-process worker never shows the sandbox shield.
-- [ ] The default stays RPC subprocess.
+- [x] Both backends pass the same supervisor contract suite.
+- [x] An in-process worker never shows the sandbox shield.
+- [x] The default stays RPC subprocess.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| In-process backend over createAgentSession | [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) |
+| 16-test contract suite incl. the timer-leak regression | [`tests/worker-inprocess.test.ts`](../../../tests/worker-inprocess.test.ts) |
 
 ## Out of scope
 

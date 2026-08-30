@@ -2957,7 +2957,7 @@ TASKS += [
     ),
     Task(
         id="T-1006", slug="in-process-worker-path", title="In-process worker path for cheap agents",
-        epic="EP-10", sprint="SP-11", status="Planned",
+        epic="EP-10", sprint="SP-11", status="Done",
         goal="Short-lived or cheap agents run in-process via the SDK behind the same worker interface, when process-per-agent proves heavy in practice.",
         read_first=[
             ARCH,
@@ -2984,6 +2984,7 @@ TASKS += [
             "An in-process worker never shows the sandbox shield.",
             "The default stays RPC subprocess.",
         ],
+                evidence=[("In-process backend over createAgentSession", "src/worker/lifecycle.ts"), ("16-test contract suite incl. the timer-leak regression", "tests/worker-inprocess.test.ts")],
         depends_on=["T-401"],
         out_of_scope=["Sandboxing in-process workers — impossible; the shield rules make that visible rather than implied."],
     ),
