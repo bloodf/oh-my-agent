@@ -25,6 +25,12 @@ import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
+import {
+	type CreateAgentSessionOptions,
+	type CreateAgentSessionResult,
+	createAgentSession,
+} from "@oh-my-pi/pi-coding-agent/sdk";
+import type { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { WorkerLayout } from "../daemon/materializer";
 import type { PeerDefinition } from "../shared/agent-definition";
 import { fingerprintPeerDefinition } from "../shared/agent-definition";
@@ -421,6 +427,274 @@ export async function startWorker(
 			// Wait for idle: callers observing tool dispatches need the turn
 			// settled before they assert on what the child actually called.
 			await client.promptAndWait(message, undefined, turnTimeoutMs);
+		},
+		park: async () => {
+			if (state !== "running") return;
+			await teardown();
+			state = "parked";
+		},
+		resume: async () => {
+			if (state === "running") return;
+			if (state === "stopped") {
+				throw new Error(
+					`Worker ${peer.name} is stopped; materialize a fresh one`,
+				);
+			}
+			await launch();
+		},
+		stop: async () => {
+			if (state === "stopped") return;
+			await teardown();
+			state = "stopped";
+		},
+	};
+}
+
+// ── In-process backend (T-1006) ─────────────────────────────────────────────
+//
+// An alternative to `startWorker`'s RPC subprocess: the peer runs as an OMP
+// `AgentSession` inside the daemon's own process, via `createAgentSession`
+// from `@oh-my-pi/pi-coding-agent/sdk`. Selected only when the daemon boots
+// with `inProcessWorkers: true` (`src/daemon/main.ts`); RPC remains the
+// default.
+//
+// Boundary this backend does NOT have, compared to the RPC path:
+//   - No materialized synthetic root (§5.2): no per-worker HOME/XDG tree, no
+//     `env-shim.ts`/`sandbox-shim.ts`, no `OH_MY_AGENT_SHIM_ENV` carrier.
+//   - No per-worker credential token is *constructed*: `handle.env` is `{}`
+//     because there is no child env to build. But the session runs INSIDE the
+//     daemon process: its tools (and any process they spawn) read the
+//     daemon's ambient `process.env` directly — operator provider keys, and
+//     any `OH_MY_AGENT_*` values the daemon itself was launched with, are
+//     reachable. There is nothing to allowlist because there is no boundary;
+//     this is the reason the backend is opt-in and RPC stays the default.
+//   - `cwd`/tool visibility/auth boundary is the *daemon's own*: the session
+//     runs with the daemon process's env, so provider credentials resolve
+//     however OMP's own auth discovery resolves them in that process, and
+//     the tool surface is whatever OMP discovers under the supplied `cwd`
+//     and `agentDir` — there is no per-peer deny-list synthesized here.
+//   - `sandboxed` is always `false`: there is no shell-level sandbox for a
+//     session living inside the daemon's own process, so `peer.sandbox` is
+//     never gated on this path.
+//   - `pid` is always `undefined`: there is no OS child process.
+//
+// Callers (the daemon) are responsible for choosing this backend only for
+// peers whose trust model tolerates running inside the daemon process — with
+// the daemon's env, filesystem defaults, and credentials in reach.
+
+/** Env var that forces `startInProcessWorker` to refuse — test-only kill switch. */
+const FORCE_INPROC_DISABLED_ENV = "OMA_FORCE_INPROC_DISABLED";
+
+/** Minimal surface of an OMP `AgentSession` this backend depends on. */
+interface InProcessSession {
+	readonly sessionId: string;
+	readonly sessionManager?: SessionManager;
+	prompt(text: string): Promise<boolean>;
+	subscribe(listener: (event: unknown) => void): () => void;
+	subscribeRunState(listener: (state: "running" | "idle") => void): () => void;
+	beginDispose(): void;
+	dispose(): Promise<void>;
+}
+
+export interface InProcessWorkerOptions {
+	peer: PeerDefinition;
+	/** Project directory the worker edits. There is no separate synthetic root. */
+	cwd: string;
+	/** OMP agent dir passed straight through to `createAgentSession`. */
+	agentDir: string;
+	/**
+	 * Fingerprint of the definition this worker was built from. Supplied by
+	 * the caller (daemon) so `recordRuns`/the supervisor's staleness check
+	 * see the same value the RPC path would compute.
+	 */
+	fingerprint: string;
+	/** SDK seam — defaults to the real `createAgentSession`; overridable for tests. */
+	createSession?: (
+		options: CreateAgentSessionOptions,
+	) => Promise<CreateAgentSessionResult>;
+	/** Per-turn ceiling for a prompt round-trip. */
+	turnTimeoutMs?: number;
+	/** Appended as the session's system prompt; mirrors RPC's `--append-system-prompt`. */
+	appendSystemPrompt?: string;
+	/** Raw model pattern (e.g. the peer's `model:` frontmatter). */
+	modelPattern?: string;
+	/** Comma-joined spawns closure, forwarded to `createAgentSession`. */
+	spawns?: string;
+	/** Unique per-session agent identity; avoids the "Main replaced" registry race. */
+	agentId?: string;
+	/**
+	 * Reused across park/resume. OMP keeps the session storage it owns behind
+	 * this manager, so recreating a session with the same manager preserves
+	 * transcript/artifact storage where the SDK permits it.
+	 */
+	sessionManager?: SessionManager;
+}
+
+async function defaultCreateSession(
+	options: CreateAgentSessionOptions,
+): Promise<CreateAgentSessionResult> {
+	return await createAgentSession(options);
+}
+
+export async function startInProcessWorker(
+	options: InProcessWorkerOptions,
+): Promise<WorkerHandle> {
+	if (process.env[FORCE_INPROC_DISABLED_ENV]) {
+		throw new Error(
+			"in-process worker backend is disabled (OMA_FORCE_INPROC_DISABLED set)",
+		);
+	}
+
+	const { peer, cwd, agentDir, fingerprint } = options;
+	const turnTimeoutMs = options.turnTimeoutMs ?? 60_000;
+	const createSession = options.createSession ?? defaultCreateSession;
+
+	// No materializer synthetic root: the project cwd doubles as both `root`
+	// and `home` in the synthetic layout, since there is no separate HOME
+	// tree to point at. `env` is always empty — see the boundary note above.
+	const layout: WorkerLayout = {
+		root: cwd,
+		home: cwd,
+		agentDir,
+		sessionDir: cwd,
+		generatedAgentPath: "",
+		configPath: "",
+		modelsPath: "",
+		provider: "",
+		modelId: "",
+		inferenceGateway: { host: "127.0.0.1", port: 0 },
+		skillPaths: [],
+		disabledAgents: [],
+		definitionFingerprint: fingerprint,
+		env: {},
+	};
+
+	let state: WorkerState = "stopped";
+	let session: InProcessSession | undefined;
+	// Captured at launch; reused across park/resume so the SDK keeps the
+	// same on-disk session storage where it permits. Falls back to the
+	// caller's `options.sessionManager` when the SDK does not expose one.
+	let activeSessionManager: SessionManager | undefined = options.sessionManager;
+	let eventUnsubscribe: (() => void) | undefined;
+	const toolListeners = new Set<(name: string) => void>();
+	const eventListeners = new Set<(event: unknown) => void>();
+
+	const buildSessionOptions = (): CreateAgentSessionOptions => ({
+		cwd,
+		agentDir,
+		spawns: options.spawns,
+		modelPattern: options.modelPattern,
+		appendSystemPrompt: options.appendSystemPrompt,
+		agentId: options.agentId ?? peer.name,
+		...(activeSessionManager ? { sessionManager: activeSessionManager } : {}),
+	});
+
+	const launch = async (): Promise<void> => {
+		const result = await createSession(buildSessionOptions());
+		const next = result.session as unknown as InProcessSession;
+		activeSessionManager ??= next.sessionManager;
+
+		eventUnsubscribe = next.subscribe((event) => {
+			for (const listener of eventListeners) listener(event);
+			const type = (event as { type?: string }).type;
+			if (type !== "tool_execution_start") return;
+			const name = (event as { toolName?: unknown }).toolName;
+			if (typeof name === "string")
+				for (const listener of toolListeners) listener(name);
+		});
+
+		session = next;
+		state = "running";
+	};
+
+	const teardown = async (): Promise<void> => {
+		eventUnsubscribe?.();
+		eventUnsubscribe = undefined;
+		const current = session;
+		session = undefined;
+		if (current) {
+			current.beginDispose();
+			await current.dispose();
+		}
+	};
+
+	await launch();
+
+	return {
+		name: peer.name,
+		// In-process has no shell-level sandbox: the field is hard-wired to
+		// `false` regardless of `peer.sandbox`.
+		sandboxed: false,
+		get state() {
+			return state;
+		},
+		get sessionId() {
+			return session?.sessionId;
+		},
+		// No OS child process backs this worker.
+		get pid() {
+			return undefined;
+		},
+		layout,
+		env: layout.env,
+		fingerprint,
+		// No subprocess stderr to read; nothing failed at the process level.
+		stderr: () => "",
+		effectiveTools: async () => {
+			if (!session) throw new Error(`Worker ${peer.name} is ${state}`);
+			// Known limitation: the SDK does not expose an RPC-style
+			// `dumpTools` snapshot on this path. Callers that need the
+			// worker's actual tool surface must use the RPC backend.
+			return [];
+		},
+		onEvent: (listener) => {
+			eventListeners.add(listener);
+			return () => {
+				eventListeners.delete(listener);
+			};
+		},
+		onToolCall: (listener) => {
+			toolListeners.add(listener);
+			return () => {
+				toolListeners.delete(listener);
+			};
+		},
+		prompt: async (message) => {
+			if (!session)
+				throw new Error(`Worker ${peer.name} is ${state}; cannot prompt`);
+			const current = session;
+
+			// Wait for the terminal `idle` run-state transition after the
+			// prompt resolves, the same "settled before returning" contract
+			// `RpcClient.promptAndWait` gives the RPC path.
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const idle = new Promise<void>((resolve, reject) => {
+				const unsubscribe = current.subscribeRunState((runState) => {
+					if (runState !== "idle") return;
+					if (timer !== undefined) clearTimeout(timer);
+					unsubscribe();
+					resolve();
+				});
+				timer = setTimeout(() => {
+					unsubscribe();
+					reject(
+						new Error(
+							`Worker ${peer.name} did not go idle within ${turnTimeoutMs}ms`,
+						),
+					);
+				}, turnTimeoutMs);
+			});
+
+			try {
+				await current.prompt(message);
+				await idle;
+			} finally {
+				// A rejecting prompt or a timed-out idle must not leave a live
+				// timer behind in the daemon process (shared memory — an
+				// orphaned rejection here is everyone's crash).
+				if (timer !== undefined) clearTimeout(timer);
+				idle.catch(() => {});
+			}
 		},
 		park: async () => {
 			if (state !== "running") return;

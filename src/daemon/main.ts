@@ -47,13 +47,14 @@ import type {
 	PeerDefinition,
 	Schedule,
 } from "../shared/agent-definition";
+import { fingerprintPeerDefinition } from "../shared/agent-definition";
 import type {
 	AgentSpawnResult,
 	RoomInfo,
 	ScheduleInfo,
 } from "../shared/protocol";
 import type { WorkerHandle } from "../worker/lifecycle";
-import { startWorker } from "../worker/lifecycle";
+import { startInProcessWorker, startWorker } from "../worker/lifecycle";
 import { resolveBrokerHosting } from "./boot";
 import type { ConsoleApi } from "./console-api";
 import { startConsoleApi } from "./console-api";
@@ -84,6 +85,12 @@ export interface WorkerFactoryOptions {
 	peer: PeerDefinition;
 	/** Project directory the worker edits. Not its synthetic root. */
 	cwd: string;
+	/**
+	 * The daemon's own OMP agent dir. Ignored by the RPC path (which
+	 * materializes its own agent dir under `rootDir`); consumed by the
+	 * in-process path, which has no materialized tree of its own.
+	 */
+	agentDir: string;
 	/** Root for this worker's materialized synthetic user tree. */
 	rootDir: string;
 	/** Names the worker's deny-list is built against. */
@@ -96,6 +103,14 @@ export interface WorkerFactoryOptions {
 	socketPath: string;
 	/** Bearer credential for this worker's control-socket identity. */
 	controlToken: string;
+	/**
+	 * True when the daemon was booted with `inProcessWorkers: true`. The
+	 * default factory uses this to route the call to the in-process OMP
+	 * session backend instead of the materialized RPC subprocess path.
+	 * Custom factories (tests, vendored installs) receive the same value
+	 * and branch on it themselves.
+	 */
+	inProcess: boolean;
 }
 
 /**
@@ -135,6 +150,15 @@ export interface BootDaemonOptions {
 	 * is the only place an operator can actually read it.
 	 */
 	announce?: (url: string | undefined) => void;
+	/**
+	 * Run every peer as an in-process OMP session (T-1006) instead of the
+	 * default materialized RPC subprocess. Default `false`: RPC stays the
+	 * default backend. An in-process worker shares the daemon's own process
+	 * — no materialized synthetic root, no per-worker credential-gate token,
+	 * no shell-level sandbox — see `startInProcessWorker` in
+	 * `src/worker/lifecycle.ts` for the full boundary this trades away.
+	 */
+	inProcessWorkers?: boolean;
 }
 
 export interface DaemonHandle {
@@ -246,8 +270,39 @@ async function loadConsoleToken(stateDir: string): Promise<string> {
 	return token;
 }
 
-/** The real worker path: materialize a synthetic root, then launch the child. */
+/**
+ * The real worker path: materialize a synthetic root, then launch the child.
+ *
+ * T-1006 selects the in-process OMP session only when `options.inProcess` is
+ * true. RPC is still the default. In-process deliberately skips materializer
+ * setup: no synthetic HOME/XDG root, no worker gateway/control token, no
+ * shell-level sandbox; its auth/tool boundary is the daemon's own process.
+ */
 const defaultWorkerFactory: WorkerFactory = async (options) => {
+	if (options.inProcess) {
+		const peerModel = options.peer.model;
+		const modelPattern = Array.isArray(peerModel)
+			? peerModel.join(",")
+			: peerModel;
+		const peerSpawns = options.peer.spawns;
+		const spawns = peerSpawns === "*" ? "*" : peerSpawns.join(",");
+		return await startInProcessWorker({
+			peer: options.peer,
+			cwd: options.cwd,
+			agentDir: options.agentDir,
+			fingerprint: fingerprintPeerDefinition(options.peer),
+			appendSystemPrompt: options.peer.body,
+			modelPattern,
+			spawns,
+			agentId: options.peer.name,
+			// No cross-call SessionManager here: the daemon does not own a
+			// shared one, so each `startInProcessWorker` builds its own.
+			// Park/resume will discard it and the SDK re-initializes one
+			// fresh on resume. Persistence is whatever OMP writes to the
+			// per-agent storage rooted at `agentDir`.
+		});
+	}
+
 	const layout = await materializeWorker({
 		rootDir: options.rootDir,
 		parsedPeer: options.peer,
@@ -271,6 +326,7 @@ export async function bootDaemon(
 	const agentDir = options.agentDir ?? getAgentDir();
 	const projectDir = options.projectDir ?? process.cwd();
 	const workerFactory = options.workerFactory ?? defaultWorkerFactory;
+	const inProcessWorkers = options.inProcessWorkers ?? false;
 	const now = options.now ?? Date.now;
 	const log = options.logger ?? (() => {});
 
@@ -383,6 +439,7 @@ export async function bootDaemon(
 					await workerFactory({
 						peer: definition,
 						cwd: projectDir,
+						agentDir,
 						rootDir: join(stateDir, "workers", peerName),
 						discoveredAgentNames,
 						inferenceGateway: {
@@ -397,6 +454,7 @@ export async function bootDaemon(
 						sourceSpawnAgents: await spawnSourcesFor(definition),
 						socketPath,
 						controlToken,
+						inProcess: inProcessWorkers,
 					}),
 				);
 				activateControlToken(peerName, controlToken);
@@ -725,6 +783,7 @@ export async function bootDaemon(
 				await workerFactory({
 					peer: materialized,
 					cwd: projectDir,
+					agentDir,
 					rootDir: join(stateDir, "workers", name),
 					discoveredAgentNames,
 					inferenceGateway: {
@@ -737,6 +796,7 @@ export async function bootDaemon(
 					sourceSpawnAgents: await spawnSourcesFor(definition),
 					socketPath,
 					controlToken,
+					inProcess: inProcessWorkers,
 				}),
 			);
 			activateControlToken(name, controlToken);

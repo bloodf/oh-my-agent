@@ -208,6 +208,14 @@ async function waitFor<T>(
 	}
 }
 
+/** Click a selector atomically in the page, immune to feed-event re-renders. */
+async function clickInPage(page: Page, selector: string): Promise<void> {
+	await page.waitForSelector(selector, { timeout: 10_000 });
+	await page.evaluate((s) => {
+		document.querySelector(s)?.click();
+	}, selector);
+}
+
 /** Transcript bodies rendered in the channel pane. */
 const renderedMessages = (page: Page): Promise<string[]> =>
 	page.$$eval("#messages .message .body", (nodes) =>
@@ -623,7 +631,10 @@ describe("threads", () => {
 			);
 			expect(await renderedMessages(page)).not.toContain("Threaded answer.");
 
-			await page.click(`#messages .message[data-id="${root.id}"] .thread-open`);
+			await clickInPage(
+				page,
+				`#messages .message[data-id="${root.id}"] .thread-open`,
+			);
 			await page.waitForSelector("#thread:not([hidden])");
 			const threadText = await waitFor(
 				"thread pane",
@@ -932,7 +943,8 @@ describe("membership controls", () => {
 				'#agents .agent[data-name="reviewer"] .membership-toggle',
 			);
 
-			await page.click(
+			await clickInPage(
+				page,
 				'#agents .agent[data-name="reviewer"] .membership-toggle',
 			);
 			await waitFor(
@@ -970,7 +982,8 @@ describe("membership controls", () => {
 				'#agents .agent[data-name="reviewer"] .membership-toggle',
 			);
 
-			await page.click(
+			await clickInPage(
+				page,
 				'#agents .agent[data-name="reviewer"] .membership-toggle',
 			);
 			await waitFor(
@@ -1014,7 +1027,8 @@ describe("membership controls", () => {
 				'#agents .agent[data-name="reviewer"] .membership-toggle',
 			);
 
-			await page.click(
+			await clickInPage(
+				page,
 				'#agents .agent[data-name="reviewer"] .membership-toggle',
 			);
 
@@ -1490,7 +1504,7 @@ describe("states", () => {
 			expect(shown?.action.length ?? 0).toBeGreaterThan(0);
 
 			// The empty state's next action targets the composer.
-			await page.click("#state .state-action");
+			await clickInPage(page, "#state .state-action");
 			const focused = await page.evaluate(
 				() => document.activeElement?.id ?? "",
 			);
@@ -1578,7 +1592,10 @@ describe("composer", () => {
 			() => transcriptText(page),
 			(t) => t.includes("Root question."),
 		);
-		await page.click(`#messages .message[data-id="${root.id}"] .thread-open`);
+		await clickInPage(
+			page,
+			`#messages .message[data-id="${root.id}"] .thread-open`,
+		);
 		await page.waitForSelector("#thread:not([hidden])");
 
 		const tag = await page.$eval("#thread-composer-input", (n) => n.tagName);
