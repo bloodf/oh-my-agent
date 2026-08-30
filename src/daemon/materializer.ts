@@ -1,7 +1,10 @@
 /**
  * Purpose: Build the synthetic user root a worker process runs inside (§5.2).
- * Each spawn gets its own HOME + XDG_* tree, explicit agent dir, and blank
- * host config/profile selectors. Its OMP agent dir contains only the worker's
+ * Each spawn gets its own HOME + XDG_* tree, explicit agent dir, and no
+ * host env (T-1005): the env map is an allowlist — synthetic roots, the
+ * declared passthroughs, and the inference bearer — handed to the child
+ * through a controlled re-exec, never merged over Bun.env. Its OMP agent dir
+ * contains only the worker's
  * generated native definition and definitions named by `spawns:`, a config
  * that pins `task.disabledAgents` to every discovered agent outside that
  * allowlist, and a `models.yml` routing every turn through the per-worker
@@ -29,7 +32,7 @@ import { join, resolve, sep } from "node:path";
 
 import type { PeerDefinition } from "../shared/agent-definition";
 import { fingerprintPeerDefinition } from "../shared/agent-definition";
-import { blankScrubbedEnvVars } from "../shared/env-scrub";
+import { passthroughEnvVars } from "../shared/env-scrub";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -88,7 +91,7 @@ export interface WorkerLayout {
 	/** Discovered agents denied to this worker, ascending. */
 	disabledAgents: string[];
 	definitionFingerprint: string;
-	/** Synthetic roots, blank host selectors, and inference bearer. */
+	/** Allowlisted env: synthetic roots, declared passthroughs, inference bearer. */
 	env: Record<string, string>;
 }
 
@@ -449,7 +452,7 @@ export async function materializeWorker(
 		inferenceGateway: gatewayEndpoint,
 		definitionFingerprint: fingerprintPeerDefinition(parsedPeer),
 		env: {
-			...blankScrubbedEnvVars(),
+			...passthroughEnvVars(process.env),
 			HOME: home,
 			XDG_CONFIG_HOME: join(home, ".config"),
 			XDG_DATA_HOME: join(home, ".local", "share"),

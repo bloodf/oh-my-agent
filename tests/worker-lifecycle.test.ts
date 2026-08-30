@@ -27,6 +27,7 @@ import { join } from "node:path";
 import { materializeWorker } from "../src/daemon/materializer";
 import type { PeerDefinition } from "../src/shared/agent-definition";
 import { parsePeerDefinition } from "../src/shared/agent-definition";
+import { PASSTHROUGH_ENV_VARS } from "../src/shared/env-scrub";
 import { resolveSandboxLaunch } from "../src/worker/launch-gate";
 import type { WorkerHandle } from "../src/worker/lifecycle";
 import {
@@ -199,14 +200,22 @@ async function workerFixture(
 /**
  * A runnable stand-in for `sandbox-exec`: consumes `-p <profile>`, execs the
  * payload. Lets a real gate result run without a privileged sandbox.
+ *
+ * A POSIX sh adds PWD/SHLVL to its own environment when it starts; the real
+ * sandbox-exec adds nothing. Strip them before `exec` so the payload sees the
+ * same env a real adapter would hand it — the T-1005 allowlist tests assert
+ * the child env is exactly the declared map.
  */
 async function passthroughAdapter(root: string): Promise<string> {
 	const path = join(root, "passthrough-adapter");
 	await writeFile(
 		path,
-		["#!/bin/sh", 'if [ "$1" = "-p" ]; then shift 2; fi', 'exec "$@"', ""].join(
-			"\n",
-		),
+		[
+			"#!/bin/sh",
+			'if [ "$1" = "-p" ]; then shift 2; fi',
+			'exec env -u PWD -u SHLVL "$@"',
+			"",
+		].join("\n"),
 		{ encoding: "utf8", mode: 0o755 },
 	);
 	return path;
@@ -221,6 +230,205 @@ async function start(
 	cleanups.push(() => handle.stop());
 	return handle;
 }
+/**
+ * T-1005 harness: a spawnable stand-in for the OMP CLI that records its own
+ * process env, then hands off to the real CLI so the worker still boots.
+ * Routing the spawn through it is how this suite reads a *real* child's env
+ * instead of trusting the parent's bookkeeping.
+ */
+async function envSpyCli(root: string, envPath: string): Promise<string> {
+	const spyPath = join(root, "spy-cli.ts");
+	await writeFile(
+		spyPath,
+		[
+			"// Test-only: records the child env, then re-execs the real OMP CLI.",
+			`await Bun.write(${JSON.stringify(envPath)}, JSON.stringify(process.env));`,
+			`const child = Bun.spawn(["bun", ${JSON.stringify(resolveOmpCli())}, ...process.argv.slice(2)], {`,
+			'\tstdin: "inherit",',
+			'\tstdout: "inherit",',
+			'\tstderr: "inherit",',
+			"});",
+			"process.exit(await child.exited);",
+			"",
+		].join("\n"),
+		"utf8",
+	);
+	return spyPath;
+}
+
+/** Set host env poison for one callback, restoring every key afterward. */
+async function withHostEnv<T>(
+	poison: Record<string, string>,
+	fn: () => Promise<T>,
+): Promise<T> {
+	const original = Object.fromEntries(
+		Object.keys(poison).map((key) => [key, process.env[key]]),
+	);
+	try {
+		Object.assign(process.env, poison);
+		return await fn();
+	} finally {
+		for (const [key, value] of Object.entries(original)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	}
+}
+
+// ── T-1005: the child env is an allowlist, asserted on a real process ───────
+
+describe("worker env allowlist", () => {
+	test("a poisoned host env never reaches the real child", async () => {
+		await withHostEnv(
+			{
+				OPENAI_API_KEY: "sk-poison",
+				ANTHROPIC_API_KEY: "sk-ant-poison",
+				OMA_POISON: "1",
+			},
+			async () => {
+				const { base, cwd, parsedPeer, layout } = await workerFixture();
+				const envPath = join(base, "child-env.json");
+				const handle = await startWorker({
+					peer: parsedPeer,
+					layout,
+					cwd,
+					cliPath: await envSpyCli(base, envPath),
+				});
+				cleanups.push(() => handle.stop());
+
+				const childEnv = JSON.parse(await readFile(envPath, "utf8")) as Record<
+					string,
+					string
+				>;
+				expect(childEnv.OPENAI_API_KEY).toBeUndefined();
+				expect(childEnv.ANTHROPIC_API_KEY).toBeUndefined();
+				expect(childEnv.OMA_POISON).toBeUndefined();
+				expect(childEnv.OH_MY_AGENT_INFERENCE_TOKEN).toBe(
+					layout.env.OH_MY_AGENT_INFERENCE_TOKEN,
+				);
+				expect(childEnv.HOME).toBe(layout.home);
+				// The carrier exists only in the shim's own env; the payload never sees it.
+				expect(childEnv.OH_MY_AGENT_SHIM_ENV).toBeUndefined();
+			},
+		);
+	});
+
+	test("the real child env is exactly the materialized layout map", async () => {
+		const { base, cwd, parsedPeer, layout } = await workerFixture();
+		const envPath = join(base, "child-env.json");
+		const handle = await startWorker({
+			peer: parsedPeer,
+			layout,
+			cwd,
+			cliPath: await envSpyCli(base, envPath),
+		});
+		cleanups.push(() => handle.stop());
+
+		const childEnv = JSON.parse(await readFile(envPath, "utf8")) as Record<
+			string,
+			string
+		>;
+		expect(childEnv).toEqual(layout.env);
+	});
+
+	test("the generated shims never carry the inference bearer on disk", async () => {
+		// The materializer contract: the bearer passes through env, never disk.
+		// The shim file must be free of the token; the env map only ever rides
+		// the shim's own process env carrier.
+		const { base, cwd, parsedPeer, layout } = await workerFixture({
+			sandbox: true,
+		});
+		const wrapper = await passthroughAdapter(base);
+		const handle = await startWorker({
+			peer: parsedPeer,
+			layout,
+			cwd,
+			sandboxAdapter: {
+				platform: "darwin",
+				which: async () => "/usr/bin/sandbox-exec",
+				probeBridge: async () => true,
+				adapterCommand: wrapper,
+			},
+		});
+		cleanups.push(() => handle.stop());
+
+		const token = layout.env.OH_MY_AGENT_INFERENCE_TOKEN as string;
+		const sandboxShim = await readFile(
+			join(layout.root, "sandbox-shim.ts"),
+			"utf8",
+		);
+		// The bearer must never land on disk. The sandbox argv legitimately
+		// embeds worker-home paths — policy data, not env secrets — so only
+		// the token is asserted absent here.
+		expect(sandboxShim).not.toContain(token);
+	});
+
+	test("the direct-launch shim never carries the inference bearer on disk", async () => {
+		const { cwd, parsedPeer, layout } = await workerFixture();
+		const handle = await startWorker({ peer: parsedPeer, layout, cwd });
+		cleanups.push(() => handle.stop());
+
+		const token = layout.env.OH_MY_AGENT_INFERENCE_TOKEN as string;
+		const envShim = await readFile(join(layout.root, "env-shim.ts"), "utf8");
+		expect(envShim).not.toContain(token);
+		expect(envShim).not.toContain(layout.home);
+	});
+
+	test("a sandboxed worker's env is the same allowlist, behind the shim", async () => {
+		await withHostEnv(
+			{ OPENAI_API_KEY: "sk-poison", OMA_POISON: "1" },
+			async () => {
+				// The peer must opt in — without `sandbox: true` the gate stays off and
+				// the sandbox assertions below would pass vacuously.
+				const { base, cwd, parsedPeer, layout } = await workerFixture({
+					sandbox: true,
+				});
+				const envPath = join(base, "child-env.json");
+				const wrapper = await passthroughAdapter(base);
+
+				const handle = await startWorker({
+					peer: parsedPeer,
+					layout,
+					cwd,
+					cliPath: await envSpyCli(base, envPath),
+					sandboxAdapter: {
+						platform: "darwin",
+						which: async () => "/usr/bin/sandbox-exec",
+						probeBridge: async () => true,
+						adapterCommand: wrapper,
+					},
+				});
+				cleanups.push(() => handle.stop());
+
+				expect(handle.sandboxed).toBe(true);
+				const childEnv = JSON.parse(await readFile(envPath, "utf8")) as Record<
+					string,
+					string
+				>;
+				expect(childEnv.OPENAI_API_KEY).toBeUndefined();
+				expect(childEnv.OMA_POISON).toBeUndefined();
+				// The sandbox path must not reintroduce anything: the child's env is
+				// exactly the declared map, same as the direct path.
+				expect(childEnv).toEqual(layout.env);
+			},
+		);
+	});
+
+	test("declared passthroughs keep the child functional", async () => {
+		// The materialized passthroughs must carry the host's real PATH — a
+		// child that cannot find its own runtime cannot boot. The real-child
+		// suites above staying green is the rest of this assertion.
+		const { layout } = await workerFixture();
+		for (const key of PASSTHROUGH_ENV_VARS) {
+			if (process.env[key] !== undefined) {
+				expect(layout.env[key]).toBe(process.env[key]);
+			} else {
+				expect(layout.env[key]).toBeUndefined();
+			}
+		}
+		expect(layout.env.PATH).toBeTruthy();
+	});
+});
 
 // ── RPC subprocess lifecycle (§9.1) ─────────────────────────────────────────
 

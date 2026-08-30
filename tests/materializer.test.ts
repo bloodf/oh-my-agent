@@ -38,6 +38,7 @@ import {
 	fingerprintPeerDefinition,
 	parsePeerDefinition,
 } from "../src/shared/agent-definition";
+import { PASSTHROUGH_ENV_VARS } from "../src/shared/env-scrub";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -179,7 +180,7 @@ describe("synthetic directory creation", () => {
 		});
 	});
 
-	test("blanks inherited config-root and profile selectors", async () => {
+	test("inherited config-root and profile selectors never reach the env", async () => {
 		const poisonedSelectors = {
 			PI_CONFIG_DIR: "/poison/pi-config",
 			CLAUDE_CONFIG_DIR: "/poison/claude-config",
@@ -202,13 +203,79 @@ describe("synthetic directory creation", () => {
 					inferenceGateway: GATEWAY,
 				});
 
-				expect(result.env).toMatchObject({
-					...Object.fromEntries(
-						Object.keys(poisonedSelectors).map((key) => [key, ""]),
-					),
-					HOME: join(root, "home"),
-					PI_CODING_AGENT_DIR: join(root, ...AGENT_DIR_SEGMENTS),
+				// T-1005 inverted blanking into an allowlist: a poisoned selector is
+				// not blanked, it is absent — nothing undeclared exists in the map.
+				for (const key of Object.keys(poisonedSelectors)) {
+					expect(result.env[key]).toBeUndefined();
+				}
+				expect(result.env.HOME).toBe(join(root, "home"));
+				expect(result.env.PI_CODING_AGENT_DIR).toBe(
+					join(root, ...AGENT_DIR_SEGMENTS),
+				);
+			});
+		} finally {
+			for (const [key, value] of Object.entries(originalValues)) {
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	});
+	test("env is an exact allowlist: declared keys only, never the host env", async () => {
+		// T-1005: the worker env inverts from blanklist to allowlist. The child
+		// is spawned through a controlled re-exec that hands it exactly this
+		// map, so selector blanks are gone too — anything undeclared is absent.
+		const poison = {
+			OPENAI_API_KEY: "sk-poison",
+			ANTHROPIC_API_KEY: "sk-ant-poison",
+			OMA_POISON: "1",
+			PATH: "/poison/bin",
+			TERM: "xterm-poison",
+		} as const;
+		const originalValues = Object.fromEntries(
+			Object.keys(poison).map((key) => [key, process.env[key]]),
+		);
+
+		try {
+			Object.assign(process.env, poison);
+			await withTempRoot(async (root) => {
+				const result = await materialize({
+					rootDir: root,
+					parsedPeer: minimalPeer(),
+					discoveredAgentNames: [],
+					inferenceGateway: GATEWAY,
 				});
+
+				const declared = [
+					// Declared passthroughs, taken from the host when it sets them.
+					"PATH",
+					"TERM",
+					// Synthetic roots and the inference bearer.
+					"HOME",
+					"XDG_CONFIG_HOME",
+					"XDG_DATA_HOME",
+					"XDG_STATE_HOME",
+					"XDG_CACHE_HOME",
+					"PI_CODING_AGENT_DIR",
+					"OH_MY_AGENT_INFERENCE_TOKEN",
+				];
+				const expectedKeys = declared
+					.filter(
+						(key) =>
+							!(PASSTHROUGH_ENV_VARS as readonly string[]).includes(key) ||
+							process.env[key] !== undefined,
+					)
+					.sort();
+				expect(Object.keys(result.env).sort()).toEqual(expectedKeys);
+
+				// Passthroughs carry the host value, even a poisoned one.
+				expect(result.env.PATH).toBe("/poison/bin");
+				expect(result.env.TERM).toBe("xterm-poison");
+				// Undeclared host vars never appear — including blanked selectors.
+				expect(result.env.OPENAI_API_KEY).toBeUndefined();
+				expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
+				expect(result.env.OMA_POISON).toBeUndefined();
+				expect(result.env.PI_CONFIG_DIR).toBeUndefined();
+				expect(result.env.OMP_PROFILE).toBeUndefined();
 			});
 		} finally {
 			for (const [key, value] of Object.entries(originalValues)) {
