@@ -2880,7 +2880,7 @@ TASKS += [
     ),
     Task(
         id="T-1004", slug="control-socket-identity", title="Connection identity on the control socket",
-        epic="EP-10", sprint="SP-11", status="Planned",
+        epic="EP-10", sprint="SP-11", status="Done",
         goal="When the control socket ever needs to distinguish callers, each client presents a credential and the daemon can enforce per-identity rules — including making agent hierarchy authoritative instead of cooperative.",
         read_first=[
             ARCH,
@@ -2914,12 +2914,13 @@ TASKS += [
             "A worker token cannot kill or inject into a peer it does not own.",
             "The operator token path keeps today's TUI/console flows working unchanged.",
         ],
+                evidence=[("Bearer identity on the socket with per-worker revocation", "src/daemon/socket.ts"), ("Identity suite plus every harness presenting its token", "tests/socket-identity.test.ts")],
         depends_on=["T-502"],
         out_of_scope=["Replacing loopback as the default trust model; this task exists so the trigger is named, not to add ceremony today."],
     ),
     Task(
         id="T-1005", slug="worker-env-allowlist", title="Allowlist the worker environment",
-        epic="EP-10", sprint="SP-11", status="Planned",
+        epic="EP-10", sprint="SP-11", status="Done",
         goal="A worker's process env contains only what its layout declares — provider keys and other host secrets in the daemon's environment never reach a child.",
         read_first=[
             ("Env scrub", "src/shared/env-scrub.ts"),
@@ -2948,6 +2949,7 @@ TASKS += [
             "The declared passthroughs keep the child functional (the real-child suites stay green).",
             "The sandbox launch path is covered by the same assertions.",
         ],
+                evidence=[("Allowlisted worker env with per-var justification", "src/shared/env-scrub.ts"), ("Poisoned-host proofs on both launch paths, revert-verified", "tests/worker-lifecycle.test.ts")],
         depends_on=["T-205"],
         out_of_scope=["OS sandboxing itself (EP-02, shipped) and network egress policy (sandbox-bridge territory)."],
     ),
