@@ -167,6 +167,11 @@ interface TrackedPage {
 
 async function openPage(): Promise<TrackedPage> {
 	const page = await browser.newPage();
+	// A new headless target is not the active one, and in an unfocused
+	// document HTMLElement.focus() is a silent no-op — without this the
+	// keyboard tests flake depending on which target Chrome happened to
+	// activate first.
+	await page.bringToFront();
 	// RED runs must fail fast; 5s default hides a missing client behind a hang.
 	page.setDefaultTimeout(1_500);
 	let closed = false;
@@ -213,6 +218,21 @@ async function clickInPage(page: Page, selector: string): Promise<void> {
 	await page.waitForSelector(selector, { timeout: 10_000 });
 	await page.evaluate((s) => {
 		document.querySelector(s)?.click();
+	}, selector);
+}
+
+/**
+ * Focus a selector atomically in one in-page round-trip, immune to feed-event re-renders. `page.focus()` is a
+ * selector resolution and a focus() in two CDP round-trips; a transcript repaint between them
+ * leaves focus() landing on a detached node (silent no-op) — the flake that
+ * took the thread keyboard test down intermittently.
+ */
+async function focusInPage(page: Page, selector: string): Promise<void> {
+	await page.waitForSelector(selector, { timeout: 10_000 });
+	await page.evaluate((s) => {
+		const el = document.querySelector(s);
+		if (el === null) throw new Error(`Not focusable: ${s}`);
+		(el as unknown as { focus(): void }).focus();
 	}, selector);
 }
 
@@ -635,7 +655,7 @@ describe("threads", () => {
 				page,
 				`#messages .message[data-id="${root.id}"] .thread-open`,
 			);
-			await page.waitForSelector("#thread:not([hidden])");
+			await page.waitForSelector("#thread:not([hidden])", { timeout: 10_000 });
 			const threadText = await waitFor(
 				"thread pane",
 				() => page.$eval("#thread", (node) => node.textContent ?? ""),
@@ -1596,7 +1616,7 @@ describe("composer", () => {
 			page,
 			`#messages .message[data-id="${root.id}"] .thread-open`,
 		);
-		await page.waitForSelector("#thread:not([hidden])");
+		await page.waitForSelector("#thread:not([hidden])", { timeout: 10_000 });
 
 		const tag = await page.$eval("#thread-composer-input", (n) => n.tagName);
 		expect(tag).toBe("TEXTAREA");
@@ -1630,6 +1650,22 @@ describe("unread", () => {
 			const { page, errors } = await openPage();
 			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
 			await page.waitForSelector("#channels .channel");
+
+			// The unread mark arrives only as a live frame; a post that lands
+			// before the events socket is OPEN is missed forever (the open-time
+			// refetch heals the transcript, not unreadRooms). Wait for the
+			// socket before posting, the same hook the sever test uses.
+			await waitFor(
+				"events socket open",
+				() =>
+					page.evaluate(() =>
+						(
+							(globalThis as { __consoleSockets?: WebSocket[] })
+								.__consoleSockets ?? []
+						).some((s) => s.readyState === WebSocket.OPEN),
+					),
+				(open) => open === true,
+			);
 
 			await h.supervisor.post({
 				room: "#ops",
@@ -1894,7 +1930,7 @@ describe("accessibility", () => {
 			(t) => t.includes("Filler line 29"),
 		);
 
-		await page.focus("#messages");
+		await focusInPage(page, "#messages");
 		await page.$eval("#messages", (node) => {
 			(node as unknown as { scrollTop: number }).scrollTop = 0;
 		});
@@ -1949,7 +1985,7 @@ describe("accessibility", () => {
 			).toBe("false");
 
 			// Keyboard toggle on: focus the chip and press Enter.
-			await page.focus(chipSelector);
+			await focusInPage(page, chipSelector);
 			await page.keyboard.press("Enter");
 			const pressed = await waitFor(
 				"chip pressed",
@@ -1965,7 +2001,7 @@ describe("accessibility", () => {
 			expect(pressed?.text).toBe("👀 2");
 
 			// And off again, still by keyboard.
-			await page.focus(chipSelector);
+			await focusInPage(page, chipSelector);
 			await page.keyboard.press("Enter");
 			await waitFor(
 				"chip released",
@@ -2005,9 +2041,9 @@ describe("accessibility", () => {
 			);
 
 			const openerSelector = `#messages .message[data-id="${root.id}"] .thread-open`;
-			await page.focus(openerSelector);
+			await focusInPage(page, openerSelector);
 			await page.keyboard.press("Enter");
-			await page.waitForSelector("#thread:not([hidden])");
+			await page.waitForSelector("#thread:not([hidden])", { timeout: 10_000 });
 
 			// Focus moved into the pane.
 			const inPane = await waitFor(
@@ -2023,7 +2059,7 @@ describe("accessibility", () => {
 			// T-1101 gap outside this task's editable files. The a11y claim
 			// under test is keyboard operability: Enter in the thread composer
 			// sends without a pointer.
-			await page.focus("#thread-composer-input");
+			await focusInPage(page, "#thread-composer-input");
 			await page.keyboard.type("Reply from the keyboard.");
 			await page.keyboard.press("Enter");
 			await waitFor(
@@ -2045,6 +2081,58 @@ describe("accessibility", () => {
 		},
 	);
 
+	browserTest(
+		"a transcript repaint keeps focus on the control it was on",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const root = await h.rooms.post({
+				room: "#reviews",
+				author: "@you",
+				body: "Root question.",
+			});
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Threaded answer.",
+				parentId: root.id,
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"transcript",
+				() => transcriptText(page),
+				(t) => t.includes("Root question."),
+			);
+
+			const openerSelector = `#messages .message[data-id="${root.id}"] .thread-open`;
+			await focusInPage(page, openerSelector);
+
+			// A live update repaints the transcript; keyboard focus must survive on the same
+			// control, not drop to <body> — the repaint race this guards was observed
+			// as a flake in the thread keyboard test above.
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Another root elsewhere.",
+			});
+			await waitFor(
+				"repaint",
+				() => transcriptText(page),
+				(t) => t.includes("Another root elsewhere."),
+			);
+			const kept = await focusProbe(page);
+			expect(kept?.className).toBe("thread-open");
+			expect(kept?.messageId).toBe(String(root.id));
+
+			// The restored control still activates by keyboard.
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#thread:not([hidden])", { timeout: 10_000 });
+			expect(errors).toEqual([]);
+		},
+	);
+
 	browserTest("a message posts by keyboard alone", async () => {
 		const h = await harness();
 		await h.ensureRoom("#reviews");
@@ -2053,7 +2141,7 @@ describe("accessibility", () => {
 		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
 		await page.waitForSelector("#composer-input");
 
-		await page.focus("#composer-input");
+		await focusInPage(page, "#composer-input");
 		await page.keyboard.type("Sent without a pointer.");
 		await page.keyboard.press("Enter");
 		await waitFor(

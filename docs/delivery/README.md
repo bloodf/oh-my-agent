@@ -11,7 +11,7 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**59 of 59 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
+**60 of 77 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
 Every runtime subsystem is built and under test: workers, isolation, credentials, rooms, scheduling, and quota handling. Two things keep that from meaning finished.
 
@@ -56,7 +56,11 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-08](epics/EP-08-agent-hierarchy.md) | Agent hierarchy and authoring | Done | 4 |
 | [EP-09](epics/EP-09-tui-management.md) | Full TUI management surface | Done | 3 |
 | [EP-10](epics/EP-10-production-wiring.md) | Production wiring: serving, usage, and deferred hardening | Done | 6 |
-| [EP-11](epics/EP-11-operator-polish.md) | Operator polish: AAA console and the CLI surface | Done | 3 |
+| [EP-11](epics/EP-11-operator-polish.md) | Operator polish: AAA console and the CLI surface | Ready | 5 |
+| [EP-12](epics/EP-12-remote-exposure.md) | Beyond loopback: remote exposure with a real trust model | Ready | 5 |
+| [EP-13](epics/EP-13-distribution.md) | Distribution: packable artifact, versioning, and release CI | Ready | 5 |
+| [EP-14](epics/EP-14-dogfooding.md) | Live-account hardening | Ready | 3 |
+| [EP-15](epics/EP-15-upstream-filings.md) | Upstream pi-coding-agent hygiene | Ready | 3 |
 
 ## Sprints
 
@@ -73,7 +77,11 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [SP-09](sprints/SP-09-agent-hierarchy.md) | Agent hierarchy | Done | Persistent child peers under a parent: spawn-time parentage, cascades, and the authoring protocol and skills behind them. |
 | [SP-10](sprints/SP-10-tui-management.md) | TUI management | Done | The full-screen manager: browse the tree, edit definitions and models, steer agents without leaving the TUI. |
 | [SP-11](sprints/SP-11-production-wiring.md) | Production wiring | Done | The console served for real, budgets fed by real usage, and the hardening deferred to a named trigger. |
-| [SP-12](sprints/SP-12-operator-polish.md) | Operator polish | Done | AAA visuals and accessibility for the console, and a CLI that needs no TUI at all. |
+| [SP-12](sprints/SP-12-operator-polish.md) | Operator polish | Ready | AAA visuals and accessibility for the console, and a CLI that needs no TUI at all. |
+| [SP-13](sprints/SP-13-beyond-loopback.md) | Beyond loopback | Ready | Remote exposure of the console and control socket under one declared trust model: proxy TLS, operator token, enforced hierarchy. |
+| [SP-14](sprints/SP-14-release-pipeline.md) | Release pipeline | Ready | A packable npm artifact with a version story and a tag-driven release workflow. |
+| [SP-15](sprints/SP-15-live-accounts.md) | Live accounts | Ready | Dogfooding against real accounts, with findings landing back in the tree as tasks. |
+| [SP-16](sprints/SP-16-upstream-hygiene.md) | Upstream hygiene | Ready | Two pi-coding-agent issues filed with minimal repros, and the workarounds they replace made removable. |
 
 ## Decisions
 
@@ -95,6 +103,8 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [ADR-009](adr/ADR-009-threads-and-reactions.md) | Conversation gains threads and reactions; reactions carry agent status | Proposed |
 | [ADR-010](adr/ADR-010-mit-license.md) | MIT license, chosen by the repository owner | Accepted |
 | [ADR-011](adr/ADR-011-agent-hierarchy.md) | Persistent child agents are spawn-time state; kill cascades | Accepted |
+| [ADR-012](adr/ADR-012-remote-exposure.md) | Beyond loopback, a reverse proxy terminates TLS; the daemon never does | Proposed |
+| [ADR-013](adr/ADR-013-release-channel.md) | One npm package with a files allowlist; tagged releases, never per-commit publishes | Proposed |
 
 ## What to do next
 

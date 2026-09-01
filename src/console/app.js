@@ -349,6 +349,31 @@
 
 	/** @param {RoomMessage[]} messages */
 	const renderTranscript = (messages) => {
+		// A repaint destroys a focused control; remember which one and
+		// restore it after, so a live update never dumps keyboard focus on
+		// <body> — the same rule the channel list follows. Keyed by message
+		// row + classes + index among the row's same-class controls, since a
+		// message holds several reaction chips with identical classes.
+		const active = document.activeElement;
+		const activeRow =
+			active instanceof HTMLElement && messagesEl.contains(active)
+				? active.closest(".message")
+				: null;
+		/** @type {{ messageId: string; selector: string; index: number } | null} */
+		let focusKey = null;
+		if (active instanceof HTMLElement && activeRow instanceof HTMLElement) {
+			const selector = [...active.classList]
+				.map((name) => `.${CSS.escape(name)}`)
+				.join("");
+			const messageId = /** @type {HTMLElement} */ (activeRow).dataset.id;
+			if (selector !== "" && messageId !== undefined) {
+				focusKey = {
+					messageId,
+					selector,
+					index: [...activeRow.querySelectorAll(selector)].indexOf(active),
+				};
+			}
+		}
 		messagesEl.replaceChildren();
 		/** @type {string | null} */
 		let previousAuthor = null;
@@ -360,6 +385,14 @@
 			previousAuthor = message.author;
 		}
 		messagesEl.scrollTop = messagesEl.scrollHeight;
+		if (focusKey) {
+			const row = messagesEl.querySelector(
+				`.message[data-id="${CSS.escape(focusKey.messageId)}"]`,
+			);
+			const matches = [...(row?.querySelectorAll(focusKey.selector) ?? [])];
+			const restore = matches[focusKey.index] ?? matches[0];
+			if (restore instanceof HTMLElement) restore.focus();
+		}
 	};
 
 	/** @param {RoomMessage[]} messages */

@@ -652,6 +652,81 @@ ADRS = [
             ("Hierarchy design in the tree", "docs/delivery/tasks/T-802-daemon-hierarchy.md"),
         ],
     ),
+    ADR(
+        id="ADR-012",
+        slug="remote-exposure",
+        title="Beyond loopback, a reverse proxy terminates TLS; the daemon never does",
+        status="Proposed",
+        context=(
+            "Every server the daemon runs binds loopback today, and that is the stated "
+            "trust model: the console is a rooms leak if it binds a routable address (its comment says "
+            "so), and T-1004's connection identity was built as a switch that has never been flipped. "
+            "The moment an operator wants the console on a LAN, a tailnet, or a remote box, 'bind an address "
+            "and hope' is the intuitive answer and the expensive one: the console speaks the "
+            "operator token over plaintext, room contents cross the network, and the "
+            "cooperative parentage metadata (ADR-011) becomes authoritative trust nobody "
+            "intended. The epic that owns remote exposure needs the model decided before any "
+            "bind-address flag ships."
+        ),
+        decision=(
+            "The daemon never terminates TLS and never binds a routable address itself. Exposure "
+            "beyond loopback goes through a documented reverse proxy (Caddy, nginx, tailscale serve, "
+            "or an SSH tunnel) that terminates TLS and forwards to the loopback console/control "
+            "endpoints; the daemon gains an explicit opt-in flag acknowledging remote mode, "
+            "which (a) requires the operator token on every console request and control-socket "
+            "connection, and (b) flips parentage from cooperative metadata to enforced identity "
+            "per T-1004's prepared bearer layer. No remote mode, no enforcement change — loopback "
+            "stays the documented default and keeps today's flows working."
+        ),
+        consequences=[
+            "The console and control socket keep their loopback-only binds; the only new code is the refusal path and the flag.",
+            "Parentage enforcement becomes real only in remote mode, so loopback single-operator flows keep working unchanged (T-1004's tests stand).",
+            "Documentation owns the proxy recipes; the daemon ships no TLS code, no cert lifecycle, no reload semantics.",
+            "Every exposure recipe carries the same three assertions in the suite: refused bind without the flag, token required, hierarchy enforced when remote.",
+        ],
+        alternatives=[
+            ("Daemon-side TLS", "Duplicates cert lifecycle, reload, and ALPN semantics that mature proxies already solve, and a unix-socket-first daemon has no TLS code path today to extend."),
+            ("Tailscale-only as the model", "A deployment recipe, not a trust model — kept as a documented recipe, alongside the generic proxy recipe."),
+            ("SSH tunnel as the only story", "Works for one operator with shell access; it cannot serve the console to a browser on a phone, which is the actual ask."),
+        ],
+        evidence=[
+            ("Console's own loopback-only stance", "src/daemon/console-api.ts"),
+            ("The identity switch this flips", "docs/delivery/tasks/T-1004-control-socket-identity.md"),
+        ],
+    ),
+    ADR(
+        id="ADR-013",
+        slug="release-channel",
+        title="One npm package with a files allowlist; tagged releases, never per-commit publishes",
+        status="Proposed",
+        context=(
+            "The plugin works from a checkout but has no version story: no `files` allowlist, no "
+            "changelog, no release workflow, and a `patchedDependencies` patch that would silently "
+            "not travel with a published artifact. Shipping without deciding this means the "
+            "first release is improvised, and improvisation with a credential-bearing "
+            "daemon is how a private path or the patch contract leaks into a tarball."
+        ),
+        decision=(
+            "Distribution is a single npm package with an explicit `files` allowlist; versions are "
+            "semver with a CHANGELOG; releases are tag-driven CI runs that execute the full gate "
+            "suite, `npm pack` dry-run, then publish. The `patchedDependencies` story is part of "
+            "the artifact contract: either the `RpcClient.pid` patch is upstreamed (EP-15) or the "
+            "release pipeline applies the patch at pack time — the release task owns that call, "
+            "and the pack test proves the tarball carries whatever resolution shipped."
+        ),
+        consequences=[
+            "Publishing the plugin before EP-15 resolves the patch question ships a runtime whose pinned contract (pid accessor) is absent — the pack test must catch this.",
+            "Every release is reproducible: tag → gates → pack → publish, with no hand steps.",
+            "Git-only installs stay supported for development but are not a release channel.",
+        ],
+        alternatives=[
+            ("Git installs as the primary channel", "No version story for consumers and no CI gate on what ships; the daemon's own gates cannot run against a moving main."),
+            ("Publish on every commit", "Releases stop being a decision, and every main-branch breakage becomes a version someone may have installed."),
+        ],
+        evidence=[
+            ("Patch that must travel with any release", "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"),
+        ],
+    ),
 ]
 
 ADR_FILE = {a.id: f"{a.id}-{a.slug}.md" for a in ADRS}
@@ -1053,6 +1128,119 @@ EPICS = [
             "The visual overhaul ships as one design system (tokens), not a restyle per component.",
         ],
     ),
+    Epic(
+        id="EP-12",
+        slug="remote-exposure",
+        title="Beyond loopback: remote exposure with a real trust model",
+        outcome=(
+            "An operator can reach the console and the control socket from beyond localhost — through a documented "
+            "proxy recipe with TLS, an operator token, and parentage that is enforced rather than cooperative."
+        ),
+        why=(
+            "Every server the daemon runs binds loopback today, and that is the security model, not an oversight: the "
+            "console speaks the operator token, room contents cross the wire, and ADR-011's parentage is cooperative "
+            "metadata. Exposing any of it by 'bind an address' hands the network a rooms leak and an identity "
+            "system that was never meant to be one. T-1004 built the identity switch; this epic flips it under "
+            "one declared model instead of letting a bind address decide the trust boundary."
+        ),
+        scope=[
+            "An explicit remote-mode surface: config or flag, refusal when the hardening preconditions are unmet, loopback default unchanged.",
+            "TLS termination via documented reverse-proxy recipes per ADR-012; the daemon never terminates TLS itself.",
+            "Operator auth over the wire in remote mode: every request carries the operator token, and hierarchy enforcement flips from cooperative to authoritative (T-1004's prepared layer).",
+        ],
+        non_goals=[
+            "Changing the loopback default; remote exposure is an explicit opt-in, never a side effect of binding an address.",
+            "Multi-tenant authorization — the model is one operator with a token, not per-user accounts.",
+        ],
+        acceptance=[
+            "A non-loopback bind without the remote-mode flag is refused with the reason on stderr, never a partial boot.",
+            "In remote mode, a console request or socket connection without the operator token is refused; the loopback default keeps working exactly as today.",
+            "Parentage enforcement is asserted in remote mode: a worker token cannot kill or inject into a peer it does not own, over a proxied connection.",
+            "Every recipe in the docs (proxy, tailscale, SSH tunnel) carries the same refusal/required-token assertions.",
+        ],
+        adrs=["ADR-012"],
+    ),
+    Epic(
+        id="EP-13",
+        slug="distribution",
+        title="Distribution: packable artifact, versioning, and release CI",
+        outcome=(
+            "The plugin ships as one npm package with a version story — a files allowlist, a changelog, and a tag-driven "
+            "release pipeline that runs the gates before anything publishes."
+        ),
+        why=(
+            "The plugin installs and runs from a checkout, but nothing about a release is reproducible: no "
+            "tarball contract, no version policy, and a patchedDependencies story that does not survive "
+            "npm pack today. Improvising the first release with a credential-bearing daemon is how a private "
+            "path or the patch contract ends up in a tarball."
+        ),
+        scope=[
+            "A files allowlist in the manifest and a pack test that proves the tarball contains exactly what the plugin needs.",
+            "Semver + CHANGELOG + a tag-driven release workflow that runs gates first, publishes second.",
+            "A decision on how the pi-coding-agent patch travels with the artifact (ADR-013; upstreaming is EP-15).",
+        ],
+        non_goals=[
+            "Publishing before the patch question is answered — the pack test makes that a gate, not a judgment call.",
+            "Releases on every commit; release is a tag, not a push.",
+        ],
+        acceptance=[
+            "`npm pack` dry-run output is asserted in CI: no unintended file ships, and the patch story is explicit.",
+            "A release is a tag; CI runs the full gate suite before publish.",
+            "The README's install section describes installing the released artifact, not the repo.",
+        ],
+        adrs=["ADR-013"],
+    ),
+    Epic(
+        id="EP-14",
+        slug="dogfooding",
+        title="Live-account hardening",
+        outcome=(
+            "The system runs against the operator's real accounts under a scripted scenario, and every finding "
+            "becomes a tree entry — the tree stays the single backlog."
+        ),
+        why=(
+            "Eight hundred tests prove the machinery; they say nothing about a live account's behavior — a real "
+            "provider's usage shape, a real broker's long-poll cadence, a TUI at 3am. The gap between 'green suite' "
+            "and 'trusted daily' is exactly what this epic measures."
+        ),
+        scope=[
+            "A dogfooding runbook and a scripted scenario that drives the CLI verbs end-to-end against a live daemon.",
+            "A session-capture protocol so a finding is reproducible and attributable.",
+        ],
+        non_goals=[
+            "Fixing findings in-place; findings become tasks in the tree, prioritized there.",
+        ],
+        acceptance=[
+            "The scripted scenario exercises every CLI verb and both worker paths against a live daemon.",
+            "Every finding either becomes a new task in the generator or is closed with a reason recorded in the runbook.",
+        ],
+    ),
+    Epic(
+        id="EP-15",
+        slug="upstream-filings",
+        title="Upstream pi-coding-agent hygiene",
+        outcome=(
+            "The two workarounds — the node_modules walk in resolveOmpCli and the patchedDependencies entry — are "
+            "each backed by a filed upstream issue with a minimal repro, and both are removable."
+        ),
+        why=(
+            "Workarounds without a filed upstream cause drift into load-bearing code. The Bun.plugin "
+            "memo-corruption walk and the RpcClient.pid patch were both diagnosed to root cause; leaving them "
+            "unfiled means a future upgrade silently breaks the workaround or the patch, and nobody knows which "
+            "side moved."
+        ),
+        scope=[
+            "Minimal repros for the legacy-pi-compat memo-corruption and the RpcClient.pid accessor, filed upstream.",
+            "A removal task so the workarounds die with their upstream fixes.",
+        ],
+        non_goals=[
+            "Maintaining a fork; the patch exists to be deleted.",
+        ],
+        acceptance=[
+            "Both issues are filed with a minimal repro; links are recorded in the tree.",
+            "The removal task names the exact code that goes away when each fix lands.",
+        ],
+    ),
 ]
 
 EPIC_FILE = {e.id: f"{e.id}-{e.slug}.md" for e in EPICS}
@@ -1092,6 +1280,18 @@ SPRINTS = [
     Sprint(id="SP-12", slug="operator-polish", title="Operator polish",
            theme="AAA visuals and accessibility for the console, and a CLI that needs "
                  "no TUI at all."),
+    Sprint(id="SP-13", slug="beyond-loopback", title="Beyond loopback",
+           theme="Remote exposure of the console and control socket under one declared "
+                 "trust model: proxy TLS, operator token, enforced hierarchy."),
+    Sprint(id="SP-14", slug="release-pipeline", title="Release pipeline",
+           theme="A packable npm artifact with a version story and a tag-driven "
+                 "release workflow."),
+    Sprint(id="SP-15", slug="live-accounts", title="Live accounts",
+           theme="Dogfooding against real accounts, with findings landing back in "
+                 "the tree as tasks."),
+    Sprint(id="SP-16", slug="upstream-hygiene", title="Upstream hygiene",
+           theme="Two pi-coding-agent issues filed with minimal repros, and the "
+                 "workarounds they replace made removable."),
 ]
 
 SPRINT_FILE = {s.id: f"{s.id}-{s.slug}.md" for s in SPRINTS}
@@ -3101,6 +3301,529 @@ TASKS += [
                 evidence=[("Verb handlers and the socket client", "src/daemon/cli.ts"), ("CLI suite, 15 tests incl. process-level exit codes and the scripting flow", "tests/daemon-cli.test.ts")],
         depends_on=["T-502"],
         out_of_scope=["The daemon's own `daemon` verb internals (already shipped), and any TUI behavior."],
+    ),
+    Task(
+        id="T-1104", slug="console-focus-stability", title="Focus stability across transcript repaints",
+        epic="EP-11", sprint="SP-12", status="Done",
+        goal="A live transcript repaint never dumps keyboard focus, and the keyboard tests are deterministic against the live feed.",
+        read_first=[
+            ("Console client", "src/console/app.js"),
+            ("Browser suite", "tests/console-client.test.ts"),
+        ],
+        files=[
+            "src/console/app.js",
+            "tests/console-client.test.ts",
+        ],
+        assets=[
+            ("src/console/app.js", "Edited", "renderTranscript remembers the focused control (message row, classes, index among same-class controls) and restores it after replaceChildren — the rule the channel list already followed."),
+            ("tests/console-client.test.ts", "Edited", "focusInPage replaces two-roundtrip page.focus everywhere; the unread test waits for the events socket; the repaint regression test; explicit 10s on the thread-open selector waits."),
+        ],
+        steps=[
+            "renderTranscript: capture the focused control keyed by message row, classes, and index among the row's same-class controls before replaceChildren, and restore it after — mirroring renderChannels. Found via the thread keyboard test flaking ~1-in-5: a repaint between page.focus and Enter destroyed the focused opener.",
+            "focusInPage: one in-page round-trip, mirroring clickInPage. Puppeteer's page.focus resolves the selector and focuses in two CDP round-trips; a repaint between them makes focus() a silent no-op on a detached node. Migrate every page.focus call in the suite.",
+            "The unread test waits for the events socket to be OPEN before posting: a pre-open post is a missed frame, not a slow one — the open-time refetch heals the transcript, not unreadRooms.",
+            "Regression test: focus the thread opener, force a repaint with a new post, assert focus survives on the same control and Enter still opens the pane.",
+        ],
+        acceptance=[
+            "The repaint regression test fails without the client change and passes with it (revert-verified).",
+            "The console suite runs green repeatedly (12 consecutive full runs) where the thread keyboard test flaked intermittently.",
+        ],
+        evidence=[("Focus capture/restore in renderTranscript", "src/console/app.js"), ("focusInPage, socket-open wait, repaint regression test", "tests/console-client.test.ts")],
+        depends_on=["T-1102"],
+        out_of_scope=["Healing unreadRooms for frames missed while the socket was down — filed as T-1105."],
+    ),
+    Task(
+        id="T-1105", slug="unread-reconcile-on-open", title="Reconcile unread state when the events socket opens",
+        epic="EP-11", sprint="SP-12", status="Ready",
+        goal="Messages that arrive in background rooms while the events socket is down (or not yet open) mark those rooms unread on reconnect — missed frames are healed, not lost.",
+        read_first=[
+            ("Console client", "src/console/app.js"),
+            ("Console API push", "src/daemon/console-api.ts"),
+            ("Unread test", "tests/console-client.test.ts"),
+        ],
+        files=[
+            "src/console/app.js",
+            "tests/console-client.test.ts",
+        ],
+        assets=[
+            ("src/console/app.js", "Edited", "Per-room lastSeen tracking; the socket-open refetch marks rooms with newer activity unread, the same heal the transcript already gets."),
+            ("tests/console-client.test.ts", "Edited", "Sever the socket, post in a background room, reconnect: the unread affordance appears."),
+        ],
+        steps=[
+            "Track per-room lastSeen client-side (a visit sets it; in-memory is enough).",
+            "On socket open, alongside the transcript refetch, mark rooms whose latest activity is newer than lastSeen unread — never the open room.",
+            "Browser-prove the sever-and-post-while-deaf case, reusing the __consoleSockets hook.",
+        ],
+        acceptance=[
+            "A post made while the console is deaf marks the room unread after reconnect, browser-proven.",
+            "The open channel never marks itself unread.",
+        ],
+        depends_on=["T-1104"],
+        out_of_scope=["Read cursors persisted across console sessions."],
+    ),
+]
+
+TASKS += [
+    # ── EP-12: beyond loopback ───────────────────────────────────────────────
+    Task(
+        id="T-1201", slug="exposure-policy", title="Remote-mode surface and bind refusal",
+        epic="EP-12", sprint="SP-13", status="Ready",
+        goal="One explicit remote-mode switch exists; a non-loopback bind without it is refused with the reason on stderr, and the loopback default is byte-identical to today.",
+        read_first=[
+            ARCH,
+            ("ADR-012: remote exposure", "docs/delivery/adr/ADR-012-remote-exposure.md"),
+            ("Console API and its loopback stance", "src/daemon/console-api.ts"),
+            ("Control socket", "src/daemon/socket.ts"),
+        ],
+        files=[
+            "src/daemon/main.ts",
+            "src/daemon/console-api.ts",
+            "src/daemon/socket.ts",
+            "tests/remote-exposure.test.ts",
+        ],
+        assets=[
+            ("src/daemon/main.ts", "Edited", "Parses the remote-mode flag/config at boot; the refusal runs before any listener opens."),
+            ("src/daemon/console-api.ts", "Edited", "The loopback-only comment becomes an enforced gate: non-loopback requires remote mode plus the operator token on every request."),
+            ("src/daemon/socket.ts", "Edited", "The same gate for the control socket's bind and per-connection identity."),
+            ("tests/remote-exposure.test.ts", "New", "Refusal without the flag; token required in remote mode; loopback flows unchanged."),
+        ],
+        steps=[
+            "Add the surface: one flag or config key, parsed at boot, off by default. A non-loopback bind without it exits before any listener opens, naming the flag on stderr.",
+            "Thread remote mode into the console API and the control socket: in remote mode every request and connection presents the operator token (T-1004's layer).",
+            "Tests: refusal without the flag, token required in remote mode, and every existing suite passing unchanged on the loopback default.",
+        ],
+        acceptance=[
+            "A non-loopback bind without the flag exits before any listener opens, with the reason on stderr.",
+            "Remote mode without the operator token is refused on both the console and the control socket.",
+            "The loopback default keeps every existing suite green unchanged.",
+        ],
+        depends_on=["T-1004"],
+        out_of_scope=["TLS itself (T-1202, via proxy per ADR-012) and the console's login UX (T-1203)."],
+    ),
+    Task(
+        id="T-1202", slug="tls-termination", title="Proxy recipes and behind-proxy correctness",
+        epic="EP-12", sprint="SP-13", status="Blocked",
+        goal="Remote mode is reachable only behind TLS: the docs ship copy-paste proxy recipes, and the suite proves the daemon behaves correctly behind a proxy.",
+        read_first=[
+            ("ADR-012: remote exposure", "docs/delivery/adr/ADR-012-remote-exposure.md"),
+            ("Console API", "src/daemon/console-api.ts"),
+            ("Identity suite", "tests/socket-identity.test.ts"),
+        ],
+        files=[
+            "docs/remote-exposure.md",
+            "tests/remote-exposure.test.ts",
+            "src/daemon/console-api.ts",
+        ],
+        assets=[
+            ("docs/remote-exposure.md", "New", "The three recipes — Caddy, tailscale serve, SSH tunnel — each ending in the same three checks."),
+            ("tests/remote-exposure.test.ts", "Edited", "Behind-proxy assertions: forwarded headers honored, unproxied remote access refused."),
+            ("src/daemon/console-api.ts", "Edited", "Proxy-aware request handling per the recipe contract: scheme and host from forwarded headers."),
+        ],
+        steps=[
+            "Write the three recipes in docs/remote-exposure.md; each ends with the same checks: refused bind without the flag, token required, hierarchy enforced.",
+            "Make the console proxy-aware so URLs the client builds are correct behind the documented proxy.",
+            "Extend the suite: a remote request that bypasses the proxy (no forwarded identity) is refused or normalized, never trusted.",
+        ],
+        acceptance=[
+            "Each recipe's three checks appear verbatim in the doc and are mirrored by suite assertions.",
+            "`omp-agent console` prints a URL that is correct when the daemon sits behind the documented proxy.",
+        ],
+        depends_on=["T-1201"],
+        out_of_scope=["The daemon terminating TLS (ADR-012 rejects it) and the login flow UX (T-1203)."],
+    ),
+    Task(
+        id="T-1203", slug="remote-console-auth", title="Operator-token flow in the console client",
+        epic="EP-12", sprint="SP-13", status="Blocked",
+        goal="The console client authenticates as the operator over the wire: a first-visit token prompt, reload persistence, a clear refusal state — and no prompt at all on loopback.",
+        read_first=[
+            ("Console client", "src/console/app.js"),
+            ("Console API", "src/daemon/console-api.ts"),
+            ("Browser suite", "tests/console-client.test.ts"),
+        ],
+        files=[
+            "src/console/app.js",
+            "src/console/index.html",
+            "src/daemon/console-api.ts",
+            "tests/console-client.test.ts",
+        ],
+        assets=[
+            ("src/console/app.js", "Edited", "Token entry flow, the token on every fetch and the WebSocket upgrade, a 401 state with re-entry."),
+            ("src/console/index.html", "Edited", "The token prompt markup: semantic, labeled, keyboard-first."),
+            ("src/daemon/console-api.ts", "Edited", "Token verification on every request in remote mode; the 401 shape the client renders."),
+            ("tests/console-client.test.ts", "Edited", "Browser-proven: prompt, success, refusal, reload persistence."),
+        ],
+        steps=[
+            "Daemon side first: the remote-mode 401 shape, then the client renders it as a labeled prompt using the T-1101/T-1102 landmarks and focus model.",
+            "Persist the token in sessionStorage (an operator surface is not a remember-me app) and send it on every request, including the WebSocket upgrade.",
+            "The client learns the mode from the daemon's first response, not from configuration; loopback never shows the prompt.",
+        ],
+        acceptance=[
+            "The browser suite drives: first visit shows the prompt, a good token opens the console, reload with the stored token opens directly, a bad token shows the refusal state with re-entry.",
+            "The WebSocket carries the token; an unauthenticated upgrade is refused in remote mode.",
+            "Loopback flows show no prompt and pass unchanged.",
+        ],
+        depends_on=["T-1202"],
+        out_of_scope=["Multi-user accounts or sessions; one operator token, per ADR-012."],
+    ),
+    Task(
+        id="T-1204", slug="authoritative-hierarchy", title="Hierarchy enforcement flips in remote mode",
+        epic="EP-12", sprint="SP-13", status="Blocked",
+        goal="In remote mode, parentage stops being cooperative metadata: kill, inject, and spawn-parent claims are enforced against the caller's identity, and the cooperative path is unreachable remotely.",
+        read_first=[
+            ("ADR-011: agent hierarchy", "docs/delivery/adr/ADR-011-agent-hierarchy.md"),
+            ("Control socket", "src/daemon/socket.ts"),
+            ("Identity suite", "tests/socket-identity.test.ts"),
+        ],
+        files=[
+            "src/daemon/socket.ts",
+            "tests/socket-identity.test.ts",
+            "tests/remote-exposure.test.ts",
+        ],
+        assets=[
+            ("src/daemon/socket.ts", "Edited", "Remote mode flips the enforcement switch T-1004 built; loopback keeps cooperative behavior."),
+            ("tests/socket-identity.test.ts", "Edited", "The enforcement assertions run in remote mode."),
+            ("tests/remote-exposure.test.ts", "Edited", "The flip is on in remote mode and off on loopback — both asserted."),
+        ],
+        steps=[
+            "Wire the remote-mode flag to T-1004's enforcement: a worker token's kill, bump, or inject is refused against peers it does not own; a spawn's parent claim must equal the caller identity.",
+            "Assert the negative space: loopback keeps cooperative parentage (existing suites stand), remote mode has no cooperative path.",
+            "Boot in remote mode logs the active trust model once, so an operator can audit which is live.",
+        ],
+        acceptance=[
+            "Remote mode: every privileged verb refuses a foreign-identity caller, suite-proven over the proxied connection shape.",
+            "Loopback: cooperative behavior and the existing suites are unchanged.",
+            "The boot log names the active trust model.",
+        ],
+        depends_on=["T-1201"],
+        out_of_scope=["Room ACLs beyond parentage (ADR-011's list); identity grows no new powers here."],
+    ),
+    Task(
+        id="T-1205", slug="exposure-runbook", title="Threat model and operator checklist",
+        epic="EP-12", sprint="SP-13", status="Blocked",
+        goal="One page an operator reads before flipping remote mode: the threat model, the checklist, and the audit commands — so 'should I enable this' has a written answer.",
+        read_first=[
+            ("ADR-012: remote exposure", "docs/delivery/adr/ADR-012-remote-exposure.md"),
+            ("README", "README.md"),
+            ARCH,
+        ],
+        files=[
+            "docs/remote-exposure.md",
+            "README.md",
+            "ARCHITECTURE.md",
+        ],
+        assets=[
+            ("docs/remote-exposure.md", "Edited", "The threat-model and checklist sections land here; T-1202's recipes reference them."),
+            ("README.md", "Edited", "A remote-access section pointing at the runbook, not duplicating it."),
+            ("ARCHITECTURE.md", "Edited", "The trust-model section names remote mode and its preconditions."),
+        ],
+        steps=[
+            "Threat model: what the operator token protects (room contents, kill authority, credentials via the gateway), what the proxy protects (transport), what stays out of scope (multi-tenant).",
+            "Checklist: flag set, token verified non-default, proxy TLS verified, enforcement state read from the boot log.",
+            "Audit commands: how to check which mode is live and which connections are authenticated.",
+        ],
+        acceptance=[
+            "The runbook names every precondition T-1201 enforces, in the same words the daemon prints on stderr.",
+            "README and ARCHITECTURE point at the runbook; there is no duplicated threat model to drift.",
+        ],
+        depends_on=["T-1201"],
+    ),
+    # ── EP-13: distribution ──────────────────────────────────────────────────
+    Task(
+        id="T-1301", slug="packable-artifact", title="Files allowlist and the pack test",
+        epic="EP-13", sprint="SP-14", status="Ready",
+        goal="`npm pack` produces a tarball with exactly what the plugin needs — manifest, sources, console assets, the patches contract, LICENSE, README — and the suite proves it.",
+        read_first=[
+            ("Package manifest", "package.json"),
+            ("ADR-013: release channel", "docs/delivery/adr/ADR-013-release-channel.md"),
+            ("CI workflow", ".github/workflows/ci.yml"),
+        ],
+        files=[
+            "package.json",
+            "tests/pack.test.ts",
+        ],
+        assets=[
+            ("package.json", "Edited", "The files allowlist and a prepack script that runs the gates."),
+            ("tests/pack.test.ts", "New", "Parses `npm pack --dry-run --json` and asserts both directions: expected paths present, private paths absent."),
+        ],
+        steps=[
+            "Author the files allowlist: src, patches, LICENSE, README. Tests, docs, and .github stay out.",
+            "prepack runs typecheck and the fast suites; packing a broken tree fails before the tarball exists.",
+            "The pack test asserts the dry-run manifest both ways: expected present, and nothing under tests/, docs/, or .github/ ships.",
+        ],
+        acceptance=[
+            "The dry-run manifest contains src/, patches/, LICENSE, and README.md, and nothing under tests/, docs/, or .github/.",
+            "CI runs the pack test; a manifest regression fails the build.",
+        ],
+        out_of_scope=["Publishing itself (T-1303) and the patch-travel decision (ADR-013, implemented in T-1303 or resolved by T-1503)."],
+    ),
+    Task(
+        id="T-1302", slug="versioning-policy", title="Semver policy and the changelog",
+        epic="EP-13", sprint="SP-14", status="Ready",
+        goal="The repo has a written versioning policy and a changelog the release workflow consumes: semver semantics for a pre-1.0 plugin and the release-commit ritual.",
+        read_first=[
+            ("ADR-013: release channel", "docs/delivery/adr/ADR-013-release-channel.md"),
+            ("Package manifest", "package.json"),
+            ("README", "README.md"),
+        ],
+        files=[
+            "CHANGELOG.md",
+            "README.md",
+        ],
+        assets=[
+            ("CHANGELOG.md", "New", "Keep-a-changelog format: the policy in a header paragraph, Unreleased on top."),
+            ("README.md", "Edited", "A one-paragraph pointer to the policy; the ritual lives in the changelog header."),
+        ],
+        steps=[
+            "CHANGELOG.md in keep-a-changelog format; the header states the policy (pre-1.0: minor is features, patch is fixes, breaking is minor until 1.0).",
+            "The ritual: version bump, changelog move from Unreleased, and tag in one commit; T-1303's workflow consumes the tag.",
+            "README gains a pointer paragraph and nothing more — one home for the policy.",
+        ],
+        acceptance=[
+            "CHANGELOG.md exists with the policy header and an Unreleased section.",
+            "After a release, package.json's version matches the latest changelog entry.",
+        ],
+        out_of_scope=["The release workflow itself (T-1303)."],
+    ),
+    Task(
+        id="T-1303", slug="release-ci", title="Tag-driven release workflow",
+        epic="EP-13", sprint="SP-14", status="Blocked",
+        goal="A pushed tag runs the full gate suite and the pack test, then publishes the npm artifact — with ADR-013's patch-travel decision implemented as a pipeline step, not a wiki note.",
+        read_first=[
+            ("CI workflow", ".github/workflows/ci.yml"),
+            ("Package manifest", "package.json"),
+            ("ADR-013: release channel", "docs/delivery/adr/ADR-013-release-channel.md"),
+        ],
+        files=[
+            ".github/workflows/release.yml",
+            "package.json",
+        ],
+        assets=[
+            (".github/workflows/release.yml", "New", "Tag-triggered: install, gates, pack test, publish with provenance."),
+            ("package.json", "Edited", "publishConfig and the version the tag step asserts."),
+        ],
+        steps=[
+            "Trigger on v* tags; a step asserts the tag version equals package.json's version before anything publishes.",
+            "Run the full suite, the delivery-doc gates, and the pack test on the tag checkout.",
+            "Publish with provenance; the patch-travel step either applies patches/ at pack time or asserts the patch is gone (T-1503 Done).",
+        ],
+        acceptance=[
+            "A tag whose version mismatches package.json fails before publish.",
+            "A workflow_dispatch dry-run mode exercises everything except the publish step.",
+        ],
+        depends_on=["T-1301", "T-1302"],
+        out_of_scope=["GitHub Releases notes beyond the changelog excerpt."],
+    ),
+    Task(
+        id="T-1304", slug="install-docs", title="README install path for the released artifact",
+        epic="EP-13", sprint="SP-14", status="Blocked",
+        goal="The README's install path installs the released package into OMP and reaches a running daemon in five commands — not a repo build.",
+        read_first=[
+            ("README", "README.md"),
+            ("Package manifest", "package.json"),
+        ],
+        files=["README.md"],
+        assets=[
+            ("README.md", "Edited", "Install and quickstart rewritten against the released artifact; the checkout-build path moves to a development section."),
+        ],
+        steps=[
+            "Install: add the package, OMP picks up the extension, first daemon boot.",
+            "Verify: `omp-agent status` answers and the console opens.",
+            "Move the build-from-checkout instructions under Development.",
+        ],
+        acceptance=[
+            "The quickstart's commands are executable as written against the packed artifact, verified per release (manual check named in the runbook or a fixture install in the pack test).",
+        ],
+        depends_on=["T-1301"],
+        out_of_scope=["The release pipeline (T-1303)."],
+    ),
+    Task(
+        id="T-1305", slug="patch-hygiene-gate", title="patches/ contains code only, enforced",
+        epic="EP-13", sprint="SP-14", status="Ready",
+        goal="CI proves every file under patches/ is a code-only patch: no binary hunks, no stray files, no hunks touching non-source paths — the .DS_Store incident becomes a gate.",
+        read_first=[
+            ("The one patch under contract", "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"),
+            ("CI workflow", ".github/workflows/ci.yml"),
+        ],
+        files=[
+            "scripts/check-patches.py",
+            ".github/workflows/ci.yml",
+        ],
+        assets=[
+            ("scripts/check-patches.py", "New", "Parses unified diffs under patches/; fails on binary hunks, non-patch files, and hunks outside source paths; has a --selftest fixture mode."),
+            (".github/workflows/ci.yml", "Edited", "Runs the gate alongside the existing gates."),
+        ],
+        steps=[
+            "Parse each patch: every hunk must name a source path in the package; GIT binary hunks and literal/delta content fail.",
+            "Fail on any non-.patch file in patches/.",
+            "Wire into CI; --selftest proves the gate fails on a fixture containing a binary hunk.",
+        ],
+        acceptance=[
+            "The gate passes on the current patch and fails on a binary-hunk fixture under --selftest.",
+            "CI runs both the gate and its selftest.",
+        ],
+        out_of_scope=["Removing the patch (T-1503)."],
+    ),
+    # ── EP-14: live accounts ─────────────────────────────────────────────────
+    Task(
+        id="T-1401", slug="dogfood-runbook", title="Dogfooding runbook",
+        epic="EP-14", sprint="SP-15", status="Ready",
+        goal="A written runbook takes the operator from zero to a live dogfood session: account checklist, the scenario, what to capture, and how a finding becomes a task.",
+        read_first=[
+            ("README", "README.md"),
+            ("CLI verbs the scenario drives", "src/daemon/cli.ts"),
+            ("Console guide", "docs/web-console.md"),
+        ],
+        files=["docs/dogfooding.md"],
+        assets=[
+            ("docs/dogfooding.md", "New", "The runbook: preconditions, scenario, capture protocol, triage rules."),
+        ],
+        steps=[
+            "Preconditions: which accounts and definitions, a clean daemon state, and the explicit 'this touches real accounts' checklist.",
+            "The scenario: spawn a parent, deploy a child, run a room exchange, exercise every CLI verb, run both worker backends, kill with cascade.",
+            "Capture and triage: where the session log lives, and the rule that every finding becomes a generator task or a recorded wont-fix.",
+        ],
+        acceptance=[
+            "A reader can run the full session from the runbook alone; every step names its command or check.",
+        ],
+        out_of_scope=["Automating the scenario (T-1402)."],
+    ),
+    Task(
+        id="T-1402", slug="dogfood-harness", title="Scripted dogfood scenario driver",
+        epic="EP-14", sprint="SP-15", status="Blocked",
+        goal="The runbook's scenario runs as one command: a script drives `omp-agent --json` verbs end-to-end against a live daemon, captures a timestamped session log, and exits non-zero on any failed check.",
+        read_first=[
+            ("CLI verbs", "src/daemon/cli.ts"),
+            ("CLI suite patterns", "tests/daemon-cli.test.ts"),
+        ],
+        files=[
+            "scripts/dogfood.ts",
+            "tests/dogfood.test.ts",
+        ],
+        assets=[
+            ("scripts/dogfood.ts", "New", "The scenario driver: verbs in sequence, JSON results asserted, log capture."),
+            ("tests/dogfood.test.ts", "New", "The driver against a fixture daemon with stub accounts — the harness is testable without live credentials."),
+        ],
+        steps=[
+            "Drive the scenario through the CLI's --json surface only — no socket shortcuts, so the harness tests what an operator runs.",
+            "Capture a timestamped log of every command, result, and elapsed time; the runbook's triage section reads this format.",
+            "The suite runs the driver against a booted fixture daemon; live-account runs are the operator's, per the runbook.",
+        ],
+        acceptance=[
+            "One command runs the scenario and writes a session log; any failed check exits non-zero with the step named.",
+            "The suite proves the driver against a fixture daemon with no live credentials.",
+        ],
+        depends_on=["T-1401"],
+    ),
+    Task(
+        id="T-1403", slug="first-live-session", title="First live session and triage",
+        epic="EP-14", sprint="SP-15", status="Blocked",
+        goal="The first live dogfood session runs end-to-end and every finding lands in the tree — the epic's acceptance, executed.",
+        read_first=[
+            ("CLI verbs the harness drives", "src/daemon/cli.ts"),
+            ("Worker backends the scenario exercises", "src/worker/lifecycle.ts"),
+        ],
+        files=[
+            "docs/dogfooding.md",
+            "scripts/gen-delivery-docs.py",
+        ],
+        assets=[
+            ("docs/dogfooding.md", "Edited", "The session record: date, accounts, outcome per step, finding dispositions."),
+            ("scripts/gen-delivery-docs.py", "Edited", "Each accepted finding becomes a task entry with the usual contract."),
+        ],
+        steps=[
+            "Pick this up WHEN the operator's live accounts are ready and the runbook plus harness are Done.",
+            "Run the harness against the live daemon and capture the log.",
+            "Triage within the session: every finding becomes a generator task (Ready or Blocked per its deps) or a wont-fix with the reason in the runbook.",
+        ],
+        acceptance=[
+            "The session record is in the runbook with a disposition for every finding.",
+            "The generator regenerates clean with the finding tasks added.",
+        ],
+        depends_on=["T-1402"],
+    ),
+    # ── EP-15: upstream hygiene ──────────────────────────────────────────────
+    Task(
+        id="T-1501", slug="repro-import-meta-resolve", title="Minimal repro: Bun.plugin memo-corruption of import.meta.resolve",
+        epic="EP-15", sprint="SP-16", status="Ready",
+        goal="A minimal, self-contained repro of the legacy-pi-compat Bun.plugin onResolve hook memo-corrupting import.meta.resolve for @oh-my-pi/* — runnable upstream without our repo.",
+        read_first=[
+            ("The workaround this replaces", "src/worker/lifecycle.ts"),
+            ("Worker lifecycle suite", "tests/worker-lifecycle.test.ts"),
+        ],
+        files=[
+            "repro/bun-plugin-memo/README.md",
+            "repro/bun-plugin-memo/repro.ts",
+        ],
+        assets=[
+            ("repro/bun-plugin-memo/README.md", "New", "Symptoms, root cause, affected versions, and the walk we do instead — written as the issue body."),
+            ("repro/bun-plugin-memo/repro.ts", "New", "The minimal failure: plugin installed, resolution corrupted under deterministic ordering; plugin removed, resolution correct."),
+        ],
+        steps=[
+            "Extract the failure from resolveOmpCli's history: the legacy-pi-compat onResolve hook memoizes across packages, so resolving a second @oh-my-pi/* package returns the first's resolution.",
+            "Make it minimal: one file, pinned deps, no daemon — run, observe the wrong resolution; remove the plugin, observe the correct one.",
+            "The README names the affected Bun and pi-coding-agent versions and links our workaround location.",
+        ],
+        acceptance=[
+            "The repro runs standalone and demonstrates the corruption deterministically.",
+            "The README is the issue body, ready to paste.",
+        ],
+        out_of_scope=["Filing the issue (T-1502) and removing our workaround (T-1503)."],
+    ),
+    Task(
+        id="T-1502", slug="file-upstream-issues", title="File both pi-coding-agent issues",
+        epic="EP-15", sprint="SP-16", status="Blocked",
+        goal="Both upstream issues are filed — the memo-corruption with T-1501's repro, and the RpcClient.pid accessor request — with links recorded in the tree and at the workaround sites.",
+        read_first=[
+            ("The repro task whose README is the issue body", "docs/delivery/tasks/T-1501-repro-import-meta-resolve.md"),
+            ("Workaround site one", "src/worker/lifecycle.ts"),
+            ("Workaround site two", "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"),
+        ],
+        files=[
+            "scripts/gen-delivery-docs.py",
+            "src/worker/lifecycle.ts",
+        ],
+        assets=[
+            ("scripts/gen-delivery-docs.py", "Edited", "The issue URLs recorded as this task's evidence."),
+            ("src/worker/lifecycle.ts", "Edited", "The workaround comment names the upstream issue URL."),
+        ],
+        steps=[
+            "File the memo-corruption issue with T-1501's repro attached.",
+            "File the RpcClient.pid accessor request: one paragraph of motivation (supervision without scraping the process table) and the proposed API.",
+            "Record both URLs here and at the workaround and patch sites.",
+        ],
+        acceptance=[
+            "Both URLs are in the tree and in the code comments; a reader of either workaround reaches the issue in one click.",
+        ],
+        depends_on=["T-1501"],
+    ),
+    Task(
+        id="T-1503", slug="drop-workarounds", title="Remove the walk and the patch once upstream ships",
+        epic="EP-15", sprint="SP-16", status="Planned",
+        goal="When a released pi-coding-agent contains both fixes, the node_modules walk in resolveOmpCli and the patchedDependencies entry are deleted in one change, with the contract suites proving nothing relied on them.",
+        read_first=[
+            ("The walk", "src/worker/lifecycle.ts"),
+            ("patchedDependencies", "package.json"),
+            ("The patch", "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"),
+        ],
+        files=[
+            "src/worker/lifecycle.ts",
+            "package.json",
+            "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch",
+        ],
+        assets=[
+            ("src/worker/lifecycle.ts", "Edited", "The walk collapses back to a direct import.meta.resolve."),
+            ("package.json", "Edited", "The patchedDependencies entry is removed."),
+            ("patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch", "Edited", "Deleted; this row records the removal."),
+        ],
+        steps=[
+            "Pick this up WHEN a released pi-coding-agent contains both fixes (T-1502's issues closed).",
+            "Remove the walk and the patch and upgrade the pinned version.",
+            "Full suite plus contract suites: the failure modes the workarounds covered are now covered by upstream behavior, asserted by the existing contracts.",
+        ],
+        acceptance=[
+            "No node_modules walk and no patchedDependencies entry remain; the suites are green on the upgraded dependency.",
+        ],
+        out_of_scope=["Waiting on upstream releases outside this repo's control; this task stays Planned until T-1502's issues close."],
     ),
 ]
 

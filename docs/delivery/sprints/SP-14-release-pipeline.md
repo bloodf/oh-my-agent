@@ -1,0 +1,19 @@
+# SP-14 — Release pipeline
+
+**Status:** Ready
+
+*Derived from the tasks below.*
+
+## Theme
+
+A packable npm artifact with a version story and a tag-driven release workflow.
+
+## Tasks
+
+| Task | Epic | Title | Status |
+|---|---|---|---|
+| [T-1301](../tasks/T-1301-packable-artifact.md) | [EP-13](../epics/EP-13-distribution.md) | Files allowlist and the pack test | Ready |
+| [T-1302](../tasks/T-1302-versioning-policy.md) | [EP-13](../epics/EP-13-distribution.md) | Semver policy and the changelog | Ready |
+| [T-1303](../tasks/T-1303-release-ci.md) | [EP-13](../epics/EP-13-distribution.md) | Tag-driven release workflow | Blocked |
+| [T-1304](../tasks/T-1304-install-docs.md) | [EP-13](../epics/EP-13-distribution.md) | README install path for the released artifact | Blocked |
+| [T-1305](../tasks/T-1305-patch-hygiene-gate.md) | [EP-13](../epics/EP-13-distribution.md) | patches/ contains code only, enforced | Ready |
