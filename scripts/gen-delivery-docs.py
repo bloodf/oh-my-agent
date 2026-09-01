@@ -746,6 +746,66 @@ ADRS = [
             ("Patch that must travel with any release", "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"),
         ],
     ),
+    ADR(
+        id="ADR-014",
+        slug="attribution-policy",
+        title="Console speaks as the human; workers speak as themselves; nobody else speaks",
+        status="Accepted",
+        context=(
+            "Console posts and reactions accept caller-supplied attribution, so any non-peer label is accepted "
+            "and stopped-agent names can be impersonated. Worker chat methods on the control socket likewise "
+            "take caller-supplied author or actor values that are not bound to the authenticated connection. "
+            "ADR-011's cooperative-metadata problem repeats one layer down."
+        ),
+        decision=(
+            "The console derives HUMAN_AUTHOR server-side and ignores client-supplied attribution. Worker calls "
+            "to chat_send, chat_react, and chat_unreact have their attribution overwritten with the authenticated "
+            "connection identity's peer name. The operator token keeps full attribution override as the human's "
+            "privileged credential, and that privilege is documented."
+        ),
+        consequences=[
+            "Console POST stops honoring its author parameter; this is additive-safe because that value was only intended to represent the human label.",
+            "A worker can no longer post or react as another peer, so room transcripts retain enforceable authorship.",
+            "Attribution is enforced from connection identity prepared by T-1004, not trusted payload metadata.",
+        ],
+        alternatives=[
+            ("Bind only the console, leave the socket", "Workers impersonating peers makes room transcripts meaningless and was never a designed capability."),
+            ("Reject mismatched attribution instead of overwriting", "An LLM worker that mislabels itself enters an error loop; overwriting is lossless and loggable."),
+        ],
+        evidence=[
+            ("Console handlers accept caller-supplied attribution", "src/daemon/console-api.ts"),
+            ("Worker chat methods accept payload attribution", "src/daemon/socket.ts"),
+        ],
+    ),
+    ADR(
+        id="ADR-015",
+        slug="typed-daemon-events",
+        title="Daemon state changes are typed frames; snapshots are for reconnect",
+        status="Accepted",
+        context=(
+            "The console WebSocket carries only message and reaction frames, while its poller diffs rooms only. "
+            "Agent state, budgets, schedules, membership, and definitions stay stale until manual refetch. The "
+            "unread-heal gap from T-1105 and reaction-removal staleness share one cause: no typed event stream."
+        ),
+        decision=(
+            "Add one frame taxonomy for agent, definition, membership, channel, budget, and schedule events, "
+            "emitted at daemon state transitions. The console refreshes only the panel affected by each frame. "
+            "A snapshot refetch on socket open remains the healing path after reconnect."
+        ),
+        consequences=[
+            "The console API poller shrinks to room diffing because daemon transitions own non-room event emission.",
+            "Every frame type gets a schema and a suite assertion.",
+            "The TUI remains snapshot-based; live event subscription is not part of this decision.",
+        ],
+        alternatives=[
+            ("Per-panel polling", "The existing rooms poller already produced two staleness bugs; more pollers multiply that failure mode."),
+            ("Full-snapshot push on any change", "Large payloads and repaint flicker add cost; incremental frames plus reconnect snapshots match the client pattern already proven."),
+        ],
+        evidence=[
+            ("Console WebSocket and room poller", "src/daemon/console-api.ts"),
+            ("Daemon state transition owner", "src/daemon/supervisor.ts"),
+        ],
+    ),
 ]
 
 ADR_FILE = {a.id: f"{a.id}-{a.slug}.md" for a in ADRS}
@@ -1268,6 +1328,41 @@ EPICS = [
             "Each removal task names the exact code that goes away when its fix lands.",
         ],
     ),
+    Epic(
+        id="EP-16",
+        slug="fidelity-and-hardening",
+        title="Surface fidelity and protocol hardening",
+        outcome=(
+            "Every surface speaks the protocol with full fidelity - console thread replies land in threads, "
+            "reaction removals propagate, attribution is enforced by identity - and the daemon's state changes "
+            "reach the console as typed events."
+        ),
+        why=(
+            "The two-model review (sol + m3) found the console advertises thread replies and silently stores them "
+            "as roots, reaction removals never reach an open console, worker chat attribution is unbound from "
+            "connection identity, and the security ticket's inject bullet has no test. None of these is visible "
+            "in the suites because the suites were written to the same mistaken model."
+        ),
+        scope=[
+            "The tasks in this epic.",
+        ],
+        non_goals=[
+            "Remote mode; EP-12 owns exposure.",
+            "TUI live event subscription; snapshots stay.",
+            "Multi-user auth.",
+            "Persisted read cursors; T-1105 covers unread healing only.",
+        ],
+        acceptance=[
+            "A thread reply posted from the console lands in the thread, browser-proven.",
+            "An external chat_unreact updates an open console.",
+            "A worker cannot attribute a message to another peer.",
+            "Agent, schedule, and budget changes reach the console without a manual refresh.",
+            "Kill, inject, logs, and bump are operable from the console with confirmation for subtree kills.",
+            "The CLI gains daemon stop/restart and definition authoring.",
+            "Every acceptance bullet named by the review as unproven has a failing-when-removed test.",
+        ],
+        adrs=["ADR-014", "ADR-015"],
+    ),
 ]
 
 EPIC_FILE = {e.id: f"{e.id}-{e.slug}.md" for e in EPICS}
@@ -1319,6 +1414,9 @@ SPRINTS = [
     Sprint(id="SP-16", slug="upstream-hygiene", title="Upstream hygiene",
            theme="Two pi-coding-agent issues filed with minimal repros, and the "
                  "workarounds they replace made removable."),
+    Sprint(id="SP-17", slug="fidelity-and-hardening", title="Fidelity and hardening",
+           theme="Close what the two-model review found: threads, reactions, attribution, "
+                 "typed events, and the acceptance bullets no test proved."),
 ]
 
 SPRINT_FILE = {s.id: f"{s.id}-{s.slug}.md" for s in SPRINTS}
@@ -4011,6 +4109,424 @@ TASKS += [
         ],
         depends_on=["T-1502"],
         out_of_scope=["Waiting on the upstream release, which is outside this repo's control; this task stays Blocked until T-1502's issue closes."],
+    ),
+]
+
+TASKS += [
+    # ── EP-16: fidelity and hardening ────────────────────────────────────────
+    Task(
+        id="T-1601", slug="console-thread-parentage", title="Console thread replies preserve parentage",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="A thread reply posted from the console lands in the thread because parentId flows from the console POST through the API and supervisor into RoomStore.post().",
+        read_first=[
+            ("Console API post handler", "src/daemon/console-api.ts"),
+            ("Supervisor post chain", "src/daemon/supervisor.ts"),
+            ("Console thread composer", "src/console/app.js"),
+            ("Thread keyboard regression", "tests/console-client.test.ts"),
+        ],
+        files=[
+            "src/daemon/console-api.ts", "src/daemon/supervisor.ts", "src/console/app.js",
+            "tests/console-api.test.ts", "tests/console-client.test.ts",
+        ],
+        assets=[
+            ("src/daemon/console-api.ts", "Edited", "Parses parentId and returns RoomStore validation errors as HTTP 400."),
+            ("src/daemon/supervisor.ts", "Edited", "Carries parentId through the post API into RoomStore.post()."),
+            ("src/console/app.js", "Edited", "Sends the open thread root id from the thread composer."),
+            ("tests/console-api.test.ts", "Edited", "Covers parentId flow and client-visible validation errors."),
+            ("tests/console-client.test.ts", "Edited", "Asserts keyboard replies render inside the pane and removes the stale workaround comment."),
+        ],
+        steps=[
+            "Add parentId to the console POST parser and the API-to-supervisor chain; leave validation in RoomStore, its existing owner.",
+            "Send the open thread root id from the thread composer and render a returned 400 validation error in the client.",
+            "Change the thread keyboard test's reply section to assert the reply lands inside the pane, never as a root, and delete the stale server-side-gap comment.",
+        ],
+        acceptance=[
+            "Browser-proven: a keyboard reply from the thread pane renders inside the pane and never as a root.",
+            "The stale workaround comment in the thread keyboard test is gone.",
+            "Store validation errors surface as a 400 the client renders.",
+        ],
+    ),
+    Task(
+        id="T-1602", slug="reaction-removal-frames", title="Reaction removal frames",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="Reaction removals propagate through the WebSocket so an external chat_unreact updates an open console.",
+        read_first=[
+            ("Console WebSocket poller", "src/daemon/console-api.ts"),
+            ("Console reaction renderer", "src/console/app.js"),
+            ("Console browser suite", "tests/console-client.test.ts"),
+        ],
+        files=["src/daemon/console-api.ts", "src/console/app.js", "tests/console-api.test.ts", "tests/console-client.test.ts"],
+        assets=[
+            ("src/daemon/console-api.ts", "Edited", "Diffs reaction state both ways and emits a boolean reacted frame."),
+            ("src/console/app.js", "Edited", "Applies reaction additions and removals from WebSocket frames."),
+            ("tests/console-api.test.ts", "Edited", "Asserts the reacted field is boolean and removals emit."),
+            ("tests/console-client.test.ts", "Edited", "Browser-proves an out-of-band unreact clears an open chip."),
+        ],
+        steps=[
+            "Make the room poller diff reactions in both directions and emit reacted: true or false for each change.",
+            "Apply both values in the console without requiring a snapshot refetch.",
+            "Pin the frame schema and browser behavior in the API and client suites.",
+        ],
+        acceptance=[
+            "Browser-proven: an out-of-band unreact clears the chip in an open console.",
+            "The frame schema asserts reacted is boolean.",
+        ],
+    ),
+    Task(
+        id="T-1603", slug="attribution-enforcement", title="Enforce attribution from connection identity",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="ADR-014 is enforced: console actions speak as the human and worker chat actions speak as the authenticated peer.",
+        read_first=[
+            ("Attribution policy", "docs/delivery/adr/ADR-014-attribution-policy.md"),
+            ("Console post and reaction handlers", "src/daemon/console-api.ts"),
+            ("Worker method dispatcher", "src/daemon/socket.ts"),
+        ],
+        files=["src/daemon/console-api.ts", "src/daemon/socket.ts", "tests/console-api.test.ts", "tests/socket-identity.test.ts"],
+        assets=[
+            ("src/daemon/console-api.ts", "Edited", "Derives HUMAN_AUTHOR server-side; forged client attribution is ignored and logged for compatibility."),
+            ("src/daemon/socket.ts", "Edited", "Overwrites worker chat_send, chat_react, and chat_unreact attribution with identity.peerName while preserving operator override."),
+            ("tests/console-api.test.ts", "Edited", "Proves a forged console author stores @you."),
+            ("tests/socket-identity.test.ts", "Edited", "Proves worker binding and the documented privileged operator override."),
+        ],
+        steps=[
+            "Keep accepting the console author field for compatibility, but ignore and log it; derive HUMAN_AUTHOR server-side.",
+            "For worker-token chat_send, chat_react, and chat_unreact, overwrite payload attribution with identity.peerName; leave operator-token override privileged and document it at the dispatcher contract.",
+            "Add negative identity tests for forged console and worker attribution plus the retained operator privilege.",
+        ],
+        acceptance=[
+            "A worker posting with author='@other' is recorded under its own peer name, suite-proven.",
+            "A console post with a forged author stores @you.",
+            "Operator-token attribution override still works and is documented as privileged.",
+        ],
+    ),
+    Task(
+        id="T-1604", slug="typed-daemon-events", title="Typed daemon state events",
+        epic="EP-16", sprint="SP-17", status="Blocked",
+        goal="ADR-015 is implemented with typed agent, definition, membership, channel, budget, and schedule frames that refresh only the affected console panel.",
+        read_first=[
+            ("Typed event decision", "docs/delivery/adr/ADR-015-typed-daemon-events.md"),
+            ("Reaction frame machinery", "docs/delivery/tasks/T-1602-reaction-removal-frames.md"),
+            ("Daemon state owner", "src/daemon/supervisor.ts"),
+            ("Schedule fire path", "src/daemon/main.ts"),
+        ],
+        files=[
+            "src/daemon/console-api.ts", "src/console/app.js", "src/daemon/main.ts", "src/daemon/supervisor.ts",
+            "tests/console-api.test.ts", "tests/console-client.test.ts",
+        ],
+        assets=[
+            ("src/daemon/console-api.ts", "Edited", "Carries the additive frame taxonomy to connected consoles."),
+            ("src/console/app.js", "Edited", "Validates frames and refreshes only their affected panels."),
+            ("src/daemon/main.ts", "Edited", "Emits schedule arm and fire transitions."),
+            ("src/daemon/supervisor.ts", "Edited", "Emits agent, definition, membership, channel, budget, and schedule state transitions."),
+            ("tests/console-api.test.ts", "Edited", "Asserts the schema of every typed frame."),
+            ("tests/console-client.test.ts", "Edited", "Browser-proves targeted panel updates without manual refresh."),
+        ],
+        steps=[
+            "Extend T-1602's frame machinery with agent, definition, membership, channel, budget, and schedule schemas emitted where each transition commits.",
+            "Handle each frame by refreshing only its affected console panel; retain the socket-open snapshot as reconnect healing.",
+            "Cover spawn, kill, schedule arm/fire, budget park, and every frame schema in the API and browser suites.",
+        ],
+        acceptance=[
+            "Browser-proven: an agent spawn or kill updates the agents panel without a manual refresh; a schedule arm/fire and a budget park emit frames the client handles.",
+            "Every frame type has a schema assertion.",
+        ],
+        depends_on=["T-1602"],
+    ),
+    Task(
+        id="T-1605", slug="console-ops-panel", title="Console operations panel",
+        epic="EP-16", sprint="SP-17", status="Blocked",
+        goal="Kill, inject, logs tail, and budget bump are operable from the authenticated console with subtree confirmation for kills.",
+        read_first=[
+            ("Typed panel state", "docs/delivery/tasks/T-1604-typed-daemon-events.md"),
+            ("Console API", "src/daemon/console-api.ts"),
+            ("Console interaction model", "src/console/app.js"),
+        ],
+        files=[
+            "src/daemon/console-api.ts", "src/console/app.js", "src/console/index.html", "src/console/style.css",
+            "tests/console-client.test.ts",
+        ],
+        assets=[
+            ("src/daemon/console-api.ts", "Edited", "Exposes operator-authenticated kill, inject, logs-tail, and budget-bump routes."),
+            ("src/console/app.js", "Edited", "Runs all four operations, including subtree confirmation and typed-event refresh."),
+            ("src/console/index.html", "Edited", "Adds semantic controls and the logs tail view."),
+            ("src/console/style.css", "Edited", "Styles the operations panel and accessible confirmation state."),
+            ("tests/console-client.test.ts", "Edited", "Browser-proves operations and keyboard-only accessibility."),
+        ],
+        steps=[
+            "Expose the four existing operator capabilities through console API routes without adding another auth model.",
+            "Add the operations panel; require explicit subtree confirmation before kill and show logs tail and updated budget state.",
+            "Drive kill, inject, logs, and bump keyboard-only through the browser accessibility assertions.",
+        ],
+        acceptance=[
+            "Browser-proven kill with subtree confirmation, inject, a logs tail view, and a bump with the new budget visible.",
+            "All four pass the console's accessibility assertions keyboard-only.",
+        ],
+        depends_on=["T-1604"],
+    ),
+    Task(
+        id="T-1606", slug="daemon-lifecycle-verbs", title="Daemon lifecycle verbs and logs",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="The CLI can stop and restart a pidfile-validated daemon gracefully, daemon stderr persists across restarts, and logs can select worker or daemon source.",
+        read_first=[
+            ("Daemon boot and detached launcher", "src/daemon/main.ts"),
+            ("CLI verb parser", "src/daemon/cli.ts"),
+            ("Control socket dispatch", "src/daemon/socket.ts"),
+            ("Protocol contract suite", "tests/protocol.contract.test.ts"),
+        ],
+        files=[
+            "src/daemon/main.ts", "src/daemon/cli.ts", "src/daemon/socket.ts", "src/shared/protocol.ts",
+            "src/shared/protocol-schemas.ts", "tests/daemon-cli.test.ts",
+        ],
+        assets=[
+            ("src/daemon/main.ts", "Edited", "Persists detached daemon stderr and performs graceful shutdown/restart lifecycle."),
+            ("src/daemon/cli.ts", "Edited", "Adds daemon stop/restart and logs source selection."),
+            ("src/daemon/socket.ts", "Edited", "Adds operator-only daemon_stop dispatch instead of signal-based control."),
+            ("src/shared/protocol.ts", "Edited", "Declares additive daemon_stop params and result."),
+            ("src/shared/protocol-schemas.ts", "Edited", "Validates daemon_stop and logs source selection."),
+            ("tests/daemon-cli.test.ts", "Edited", "Covers stale/live pidfiles, restarts, daemon logs, and protocol shapes."),
+        ],
+        steps=[
+            "Add operator-only daemon_stop to the protocol and socket; validate pidfile ownership before graceful stop and restart.",
+            "Persist detached daemon stderr to its log file across restarts instead of discarding it.",
+            "Add worker-stderr-default and daemon source selection to logs, then cover protocol and real-daemon CLI behavior.",
+        ],
+        acceptance=[
+            "Stop is refused for a stale pidfile, graceful for a live one, and verified gone.",
+            "The daemon log file captures stderr across restarts.",
+            "Protocol contract coverage includes daemon_stop params and result.",
+        ],
+        out_of_scope=["Follow or tail -f mode."],
+    ),
+    Task(
+        id="T-1607", slug="authoring-parity", title="Definition authoring parity",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="CLI agent create/show/edit verbs and console definition read/edit complete definition-authoring parity over existing protocol methods.",
+        read_first=[
+            ("CLI command surface", "src/daemon/cli.ts"),
+            ("Definition API routes", "src/daemon/console-api.ts"),
+            ("Console definition UI", "src/console/app.js"),
+        ],
+        files=[
+            "src/daemon/cli.ts", "src/daemon/console-api.ts", "src/console/app.js", "src/console/index.html",
+            "tests/daemon-cli.test.ts", "tests/console-client.test.ts",
+        ],
+        assets=[
+            ("src/daemon/cli.ts", "Edited", "Adds agent create/show/edit over agent_create, definition_get, and definition_update."),
+            ("src/daemon/console-api.ts", "Edited", "Adds definition read beside the existing PATCH route."),
+            ("src/console/app.js", "Edited", "Loads, edits, saves, and renders strict-parser errors inline."),
+            ("src/console/index.html", "Edited", "Adds the semantic definition editor surface."),
+            ("tests/daemon-cli.test.ts", "Edited", "Round-trips all three verbs against a real daemon."),
+            ("tests/console-client.test.ts", "Edited", "Browser-proves definition edit and bad-key errors."),
+        ],
+        steps=[
+            "Map agent create/show/edit directly to agent_create, definition_get, and definition_update with existing CLI error conventions.",
+            "Add a definition read route and an editor that consumes the existing PATCH path; keep strict parser errors inline.",
+            "Round-trip the CLI against a real daemon and browser-prove valid edits plus a bad-key failure.",
+        ],
+        acceptance=[
+            "The three CLI verbs round-trip against a real daemon with clean errors.",
+            "Browser-proven: edit a definition in the console and the strict parser's error renders inline on a bad key.",
+        ],
+    ),
+    Task(
+        id="T-1608", slug="mentions-fidelity", title="Mention fidelity on every surface",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="Mentions reach every consumer through the shared RoomMessage wire type and render distinctly in the console.",
+        read_first=[
+            ("RoomMessage wire type", "src/shared/protocol.ts"),
+            ("Protocol schemas", "src/shared/protocol-schemas.ts"),
+            ("Protocol contract suite", "tests/protocol.contract.test.ts"),
+            ("Console message renderer", "src/console/app.js"),
+        ],
+        files=[
+            "src/shared/protocol.ts", "src/shared/protocol-schemas.ts", "src/daemon/socket.ts", "src/console/app.js",
+            "src/console/style.css", "tests/protocol.contract.test.ts", "tests/console-client.test.ts",
+        ],
+        assets=[
+            ("src/shared/protocol.ts", "Edited", "Adds mentions to the additive RoomMessage wire type."),
+            ("src/shared/protocol-schemas.ts", "Edited", "Validates mentions on RoomMessage frames."),
+            ("src/daemon/socket.ts", "Edited", "Carries stored mentions onto the wire."),
+            ("src/console/app.js", "Edited", "Adds the browser typedef and mention-aware rendering."),
+            ("src/console/style.css", "Edited", "Provides the distinct mention affordance."),
+            ("tests/protocol.contract.test.ts", "Edited", "Asserts mentions in the wire shape."),
+            ("tests/console-client.test.ts", "Edited", "Browser-proves a mention of @agent renders distinctly."),
+        ],
+        steps=[
+            "Add mentions to the shared RoomMessage type and schema, then preserve it through socket serialization.",
+            "Mirror the field in the browser typedef and render mention tokens with a distinct affordance.",
+            "Assert the wire shape in the protocol contract and the rendered behavior in the browser suite.",
+        ],
+        acceptance=[
+            "The contract suite asserts mentions on the wire shape.",
+            "Browser-proven: a message mentioning @agent renders the mention affordance.",
+        ],
+        out_of_scope=["Mention autocomplete in the composer."],
+    ),
+    Task(
+        id="T-1609", slug="identity-negatives", title="Identity negative-path proofs",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="The security ticket's unproven identity bullets become mutation-verified tests for forbidden worker inject and room-peer handoff prompting.",
+        read_first=[
+            ("Worker identity suite", "tests/socket-identity.test.ts"),
+            ("Worker method authorization", "src/daemon/socket.ts"),
+        ],
+        files=["tests/socket-identity.test.ts"],
+        assets=[
+            ("tests/socket-identity.test.ts", "Edited", "Proves worker-token inject never reaches the supervisor and room-peer handoff prompts its target."),
+        ],
+        steps=[
+            "Assert worker-token inject returns FORBIDDEN and the supervisor inject method is never called.",
+            "Assert a worker task_handoff to a room peer prompts the target.",
+            "Mutation-verify both tests by removing their dispatcher workerMethods or authorize entries and observing failure.",
+        ],
+        acceptance=[
+            "Both tests fail when the dispatcher's workerMethods/authorize entries are removed, mutation-verified.",
+        ],
+    ),
+    Task(
+        id="T-1610", slug="unreact-contract", title="Unreact contract parity",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="chat_unreact mirrors chat_react by rejecting an unknown messageId as INVALID_PARAMS instead of silently succeeding.",
+        read_first=[
+            ("Reaction dispatch", "src/daemon/socket.ts"),
+            ("Parallel react test", "tests/daemon-main.test.ts"),
+        ],
+        files=["src/daemon/socket.ts", "tests/daemon-main.test.ts"],
+        assets=[
+            ("src/daemon/socket.ts", "Edited", "Returns INVALID_PARAMS with messageId field data for unknown unreact targets."),
+            ("tests/daemon-main.test.ts", "Edited", "Reuses the parallel chat_react unknown-message pattern."),
+        ],
+        steps=[
+            "Route chat_unreact's unknown-message result through the same INVALID_PARAMS contract as chat_react.",
+            "Clone the behavior pattern, not implementation, from the parallel react test and assert data.field.",
+        ],
+        acceptance=[
+            "Unknown messageId returns INVALID_PARAMS with data.field === 'messageId'; the parallel react path's test pattern is reused.",
+        ],
+    ),
+    Task(
+        id="T-1611", slug="cli-json-everywhere", title="CLI JSON coverage for every verb",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="Every CLI verb's --json output is parsed by one parametrized contract, with the console verb's documented deviation asserted explicitly.",
+        read_first=[
+            ("CLI verbs", "src/daemon/cli.ts"),
+            ("CLI integration suite", "tests/daemon-cli.test.ts"),
+        ],
+        files=["tests/daemon-cli.test.ts", "src/daemon/cli.ts"],
+        assets=[
+            ("tests/daemon-cli.test.ts", "Edited", "Parametrizes --json parsing across every verb and names the console exception."),
+            ("src/daemon/cli.ts", "Edited", "Only changes if the exhaustive test exposes a JSON shape gap."),
+        ],
+        steps=[
+            "Enumerate every CLI verb in one parametrized --json parsing test instead of sampling status and agents.",
+            "Assert the console verb's documented output deviation as the sole explicit exception.",
+            "Fix cli.ts only where the exhaustive contract exposes a real shape gap.",
+        ],
+        acceptance=[
+            "A parametrized test covers all verbs' --json output parsing; the console verb's documented deviation is asserted as the exception.",
+        ],
+    ),
+    Task(
+        id="T-1612", slug="shared-supervisor-contract", title="Shared supervisor backend contract",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="One supervisor contract suite drives both worker backends and boot-level tests prove the default backend decision.",
+        read_first=[
+            ("Subprocess worker behavior", "tests/worker-lifecycle.test.ts"),
+            ("In-process worker behavior", "tests/worker-inprocess.test.ts"),
+            ("Existing contract suite pattern", "tests/contracts/discovery.contract.test.ts"),
+        ],
+        files=["tests/contracts/supervisor-contract.test.ts", "tests/worker-inprocess.test.ts", "tests/worker-lifecycle.test.ts"],
+        assets=[
+            ("tests/contracts/supervisor-contract.test.ts", "New", "Reusable supervisor contract run against startWorker and startInProcessWorker."),
+            ("tests/worker-inprocess.test.ts", "Edited", "Instantiates the shared contract and proves boot selection with inProcessWorkers true."),
+            ("tests/worker-lifecycle.test.ts", "Edited", "Instantiates the shared contract and proves boot selection with inProcessWorkers false."),
+        ],
+        steps=[
+            "Extract observable supervisor invariants into one contract factory and run it unchanged against both worker starters.",
+            "Boot without workerFactory under inProcessWorkers true and false; assert selected backend invariants including pid and sandboxed.",
+            "Keep backend-specific tests only for behavior not shared by the contract.",
+        ],
+        acceptance=[
+            "The same suite runs against startWorker and startInProcessWorker.",
+            "A boot with no workerFactory and inProcessWorkers true/false asserts the selected backend's invariants (pid, sandboxed).",
+        ],
+    ),
+    Task(
+        id="T-1613", slug="build-hygiene-test", title="Dependency-free console build hygiene",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="A machine-enforced manifest test preserves the dependency-free console by rejecting a build script or runtime dependency.",
+        read_first=[
+            ("Package manifest", "package.json"),
+            ("Console implementation", "src/console/app.js"),
+        ],
+        files=["tests/build-hygiene.test.ts", "package.json"],
+        assets=[
+            ("tests/build-hygiene.test.ts", "New", "Asserts scripts.build is absent and runtime dependencies remain empty using manifest fixtures."),
+            ("package.json", "Read only, not edited by this task", "The live manifest contract the test protects."),
+        ],
+        steps=[
+            "Add a dependency-free test that loads the live manifest and rejects scripts.build or any runtime dependency.",
+            "Exercise the predicate against fixtures that add a build script and a dependency so both guards prove non-vacuous.",
+        ],
+        acceptance=[
+            "The test fails when a fixture manifest adds a build script or a dependency.",
+        ],
+    ),
+    Task(
+        id="T-1614", slug="test-timing-hygiene", title="Deadline-bounded test timing",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="Async tests wait on observable behavior with deadline-bounded polls instead of fixed sleeps, including unread recovery across the socket reconnect race.",
+        read_first=[
+            ("Daemon timing wait", "tests/daemon-main.test.ts"),
+            ("Gateway timing wait", "tests/gateway-client.test.ts"),
+            ("Toolbelt timing wait", "tests/toolbelt.test.ts"),
+            ("Unread reconnect test", "tests/console-client.test.ts"),
+        ],
+        files=["tests/daemon-main.test.ts", "tests/gateway-client.test.ts", "tests/toolbelt.test.ts", "tests/console-client.test.ts"],
+        assets=[
+            ("tests/daemon-main.test.ts", "Edited", "Replaces Bun.sleep(60) with a deadline-bounded observable poll."),
+            ("tests/gateway-client.test.ts", "Edited", "Replaces fixed setTimeout(400) with a deadline-bounded observable poll."),
+            ("tests/toolbelt.test.ts", "Edited", "Replaces Bun.sleep(75) with a deadline-bounded observable poll."),
+            ("tests/console-client.test.ts", "Edited", "Retries the unread post after reconnect to survive the socket TOCTOU."),
+        ],
+        steps=[
+            "Replace the three named fixed waits with deadline-bounded polling helpers that report the unmet behavior on timeout.",
+            "Make the unread test retry its post after reconnect instead of betting on one socket state observation.",
+            "Search the four files for remaining fixed sleeps outside poll helpers and spot-verify one replacement fails when its behavior is reverted.",
+        ],
+        acceptance=[
+            "No Bun.sleep/fixed setTimeout remains in those four files outside deadline-bounded poll helpers.",
+            "Each replaced wait fails fast when the behavior it waits for is broken, with one spot-verified by revert.",
+        ],
+    ),
+    Task(
+        id="T-1615", slug="repaint-focus-stability", title="Repaint stability: identity-keyed focus, thread-pane restore, and sticky scroll",
+        epic="EP-16", sprint="SP-17", status="Ready",
+        goal="Every repaint site in the console preserves keyboard context: focus is restored by control identity (never by ordinal), the thread pane gets the same protection the transcript got, and a repaint never resets the scroll position of a user who scrolled up.",
+        read_first=[
+            ("Console client render paths", "src/console/app.js"),
+            ("Browser suite", "tests/console-client.test.ts"),
+            ("The ticket this extends", "docs/delivery/tasks/T-1104-console-focus-stability.md"),
+        ],
+        files=["src/console/app.js", "src/console/index.html", "tests/console-client.test.ts"],
+        assets=[
+            ("src/console/app.js", "Edited", "Focus capture/restore extracted into captureFocus/restoreFocus helpers shared by all three repaint sites; chips restore by identity (textContent/emoji), not ordinal; sticky-bottom scroll; renderChannels restores by channel identity."),
+            ("tests/console-client.test.ts", "Edited", "Chip-identity, wrong-target rejection, scroll preservation, and channel-identity assertions; the focusInPage docstring corrected (atomic-resolve rationale, bringToFront named alongside)."),
+            ("src/console/index.html", "Edited only if needed", "Add identity attributes on rows or controls only if restore cannot use existing DOM identity; otherwise leave this file unchanged and explain why in the implementation report."),
+        ],
+        steps=[
+            "Extract the capture/restore block from renderTranscript into captureFocus/restoreFocus helpers and apply them to all three repaint sites: renderTranscript, renderThread, and renderChannels.",
+            "Restore chips by textContent/emoji identity within the message row; if that identity vanished, drop focus to body or the container, never a sibling control or matches[0], and document that fallback rule in the code comment.",
+            "Make renderThread and renderChannels consume the same helpers, with channels restored by channel identity rather than roving index.",
+            "Keep scroll sticky to bottom only when the user was already at the bottom; otherwise preserve scroll position across repaint.",
+            "Add chip-identity restore, wrong-chip rejection, scrolled-up preservation, bottom-pinning, thread-pane restore, and channel-identity assertions; tighten the focusInPage docstring to the atomic-resolve rationale and name bringToFront alongside it as the environment fix.",
+        ],
+        acceptance=[
+            "Focus restore is by control identity, never by ordinal; a control whose identity vanished drops focus to the container or body, never a wrong sibling — browser-proven for transcript, thread pane, and channels.",
+            "A scrolled-up user's position survives a repaint; a user at the bottom stays pinned.",
+            "The repaint regression test covers transcript, thread pane, and channels, and the thread keyboard suite stays green.",
+        ],
+        out_of_scope=["Reworking the roving-tabindex model itself — only the restore identity changes."],
     ),
 ]
 

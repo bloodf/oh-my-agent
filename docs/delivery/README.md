@@ -11,7 +11,7 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**60 of 81 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
+**60 of 96 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
 Every runtime subsystem is built and under test: workers, isolation, credentials, rooms, scheduling, and quota handling. Two things keep that from meaning finished.
 
@@ -61,6 +61,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-13](epics/EP-13-distribution.md) | Distribution: packable artifact, versioning, and release CI | Ready | 6 |
 | [EP-14](epics/EP-14-dogfooding.md) | Live-account hardening | Ready | 4 |
 | [EP-15](epics/EP-15-upstream-filings.md) | Upstream pi-coding-agent hygiene | Ready | 4 |
+| [EP-16](epics/EP-16-fidelity-and-hardening.md) | Surface fidelity and protocol hardening | Ready | 15 |
 
 ## Sprints
 
@@ -82,6 +83,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [SP-14](sprints/SP-14-release-pipeline.md) | Release pipeline | Ready | A packable npm artifact with a version story and a tag-driven release workflow. |
 | [SP-15](sprints/SP-15-live-accounts.md) | Live accounts | Ready | Dogfooding against real accounts, with findings landing back in the tree as tasks. |
 | [SP-16](sprints/SP-16-upstream-hygiene.md) | Upstream hygiene | Ready | Two pi-coding-agent issues filed with minimal repros, and the workarounds they replace made removable. |
+| [SP-17](sprints/SP-17-fidelity-and-hardening.md) | Fidelity and hardening | Ready | Close what the two-model review found: threads, reactions, attribution, typed events, and the acceptance bullets no test proved. |
 
 ## Decisions
 
@@ -105,6 +107,8 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [ADR-011](adr/ADR-011-agent-hierarchy.md) | Persistent child agents are spawn-time state; kill cascades | Accepted |
 | [ADR-012](adr/ADR-012-remote-exposure.md) | Beyond loopback, a reverse proxy terminates TLS; the daemon never does | Accepted |
 | [ADR-013](adr/ADR-013-release-channel.md) | One npm package with a files allowlist; tagged releases, never per-commit publishes | Accepted |
+| [ADR-014](adr/ADR-014-attribution-policy.md) | Console speaks as the human; workers speak as themselves; nobody else speaks | Accepted |
+| [ADR-015](adr/ADR-015-typed-daemon-events.md) | Daemon state changes are typed frames; snapshots are for reconnect | Accepted |
 
 ## What to do next
 
