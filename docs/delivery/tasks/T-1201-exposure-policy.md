@@ -6,7 +6,7 @@
 
 ## Goal
 
-One explicit remote-mode switch exists; a non-loopback bind without it is refused with the reason on stderr, and the loopback default is byte-identical to today.
+One explicit remote-mode switch exists and governs auth and enforcement only; any non-loopback bind is refused unconditionally with the reason on stderr, and the loopback default is byte-identical to today.
 
 ## Read first
 
@@ -26,21 +26,26 @@ One explicit remote-mode switch exists; a non-loopback bind without it is refuse
 
 | Path | Role | Note |
 |---|---|---|
-| [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | Parses the remote-mode flag/config at boot; the refusal runs before any listener opens. |
-| [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | The loopback-only comment becomes an enforced gate: non-loopback requires remote mode plus the operator token on every request. |
-| [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Edited | The same gate for the control socket's bind and per-connection identity. |
-| `tests/remote-exposure.test.ts` (to be created) | New | Refusal without the flag; token required in remote mode; loopback flows unchanged. |
+| [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | Parses the remote-mode flag/config at boot; the unconditional bind refusal runs before any listener opens. |
+| [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | The loopback-only comment becomes an enforced gate: non-loopback is refused always, and remote mode adds the operator token plus the proxy shared-secret check on every request. |
+| [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Edited | The same gate for the control socket's bind and per-connection identity; token comparison goes constant-time here too. |
+| `tests/remote-exposure.test.ts` (to be created) | New | Unconditional bind refusal; token required in remote mode; forged forwarded headers gain nothing; loopback flows unchanged. |
 
 ## Steps
 
-1. Add the surface: one flag or config key, parsed at boot, off by default. A non-loopback bind without it exits before any listener opens, naming the flag on stderr.
-2. Thread remote mode into the console API and the control socket: in remote mode every request and connection presents the operator token (T-1004's layer).
-3. Tests: refusal without the flag, token required in remote mode, and every existing suite passing unchanged on the loopback default.
+1. Add the surface: one flag or config key, parsed at boot, off by default; the flag governs authentication and enforcement only. Any non-loopback bind exits before any listener opens, naming the refused address on stderr — flag or no flag.
+2. Enumerate every listener at boot — console API, control socket, credential gateway — with per-listener behavior written down: console and control socket take the remote-mode auth layer; the credential gateway is loopback-always and never joins remote mode.
+3. Thread remote mode into the console API and the control socket: in remote mode every request and connection presents the operator token (T-1004's layer), and the console additionally requires the per-install proxy shared-secret header (generated at boot, stored next to the operator token) before honoring forwarded identity.
+4. Verify the operator token file's permissions at boot: anything looser than 0600 refuses to start.
+5. Tests: the bind refusal is unconditional, the token is required in remote mode, a direct loopback caller with forged X-Forwarded-* headers gains nothing, and every existing suite passes unchanged on the loopback default.
 
 ## Acceptance
 
-- [ ] A non-loopback bind without the flag exits before any listener opens, with the reason on stderr.
+- [ ] Any non-loopback bind exits before any listener opens, with the reason on stderr — the flag does not permit one.
 - [ ] Remote mode without the operator token is refused on both the console and the control socket.
+- [ ] Token comparison is constant-time on every listener, including the control socket's identity lookup.
+- [ ] The operator token file's permissions are verified at boot (0600, else refuse).
+- [ ] A direct loopback caller with forged X-Forwarded-* headers gains nothing in remote mode.
 - [ ] The loopback default keeps every existing suite green unchanged.
 
 ## Out of scope
@@ -54,5 +59,6 @@ One explicit remote-mode switch exists; a non-loopback bind without it is refuse
 ## Unblocks
 
 - T-1202
+- T-1203
 - T-1204
-- T-1205
+- T-1206

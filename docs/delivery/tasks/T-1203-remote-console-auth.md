@@ -6,7 +6,7 @@
 
 ## Goal
 
-The console client authenticates as the operator over the wire: a first-visit token prompt, reload persistence, a clear refusal state — and no prompt at all on loopback.
+The console client authenticates as the operator over the wire: a first-visit token prompt, reload persistence, a clear refusal state — and no prompt at all on loopback. In remote mode the long-lived token never rides a URL.
 
 ## Read first
 
@@ -25,21 +25,22 @@ The console client authenticates as the operator over the wire: a first-visit to
 
 | Path | Role | Note |
 |---|---|---|
-| [`src/console/app.js`](../../../src/console/app.js) | Edited | Token entry flow, the token on every fetch and the WebSocket upgrade, a 401 state with re-entry. |
+| [`src/console/app.js`](../../../src/console/app.js) | Edited | Token entry flow, the token on every fetch, the ticket/cookie path for the WebSocket upgrade and static loads, a 401 state with re-entry. |
 | [`src/console/index.html`](../../../src/console/index.html) | Edited | The token prompt markup: semantic, labeled, keyboard-first. |
-| [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | Token verification on every request in remote mode; the 401 shape the client renders. |
-| [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) | Edited | Browser-proven: prompt, success, refusal, reload persistence. |
+| [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | Token verification on every request in remote mode; the 401 shape the client renders; mints the one-time tickets or sets the __Host- cookie for the upgrade and static loads. |
+| [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) | Edited | Browser-proven: prompt, success, refusal, reload persistence, no token in any URL. |
 
 ## Steps
 
 1. Daemon side first: the remote-mode 401 shape, then the client renders it as a labeled prompt using the T-1101/T-1102 landmarks and focus model.
-2. Persist the token in sessionStorage (an operator surface is not a remember-me app) and send it on every request, including the WebSocket upgrade.
+2. Persist the token in sessionStorage (an operator surface is not a remember-me app) and send it as a header on every API fetch; the WebSocket upgrade and static loads authenticate with a one-time ticket or a __Host- cookie per amended ADR-012 — no `?token=` material in remote mode.
 3. The client learns the mode from the daemon's first response, not from configuration; loopback never shows the prompt.
 
 ## Acceptance
 
 - [ ] The browser suite drives: first visit shows the prompt, a good token opens the console, reload with the stored token opens directly, a bad token shows the refusal state with re-entry.
-- [ ] The WebSocket carries the token; an unauthenticated upgrade is refused in remote mode.
+- [ ] The WebSocket upgrade and static loads authenticate via the ticket/cookie path — no token in any URL; an unauthenticated upgrade is refused in remote mode.
+- [ ] The token prompt and refusal state pass the console's existing accessibility assertions and are driven keyboard-only in the browser suite.
 - [ ] Loopback flows show no prompt and pass unchanged.
 
 ## Out of scope
@@ -48,7 +49,7 @@ The console client authenticates as the operator over the wire: a first-visit to
 
 ## Depends on
 
-- T-1202
+- T-1201
 
 ## Unblocks
 

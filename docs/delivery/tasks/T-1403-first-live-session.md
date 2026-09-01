@@ -22,7 +22,7 @@ The first live dogfood session runs end-to-end and every finding lands in the tr
 
 | Path | Role | Note |
 |---|---|---|
-| `docs/dogfooding.md` (to be created) | Edited | The session record: date, accounts, outcome per step, finding dispositions. |
+| `docs/dogfooding.md` (to be created) | Edited | Created by T-1401; the session record lands here: date, accounts, per-step pass/finding/skipped, finding dispositions. |
 | [`scripts/gen-delivery-docs.py`](../../../scripts/gen-delivery-docs.py) | Edited | Each accepted finding becomes a task entry with the usual contract. |
 
 ## Steps
@@ -33,7 +33,9 @@ The first live dogfood session runs end-to-end and every finding lands in the tr
 
 ## Acceptance
 
-- [ ] The session record is in the runbook with a disposition for every finding.
+- [ ] The session record enumerates every runbook step as pass/finding/skipped — 'no findings' is a positive per-step claim, not silence.
+- [ ] The session runs inside a timebox; hitting it means stop-and-triage, not overrun.
+- [ ] Every wont-fix quotes the session log line as evidence.
 - [ ] The generator regenerates clean with the finding tasks added.
 
 ## Out of scope
@@ -43,6 +45,7 @@ The first live dogfood session runs end-to-end and every finding lands in the tr
 ## Depends on
 
 - T-1402
+- T-1404
 
 ## Unblocks
 

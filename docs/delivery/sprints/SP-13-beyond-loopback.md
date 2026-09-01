@@ -17,3 +17,4 @@ Remote exposure of the console and control socket under one declared trust model
 | [T-1203](../tasks/T-1203-remote-console-auth.md) | [EP-12](../epics/EP-12-remote-exposure.md) | Operator-token flow in the console client | Blocked |
 | [T-1204](../tasks/T-1204-authoritative-hierarchy.md) | [EP-12](../epics/EP-12-remote-exposure.md) | Hierarchy enforcement flips in remote mode | Blocked |
 | [T-1205](../tasks/T-1205-exposure-runbook.md) | [EP-12](../epics/EP-12-remote-exposure.md) | Threat model and operator checklist | Blocked |
+| [T-1206](../tasks/T-1206-authenticated-connection-audit.md) | [EP-12](../epics/EP-12-remote-exposure.md) | Authenticated-connection audit surface | Blocked |

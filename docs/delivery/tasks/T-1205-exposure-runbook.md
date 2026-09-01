@@ -24,20 +24,20 @@ One page an operator reads before flipping remote mode: the threat model, the ch
 
 | Path | Role | Note |
 |---|---|---|
-| `docs/remote-exposure.md` (to be created) | Edited | The threat-model and checklist sections land here; T-1202's recipes reference them. |
+| `docs/remote-exposure.md` (to be created) | Edited | Created by T-1202; the threat-model and checklist sections land here, and T-1202's recipes reference them. |
 | [`README.md`](../../../README.md) | Edited | A remote-access section pointing at the runbook, not duplicating it. |
 | [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) | Edited | The trust-model section names remote mode and its preconditions. |
 
 ## Steps
 
 1. Threat model: what the operator token protects (room contents, kill authority, credentials via the gateway), what the proxy protects (transport), what stays out of scope (multi-tenant).
-2. Checklist: flag set, token verified non-default, proxy TLS verified, enforcement state read from the boot log.
-3. Audit commands: how to check which mode is live and which connections are authenticated.
+2. Checklist: flag set, token verified non-default, token file permissions verified, proxy TLS verified with the shared-secret header set, enforcement state read from the boot log.
+3. Audit commands: document T-1206's surface — the authenticated-connection log and `omp-agent audit` — so the operator can check which mode is live and which connections are authenticated.
 
 ## Acceptance
 
 - [ ] The runbook names every precondition T-1201 enforces, in the same words the daemon prints on stderr.
-- [ ] README and ARCHITECTURE point at the runbook; there is no duplicated threat model to drift.
+- [ ] The threat model exists in exactly one file; README and ARCHITECTURE carry a link plus at most two sentences.
 
 ## Out of scope
 
@@ -45,7 +45,8 @@ One page an operator reads before flipping remote mode: the threat model, the ch
 
 ## Depends on
 
-- T-1201
+- T-1202
+- T-1206
 
 ## Unblocks
 

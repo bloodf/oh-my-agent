@@ -1,6 +1,6 @@
 # ADR-012 — Beyond loopback, a reverse proxy terminates TLS; the daemon never does
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
@@ -8,14 +8,18 @@ Every server the daemon runs binds loopback today, and that is the stated trust 
 
 ## Decision
 
-The daemon never terminates TLS and never binds a routable address itself. Exposure beyond loopback goes through a documented reverse proxy (Caddy, nginx, tailscale serve, or an SSH tunnel) that terminates TLS and forwards to the loopback console/control endpoints; the daemon gains an explicit opt-in flag acknowledging remote mode, which (a) requires the operator token on every console request and control-socket connection, and (b) flips parentage from cooperative metadata to enforced identity per T-1004's prepared bearer layer. No remote mode, no enforcement change — loopback stays the documented default and keeps today's flows working.
+The daemon never terminates TLS and never binds a routable address — in any mode. Exposure beyond loopback goes through a documented reverse proxy (Caddy, nginx, tailscale serve, or an SSH tunnel) that terminates TLS and forwards to the loopback console/control endpoints. The daemon gains an explicit opt-in flag acknowledging remote mode, and the flag changes authentication and enforcement only: (a) the operator token is required on every console request and control-socket connection, and (b) parentage flips from cooperative metadata to enforced identity per T-1004's prepared bearer layer. Any bind-address configuration is refused unconditionally, flag or no flag — there is no mode in which the daemon listens on a routable address. The proxy reaches the daemon over loopback like any other local process, so remote mode also requires a per-install proxy shared-secret header on console requests — generated at boot, stored next to the operator token, set by every recipe — and forwarded identity (X-Forwarded-*) is honored only when the secret matches: a direct loopback caller forging those headers gains nothing, and the suite says so. No remote mode, no enforcement change — loopback stays the documented default and keeps today's flows working.
 
 ## Consequences
 
-- The console and control socket keep their loopback-only binds; the only new code is the refusal path and the flag.
+- The console and control socket keep their loopback-only binds in every mode; the only new code is the unconditional bind refusal, the flag, and the proxy-secret check.
 - Parentage enforcement becomes real only in remote mode, so loopback single-operator flows keep working unchanged (T-1004's tests stand).
 - Documentation owns the proxy recipes; the daemon ships no TLS code, no cert lifecycle, no reload semantics.
-- Every exposure recipe carries the same three assertions in the suite: refused bind without the flag, token required, hierarchy enforced when remote.
+- The operator token never rides URLs in remote mode: the WebSocket upgrade and static loads authenticate with a one-time ticket or a __Host- cookie, so proxy access logs and browser history never see it.
+- The credential gateway stays loopback-always and is never proxied; remote mode changes nothing about it.
+- Every proxy recipe carries a rate-limit stanza; the daemon does not grow backoff logic of its own.
+- Token comparison is constant-time on every listener — the control socket's identity Map lookup in socket.ts included.
+- Every exposure recipe carries the same assertions in the suite: bind-address config refused unconditionally, token required, forwarded identity ignored without the proxy secret, hierarchy enforced when remote.
 
 ## Alternatives considered
 

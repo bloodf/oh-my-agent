@@ -6,7 +6,7 @@
 
 ## Goal
 
-Both upstream issues are filed — the memo-corruption with T-1501's repro, and the RpcClient.pid accessor request — with links recorded in the tree and at the workaround sites.
+Both upstream issues are filed — the resolver corruption with T-1501's repro, on the tracker the control outcome selects, and the RpcClient.pid accessor request — with links recorded in the tree and at the code sites that can carry them.
 
 ## Read first
 
@@ -23,14 +23,15 @@ Both upstream issues are filed — the memo-corruption with T-1501's repro, and 
 
 | Path | Role | Note |
 |---|---|---|
-| [`scripts/gen-delivery-docs.py`](../../../scripts/gen-delivery-docs.py) | Edited | The issue URLs recorded as this task's evidence. |
-| [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) | Edited | The workaround comment names the upstream issue URL. |
+| [`scripts/gen-delivery-docs.py`](../../../scripts/gen-delivery-docs.py) | Edited | The issue URLs recorded as this task's evidence, in the claim text. |
+| [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) | Edited | The workaround comment and the WorkerHandle.pid getter site name the upstream issue URLs; the patch file itself carries no comment (patch hygiene, T-1305). |
 
 ## Steps
 
-1. File the memo-corruption issue with T-1501's repro attached.
-2. File the RpcClient.pid accessor request: one paragraph of motivation (supervision without scraping the process table) and the proposed API.
-3. Record both URLs here and at the workaround and patch sites.
+1. File the resolver issue with T-1501's repro attached, on the tracker the control outcome selects: oven-sh/bun if the bare-hook control reproduces the corruption, oh-my-pi if it doesn't.
+2. File the RpcClient.pid accessor request: one paragraph of motivation (supervision without scraping the process table), the proposed API as the patch's src getter verbatim, and a note on which entry point (src vs dist) executes at runtime; live pid behavior is already pinned by tests/worker-lifecycle.test.ts.
+3. Record both URLs in this task's evidence and at the code carriers — the workaround comment and the WorkerHandle.pid getter site in src/worker/lifecycle.ts; the patch file itself cannot carry a URL comment.
+4. Evidence anchors are in-repo paths or commit shas (a bare URL renders as non-linkable text); the issue URL goes in the claim text.
 
 ## Acceptance
 
@@ -46,4 +47,5 @@ Both upstream issues are filed — the memo-corruption with T-1501's repro, and 
 
 ## Unblocks
 
-- Nothing.
+- T-1503
+- T-1504

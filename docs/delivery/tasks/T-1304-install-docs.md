@@ -31,7 +31,7 @@ The README's install path installs the released package into OMP and reaches a r
 
 ## Acceptance
 
-- [ ] The quickstart's commands are executable as written against the packed artifact, verified per release (manual check named in the runbook or a fixture install in the pack test).
+- [ ] The quickstart's commands are executed against the packed artifact by T-1306's consumer smoke test.
 
 ## Out of scope
 
@@ -40,6 +40,7 @@ The README's install path installs the released package into OMP and reaches a r
 ## Depends on
 
 - T-1301
+- T-1306
 
 ## Unblocks
 

@@ -6,7 +6,7 @@
 
 ## Goal
 
-`npm pack` produces a tarball with exactly what the plugin needs — manifest, sources, console assets, the patches contract, LICENSE, README — and the suite proves it.
+`npm pack` produces a tarball with exactly what the plugin needs — manifest, sources, skills, console assets, the patches contract, LICENSE, README — and the suite proves it.
 
 ## Read first
 
@@ -28,18 +28,18 @@
 
 ## Steps
 
-1. Author the files allowlist: src, patches, LICENSE, README. Tests, docs, and .github stay out.
+1. Author the files allowlist: src, skills, patches, LICENSE, README — skills/ is load-bearing (the materializer throws Unknown skill without it) and is in the manifest today. Tests, docs, and .github stay out.
 2. prepack runs typecheck and the fast suites; packing a broken tree fails before the tarball exists.
-3. The pack test asserts the dry-run manifest both ways: expected present, and nothing under tests/, docs/, or .github/ ships.
+3. The pack test asserts the dry-run manifest both ways — expected paths present, nothing under tests/, docs/, or .github/ ships — with explicit presence asserts for the console assets (src/console/*.html/css/js), every skills/*/SKILL.md, and LICENSE, so a future src/ restructure cannot drop them silently.
 
 ## Acceptance
 
-- [ ] The dry-run manifest contains src/, patches/, LICENSE, and README.md, and nothing under tests/, docs/, or .github/.
+- [ ] The dry-run manifest contains src/ (the src/console/*.html/css/js assets included), skills/ with every SKILL.md, patches/, LICENSE, and README.md, and nothing under tests/, docs/, or .github/.
 - [ ] CI runs the pack test; a manifest regression fails the build.
 
 ## Out of scope
 
-- Publishing itself (T-1303) and the patch-travel decision (ADR-013, implemented in T-1303 or resolved by T-1503).
+- Publishing itself (T-1303), the consumer-install smoke test (T-1306), and removing the patch (T-1504).
 
 ## Depends on
 
@@ -49,3 +49,4 @@
 
 - T-1303
 - T-1304
+- T-1306

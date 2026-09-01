@@ -27,12 +27,12 @@ A written runbook takes the operator from zero to a live dogfood session: accoun
 ## Steps
 
 1. Preconditions: which accounts and definitions, a clean daemon state, and the explicit 'this touches real accounts' checklist.
-2. The scenario: spawn a parent, deploy a child, run a room exchange, exercise every CLI verb, run both worker backends, kill with cascade.
+2. The scenario: spawn a parent, deploy a child, run a room exchange, exercise every CLI verb, run both worker backends, kill with cascade — plus a manual console+TUI checklist: open the console URL, watch the room live during the run, confirm TUI state transitions.
 3. Capture and triage: where the session log lives, and the rule that every finding becomes a generator task or a recorded wont-fix.
 
 ## Acceptance
 
-- [ ] A reader can run the full session from the runbook alone; every step names its command or check.
+- [ ] T-1402's driver implements every runbook step 1:1; any runbook step with no command is marked manual with a check to record.
 
 ## Out of scope
 

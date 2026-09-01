@@ -18,6 +18,7 @@ The repo has a written versioning policy and a changelog the release workflow co
 
 - `CHANGELOG.md`
 - `README.md`
+- `.github/workflows/ci.yml`
 
 ## Modules and assets in play
 
@@ -25,17 +26,19 @@ The repo has a written versioning policy and a changelog the release workflow co
 |---|---|---|
 | `CHANGELOG.md` (to be created) | New | Keep-a-changelog format: the policy in a header paragraph, Unreleased on top. |
 | [`README.md`](../../../README.md) | Edited | A one-paragraph pointer to the policy; the ritual lives in the changelog header. |
+| [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) | Edited | Runs the version/changelog comparison alongside the existing gates. |
 
 ## Steps
 
-1. CHANGELOG.md in keep-a-changelog format; the header states the policy (pre-1.0: minor is features, patch is fixes, breaking is minor until 1.0).
+1. CHANGELOG.md in keep-a-changelog format; the header states the policy (pre-1.0: minor is features, patch is fixes, breaking is minor until 1.0) and the rollback policy: a bad release is `npm deprecate` plus a patch-bump forward, never unpublish.
 2. The ritual: version bump, changelog move from Unreleased, and tag in one commit; T-1303's workflow consumes the tag.
-3. README gains a pointer paragraph and nothing more — one home for the policy.
+3. Add the version/changelog comparison to CI: package.json's version and omp.version must equal the top non-Unreleased changelog entry; T-1303's tag step reuses the check.
+4. README gains a pointer paragraph and nothing more — one home for the policy.
 
 ## Acceptance
 
-- [ ] CHANGELOG.md exists with the policy header and an Unreleased section.
-- [ ] After a release, package.json's version matches the latest changelog entry.
+- [ ] CHANGELOG.md exists with the policy header — versioning and rollback — and an Unreleased section.
+- [ ] A CI check compares package.json's version and omp.version to the top non-Unreleased changelog entry.
 
 ## Out of scope
 

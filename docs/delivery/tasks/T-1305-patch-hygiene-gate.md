@@ -6,7 +6,7 @@
 
 ## Goal
 
-CI proves every file under patches/ is a code-only patch: no binary hunks, no stray files, no hunks touching non-source paths — the .DS_Store incident becomes a gate.
+CI proves every file under patches/ is a code-only patch whose pin matches the lockfile: no binary hunks, no stray files, no hunks touching non-source paths, no stale patch keys — the .DS_Store incident becomes a gate.
 
 ## Read first
 
@@ -22,23 +22,25 @@ CI proves every file under patches/ is a code-only patch: no binary hunks, no st
 
 | Path | Role | Note |
 |---|---|---|
-| `scripts/check-patches.py` (to be created) | New | Parses unified diffs under patches/; fails on binary hunks, non-patch files, and hunks outside source paths; has a --selftest fixture mode. |
+| `scripts/check-patches.py` (to be created) | New | Parses unified diffs under patches/; fails on binary hunks, non-patch files, hunks outside source paths, and patch keys that decode (%2F) to no patchedDependencies entry or a stale version; has a --selftest fixture mode. |
 | [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) | Edited | Runs the gate alongside the existing gates. |
 
 ## Steps
 
 1. Parse each patch: every hunk must name a source path in the package; GIT binary hunks and literal/delta content fail.
 2. Fail on any non-.patch file in patches/.
-3. Wire into CI; --selftest proves the gate fails on a fixture containing a binary hunk.
+3. Match every patch filename: it decodes (%2F) to a key in patchedDependencies, and the pinned version equals the lockfile-resolved version of that package — a stale pin fails.
+4. Wire into CI; --selftest proves the gate fails on a fixture containing a binary hunk.
 
 ## Acceptance
 
 - [ ] The gate passes on the current patch and fails on a binary-hunk fixture under --selftest.
+- [ ] Each patch filename decodes (%2F) to a patchedDependencies key that matches the lockfile-resolved version.
 - [ ] CI runs both the gate and its selftest.
 
 ## Out of scope
 
-- Removing the patch (T-1503).
+- Removing the patch (T-1504).
 
 ## Depends on
 

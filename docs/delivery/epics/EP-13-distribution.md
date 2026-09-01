@@ -20,7 +20,7 @@ The plugin installs and runs from a checkout, but nothing about a release is rep
 
 ## Not in scope
 
-- Publishing before the patch question is answered — the pack test makes that a gate, not a judgment call.
+- Blocking the first release on EP-15's upstream filings; distribution soft-depends on T-1502 being filed, but the only hard gate is T-1306's contract assertion.
 - Releases on every commit; release is a tag, not a push.
 
 ## Acceptance
@@ -42,3 +42,4 @@ The plugin installs and runs from a checkout, but nothing about a release is rep
 | [T-1303](../tasks/T-1303-release-ci.md) | Tag-driven release workflow | Blocked |
 | [T-1304](../tasks/T-1304-install-docs.md) | README install path for the released artifact | Blocked |
 | [T-1305](../tasks/T-1305-patch-hygiene-gate.md) | patches/ contains code only, enforced | Ready |
+| [T-1306](../tasks/T-1306-consumer-install-smoke.md) | Consumer-install smoke test | Blocked |

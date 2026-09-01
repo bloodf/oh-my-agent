@@ -26,17 +26,17 @@ In remote mode, parentage stops being cooperative metadata: kill, inject, and sp
 |---|---|---|
 | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Edited | Remote mode flips the enforcement switch T-1004 built; loopback keeps cooperative behavior. |
 | [`tests/socket-identity.test.ts`](../../../tests/socket-identity.test.ts) | Edited | The enforcement assertions run in remote mode. |
-| `tests/remote-exposure.test.ts` (to be created) | Edited | The flip is on in remote mode and off on loopback — both asserted. |
+| `tests/remote-exposure.test.ts` (to be created) | Edited | Created by T-1201; the flip is on in remote mode and off on loopback — both asserted. |
 
 ## Steps
 
-1. Wire the remote-mode flag to T-1004's enforcement: a worker token's kill, bump, or inject is refused against peers it does not own; a spawn's parent claim must equal the caller identity.
+1. Wire the remote-mode flag to T-1004's enforcement, specified by set difference: every protocol method not in socket.ts's workerMethods is operator-only, and the suite iterates METHOD_NAMES so a future method is deny-by-default — the dangerous ones the old enumeration missed (definition_update, agent_create, schedules_arm, rooms_post) are covered by the difference, not named. A spawn's parent claim must equal the caller identity.
 2. Assert the negative space: loopback keeps cooperative parentage (existing suites stand), remote mode has no cooperative path.
 3. Boot in remote mode logs the active trust model once, so an operator can audit which is live.
 
 ## Acceptance
 
-- [ ] Remote mode: every privileged verb refuses a foreign-identity caller, suite-proven over the proxied connection shape.
+- [ ] Remote mode: every privileged verb refuses a foreign-identity caller, suite-proven over a remote-mode connection.
 - [ ] Loopback: cooperative behavior and the existing suites are unchanged.
 - [ ] The boot log names the active trust model.
 

@@ -17,18 +17,21 @@ Every server the daemon runs binds loopback today, and that is the security mode
 - An explicit remote-mode surface: config or flag, refusal when the hardening preconditions are unmet, loopback default unchanged.
 - TLS termination via documented reverse-proxy recipes per ADR-012; the daemon never terminates TLS itself.
 - Operator auth over the wire in remote mode: every request carries the operator token, and hierarchy enforcement flips from cooperative to authoritative (T-1004's prepared layer).
+- An authenticated-connection audit surface: every authenticated remote-mode connection is logged, and a CLI verb reports the active mode and live connections (T-1206).
 
 ## Not in scope
 
 - Changing the loopback default; remote exposure is an explicit opt-in, never a side effect of binding an address.
 - Multi-tenant authorization — the model is one operator with a token, not per-user accounts.
+- Operator-token rotation UX; the manual path is deleting the token file and restarting (covered by the boot suite), and the runbook documents it.
 
 ## Acceptance
 
-- [ ] A non-loopback bind without the remote-mode flag is refused with the reason on stderr, never a partial boot.
+- [ ] Any non-loopback bind is refused with the reason on stderr, never a partial boot — no flag permits one; remote mode changes auth and enforcement only.
 - [ ] In remote mode, a console request or socket connection without the operator token is refused; the loopback default keeps working exactly as today.
-- [ ] Parentage enforcement is asserted in remote mode: a worker token cannot kill or inject into a peer it does not own, over a proxied connection.
+- [ ] Parentage enforcement is asserted in remote mode: a worker token cannot kill or inject into a peer it does not own, over a remote-mode connection.
 - [ ] Every recipe in the docs (proxy, tailscale, SSH tunnel) carries the same refusal/required-token assertions.
+- [ ] Every authenticated remote-mode connection leaves an audit log line, and `omp-agent audit` reports the active trust model and live authenticated connections.
 
 ## Decisions
 
@@ -43,3 +46,4 @@ Every server the daemon runs binds loopback today, and that is the security mode
 | [T-1203](../tasks/T-1203-remote-console-auth.md) | Operator-token flow in the console client | Blocked |
 | [T-1204](../tasks/T-1204-authoritative-hierarchy.md) | Hierarchy enforcement flips in remote mode | Blocked |
 | [T-1205](../tasks/T-1205-exposure-runbook.md) | Threat model and operator checklist | Blocked |
+| [T-1206](../tasks/T-1206-authenticated-connection-audit.md) | Authenticated-connection audit surface | Blocked |

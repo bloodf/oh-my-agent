@@ -17,3 +17,4 @@ A packable npm artifact with a version story and a tag-driven release workflow.
 | [T-1303](../tasks/T-1303-release-ci.md) | [EP-13](../epics/EP-13-distribution.md) | Tag-driven release workflow | Blocked |
 | [T-1304](../tasks/T-1304-install-docs.md) | [EP-13](../epics/EP-13-distribution.md) | README install path for the released artifact | Blocked |
 | [T-1305](../tasks/T-1305-patch-hygiene-gate.md) | [EP-13](../epics/EP-13-distribution.md) | patches/ contains code only, enforced | Ready |
+| [T-1306](../tasks/T-1306-consumer-install-smoke.md) | [EP-13](../epics/EP-13-distribution.md) | Consumer-install smoke test | Blocked |

@@ -11,7 +11,7 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**60 of 77 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
+**60 of 81 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
 Every runtime subsystem is built and under test: workers, isolation, credentials, rooms, scheduling, and quota handling. Two things keep that from meaning finished.
 
@@ -57,10 +57,10 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-09](epics/EP-09-tui-management.md) | Full TUI management surface | Done | 3 |
 | [EP-10](epics/EP-10-production-wiring.md) | Production wiring: serving, usage, and deferred hardening | Done | 6 |
 | [EP-11](epics/EP-11-operator-polish.md) | Operator polish: AAA console and the CLI surface | Ready | 5 |
-| [EP-12](epics/EP-12-remote-exposure.md) | Beyond loopback: remote exposure with a real trust model | Ready | 5 |
-| [EP-13](epics/EP-13-distribution.md) | Distribution: packable artifact, versioning, and release CI | Ready | 5 |
-| [EP-14](epics/EP-14-dogfooding.md) | Live-account hardening | Ready | 3 |
-| [EP-15](epics/EP-15-upstream-filings.md) | Upstream pi-coding-agent hygiene | Ready | 3 |
+| [EP-12](epics/EP-12-remote-exposure.md) | Beyond loopback: remote exposure with a real trust model | Ready | 6 |
+| [EP-13](epics/EP-13-distribution.md) | Distribution: packable artifact, versioning, and release CI | Ready | 6 |
+| [EP-14](epics/EP-14-dogfooding.md) | Live-account hardening | Ready | 4 |
+| [EP-15](epics/EP-15-upstream-filings.md) | Upstream pi-coding-agent hygiene | Ready | 4 |
 
 ## Sprints
 
@@ -103,8 +103,8 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [ADR-009](adr/ADR-009-threads-and-reactions.md) | Conversation gains threads and reactions; reactions carry agent status | Proposed |
 | [ADR-010](adr/ADR-010-mit-license.md) | MIT license, chosen by the repository owner | Accepted |
 | [ADR-011](adr/ADR-011-agent-hierarchy.md) | Persistent child agents are spawn-time state; kill cascades | Accepted |
-| [ADR-012](adr/ADR-012-remote-exposure.md) | Beyond loopback, a reverse proxy terminates TLS; the daemon never does | Proposed |
-| [ADR-013](adr/ADR-013-release-channel.md) | One npm package with a files allowlist; tagged releases, never per-commit publishes | Proposed |
+| [ADR-012](adr/ADR-012-remote-exposure.md) | Beyond loopback, a reverse proxy terminates TLS; the daemon never does | Accepted |
+| [ADR-013](adr/ADR-013-release-channel.md) | One npm package with a files allowlist; tagged releases, never per-commit publishes | Accepted |
 
 ## What to do next
 
