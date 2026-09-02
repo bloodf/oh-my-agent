@@ -47,6 +47,7 @@
  */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
 import { join, resolve, sep } from "node:path";
 
 import type { MessageReaction, RoomMessage, RoomStore } from "../rooms/store";
@@ -59,7 +60,12 @@ import { METHODS } from "../shared/protocol-schemas";
 import type { Operations } from "./operations";
 import { HUMAN_AUTHOR, InvalidParamsError } from "./operations";
 import type { PeerDefinitionFields, PeerStore } from "./peer-store";
-import type { PeerRecord } from "./socket";
+import {
+	type AuditConnection,
+	type AuditConnectionClass,
+	connectionAuditRecorder,
+	type PeerRecord,
+} from "./socket";
 import type { Supervisor } from "./supervisor";
 
 /** Loopback: a console reachable from the network is a rooms leak. */
@@ -309,9 +315,10 @@ export interface ConsoleApi {
 	close(): Promise<void>;
 }
 
-/** Attached to an upgraded socket; the token was checked at the handshake. */
+/** Attached to an upgraded socket; its private audit record closes with it. */
 interface SocketData {
 	id: number;
+	auditConnection?: AuditConnection;
 }
 
 /** One reaction as the cursor holds it, with the message it sits on. */
@@ -387,6 +394,32 @@ export async function startConsoleApi(
 		);
 	}
 
+	const audit = connectionAuditRecorder(operations);
+	const audited = async <T>(
+		connectionClass: AuditConnectionClass,
+		source: string,
+		run: (connection: AuditConnection | undefined) => Promise<T> | T,
+	): Promise<T | Response> => {
+		if (!remoteMode || audit === undefined) return await run(undefined);
+		const connection = await audit.connect("operator", connectionClass, source);
+		if (connection === undefined) {
+			return Response.json(
+				{
+					error: {
+						code: "unavailable",
+						message: "Connection audit capacity reached",
+					},
+				},
+				{ status: 503 },
+			);
+		}
+		try {
+			return await run(connection);
+		} catch (error) {
+			await audit.disconnect(connection);
+			throw error;
+		}
+	};
 	const json = (status: number, body: unknown): Response =>
 		Response.json(body, { status });
 
@@ -1532,6 +1565,17 @@ export async function startConsoleApi(
 				remoteMode &&
 				url.origin !== directUrl.origin &&
 				!isLoopback(url.hostname);
+			const observedSource = self.requestIP(request)?.address ?? "unknown";
+			const forwardedSource = request.headers
+				.get("X-Forwarded-For")
+				?.split(",", 1)[0]
+				?.trim();
+			const source =
+				remoteRequest &&
+				forwardedSource !== undefined &&
+				isIP(forwardedSource) !== 0
+					? forwardedSource
+					: observedSource;
 
 			if (remoteRequest) {
 				if (request.method === "POST" && url.pathname === "/api/session") {
@@ -1539,14 +1583,36 @@ export async function startConsoleApi(
 					if (presented === undefined || !tokenMatches(presented, token)) {
 						return fail(401, "unauthorized", "Operator token refused");
 					}
-					return json(200, { ticket: mintTicket("/") });
+					return await audited(
+						"console-proxied",
+						source,
+						async (connection) => {
+							try {
+								return json(200, { ticket: mintTicket("/") });
+							} finally {
+								if (connection !== undefined)
+									await audit?.disconnect(connection);
+							}
+						},
+					);
 				}
 				if (request.method === "POST" && url.pathname === "/api/ws-ticket") {
 					const presented = presentedToken(request, url, false);
 					if (presented === undefined || !tokenMatches(presented, token)) {
 						return fail(401, "unauthorized", "Operator token refused");
 					}
-					return json(200, { ticket: mintTicket("/api/events") });
+					return await audited(
+						"console-proxied",
+						source,
+						async (connection) => {
+							try {
+								return json(200, { ticket: mintTicket("/api/events") });
+							} finally {
+								if (connection !== undefined)
+									await audit?.disconnect(connection);
+							}
+						},
+					);
 				}
 				if (isStatic) {
 					if (!consumeTicket(url)) {
@@ -1574,7 +1640,23 @@ export async function startConsoleApi(
 						}
 						return fail(401, "unauthorized", "Static ticket required");
 					}
-					return await serveStatic(request, url.pathname, undefined, true);
+					return await audited(
+						"console-proxied",
+						source,
+						async (connection) => {
+							try {
+								return await serveStatic(
+									request,
+									url.pathname,
+									undefined,
+									true,
+								);
+							} finally {
+								if (connection !== undefined)
+									await audit?.disconnect(connection);
+							}
+						},
+					);
 				}
 				if (isUpgrade) {
 					if (!consumeTicket(url)) {
@@ -1595,23 +1677,38 @@ export async function startConsoleApi(
 					return await serveStatic(request, url.pathname, presented);
 			}
 
+			const connectionClass: AuditConnectionClass = remoteRequest
+				? "console-proxied"
+				: "console-loopback";
 			if (isUpgrade) {
-				const upgraded = self.upgrade(request, {
-					data: { id: nextSocketId++ },
+				return await audited(connectionClass, source, async (connection) => {
+					const upgraded = self.upgrade(request, {
+						data: {
+							id: nextSocketId++,
+							...(connection === undefined
+								? {}
+								: { auditConnection: connection }),
+						},
+					});
+					if (upgraded) return undefined;
+					if (connection !== undefined) await audit?.disconnect(connection);
+					return fail(400, "invalid_request", "WebSocket upgrade failed");
 				});
-				if (upgraded) return undefined;
-				return fail(400, "invalid_request", "WebSocket upgrade failed");
 			}
 
-			try {
-				return await handle(request, url);
-			} catch (error) {
-				return fail(
-					500,
-					"internal",
-					error instanceof Error ? error.message : String(error),
-				);
-			}
+			return await audited(connectionClass, source, async (connection) => {
+				try {
+					return await handle(request, url);
+				} catch (error) {
+					return fail(
+						500,
+						"internal",
+						error instanceof Error ? error.message : String(error),
+					);
+				} finally {
+					if (connection !== undefined) await audit?.disconnect(connection);
+				}
+			});
 		},
 		websocket: {
 			open: (socket) => {
@@ -1625,6 +1722,9 @@ export async function startConsoleApi(
 			close: (socket) => {
 				sockets.delete(socket);
 				if (sockets.size === 0) void stopPolling();
+				if (socket.data.auditConnection !== undefined) {
+					void audit?.disconnect(socket.data.auditConnection);
+				}
 			},
 		},
 	});

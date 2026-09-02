@@ -1,11 +1,11 @@
 /**
- * T-1201: the remote-mode surface and the unconditional bind refusal.
+ * T-1201 remote-mode trust boundaries plus T-1202 proxy URL correctness.
  *
- * The five acceptance bullets, one describe each: no listener ever answers a
- * routable address; remote mode demands the operator token on both surfaces;
- * the operator token file's mode is verified before anything opens; forged
- * `X-Forwarded-*` buys nothing without the per-install proxy secret; and the
- * loopback default behaves exactly as it did before this task.
+ * The acceptance groups prove no listener ever answers a routable address;
+ * remote mode demands the operator token on both surfaces; secret files are
+ * verified before anything opens; forwarded identity requires the proxy
+ * secret; an explicit external HTTPS origin is announced without a long-lived
+ * token; and the loopback token URL remains unchanged.
  *
  * The control socket is asserted on its JSON-RPC error code rather than an
  * HTTP status: it answers `Response.json(unauthorized(0))` — HTTP 200 with a
@@ -21,13 +21,16 @@ import {
 	mkdtemp,
 	readFile,
 	rm,
+	symlink,
 	writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
+import { runCli } from "../src/daemon/cli";
+import { normalizeRequestUrl } from "../src/daemon/console-api";
 import type { DaemonHandle, WorkerFactory } from "../src/daemon/main";
 import { bootDaemon } from "../src/daemon/main";
+import { persistConnectionAuditState } from "../src/daemon/socket";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
 import type { JsonRpcFailure, JsonRpcSuccess } from "../src/shared/protocol";
 import { ERROR_CODE } from "../src/shared/protocol";
@@ -72,6 +75,16 @@ async function tempDir(): Promise<string> {
 interface Booted {
 	handle: DaemonHandle;
 	stateDir: string;
+	messages: string[];
+}
+const defaultRemoteConsoleOrigin = "https://console.example.test";
+
+function withRemoteConsoleOrigin(
+	env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+	return env.OMA_REMOTE === "1" && !("OMA_CONSOLE_ORIGIN" in env)
+		? { ...env, OMA_CONSOLE_ORIGIN: defaultRemoteConsoleOrigin }
+		: env;
 }
 
 async function boot(
@@ -79,22 +92,54 @@ async function boot(
 	agentDir?: string,
 ): Promise<Booted> {
 	const dir = agentDir ?? (await tempDir());
+	const messages: string[] = [];
 	const handle = await bootDaemon({
-		env,
+		env: withRemoteConsoleOrigin(env),
 		agentDir: dir,
 		projectDir: await tempDir(),
 		workerFactory: stubWorkerFactory,
+		logger: (message) => messages.push(message),
 	});
 	cleanups.push(() => handle.close());
-	return { handle, stateDir: join(dir, "oh-my-agent") };
+	return { handle, stateDir: join(dir, "oh-my-agent"), messages };
+}
+
+async function bootRemoteConsole(): Promise<Booted & { localUrl: string }> {
+	const booted = await boot({
+		OMA_REMOTE: "1",
+		OMA_CONSOLE_ORIGIN: "https://console.example.com",
+	});
+	const localUrl = booted.handle.consoleListenerUrl;
+	if (localUrl === undefined) throw new Error("Remote console did not bind");
+	return { ...booted, localUrl };
 }
 
 /** The console URL with its query token stripped, i.e. an anonymous caller. */
-function anonymous(handle: DaemonHandle, path = "/"): URL {
-	const url = new URL(path, handle.consoleUrl);
+function anonymous(
+	handle: DaemonHandle,
+	path = "/",
+	base = handle.consoleUrl,
+): URL {
+	const url = new URL(path, base);
 	url.search = "";
 	return url;
 }
+
+describe("boot trust model logging", () => {
+	test("names remote trust model exactly once", async () => {
+		const { messages } = await boot({ OMA_REMOTE: "1", OMA_CONSOLE: "0" });
+		expect(
+			messages.filter((message) => message.startsWith("trust model: ")),
+		).toEqual(["trust model: remote"]);
+	});
+
+	test("names loopback trust model exactly once", async () => {
+		const { messages } = await boot({ OMA_CONSOLE: "0" });
+		expect(
+			messages.filter((message) => message.startsWith("trust model: ")),
+		).toEqual(["trust model: loopback"]);
+	});
+});
 
 async function control(
 	socketPath: string,
@@ -142,7 +187,7 @@ async function controlCall(
 
 // ── Bullet 1: the bind refusal is unconditional ──────────────────────────────
 
-describe("routable bind refusal", () => {
+describe("bind-address config refused unconditionally", () => {
 	test("refuses every listener's routable address, before anything opens", async () => {
 		// The credential gateway is on this list deliberately: it is
 		// loopback-always and never joins remote auth, so asking it to move is
@@ -154,7 +199,7 @@ describe("routable bind refusal", () => {
 		]) {
 			const agentDir = await tempDir();
 			const attempt = bootDaemon({
-				env: { OMA_REMOTE: "1", [variable]: "0.0.0.0" },
+				env: { OMA_REMOTE: "1", OMA_CONSOLE: "0", [variable]: "0.0.0.0" },
 				agentDir,
 				projectDir: await tempDir(),
 				workerFactory: stubWorkerFactory,
@@ -222,15 +267,17 @@ describe("routable bind refusal", () => {
 // ── Bullet 2: remote mode requires the operator token ────────────────────────
 
 describe("remote mode authentication", () => {
-	test("refuses an unauthenticated console request", async () => {
-		const { handle } = await boot({ OMA_REMOTE: "1" });
+	test("token required for remote console requests", async () => {
+		const { handle, localUrl } = await bootRemoteConsole();
 		expect(handle.consoleUrl).toBeString();
-		expect((await fetch(anonymous(handle))).status).toBe(401);
-		expect((await fetch(anonymous(handle, "/api/agents"))).status).toBe(401);
+		expect((await fetch(anonymous(handle, "/", localUrl))).status).toBe(401);
+		expect(
+			(await fetch(anonymous(handle, "/api/agents", localUrl))).status,
+		).toBe(401);
 	});
 
 	test("refuses an unauthenticated control connection", async () => {
-		const { handle } = await boot({ OMA_REMOTE: "1" });
+		const { handle } = await boot({ OMA_REMOTE: "1", OMA_CONSOLE: "0" });
 		const answer = await control(handle.socketPath);
 		expect(answer).toMatchObject({
 			error: { code: ERROR_CODE.UNAUTHORIZED },
@@ -238,7 +285,7 @@ describe("remote mode authentication", () => {
 	});
 
 	test("refuses a control connection presenting the wrong token", async () => {
-		const { handle } = await boot({ OMA_REMOTE: "1" });
+		const { handle } = await boot({ OMA_REMOTE: "1", OMA_CONSOLE: "0" });
 		const answer = await control(handle.socketPath, "not-the-operator-token");
 		expect(answer).toMatchObject({
 			error: { code: ERROR_CODE.UNAUTHORIZED },
@@ -256,7 +303,7 @@ describe("operator token file permissions", () => {
 		await chmod(join(stateDir, "console-token"), 0o640);
 		await expect(
 			bootDaemon({
-				env: { OMA_REMOTE: "1" },
+				env: { OMA_REMOTE: "1", OMA_CONSOLE: "0" },
 				agentDir,
 				projectDir: await tempDir(),
 				workerFactory: stubWorkerFactory,
@@ -282,7 +329,7 @@ describe("operator token file permissions", () => {
 	});
 
 	test("mints the proxy secret at 0600 in remote mode", async () => {
-		const { stateDir } = await boot({ OMA_REMOTE: "1" });
+		const { stateDir } = await boot({ OMA_REMOTE: "1", OMA_CONSOLE: "0" });
 		const path = join(stateDir, "console-proxy-secret");
 		expect(await Bun.file(path).exists()).toBe(true);
 		expect(statSync(path).mode & 0o777).toBe(0o600);
@@ -295,7 +342,7 @@ describe("operator token file permissions", () => {
 		await chmod(join(stateDir, "console-proxy-secret"), 0o666);
 		await expect(
 			bootDaemon({
-				env: { OMA_REMOTE: "1" },
+				env: { OMA_REMOTE: "1", OMA_CONSOLE: "0" },
 				agentDir,
 				projectDir: await tempDir(),
 				workerFactory: stubWorkerFactory,
@@ -305,59 +352,250 @@ describe("operator token file permissions", () => {
 });
 
 // ── Bullet 4: forged forwarded identity buys nothing ─────────────────────────
+describe("forwarded request URL normalization", () => {
+	const direct = new URL("http://127.0.0.1:4210/api/agents?view=active");
+	const proxySecret = "proxy-secret";
+
+	test("uses first valid forwarded scheme and host with the proxy secret", () => {
+		const normalized = normalizeRequestUrl(
+			direct,
+			new Headers({
+				"X-OMA-Proxy-Secret": proxySecret,
+				"X-Forwarded-Proto": "https, http",
+				"X-Forwarded-Host": "console.example.com:8443, internal.example",
+			}),
+			true,
+			proxySecret,
+		);
+		expect(normalized.href).toBe(
+			"https://console.example.com:8443/api/agents?view=active",
+		);
+	});
+
+	test("ignores forwarded values without a matching proxy secret", () => {
+		for (const presented of [undefined, "wrong-proxy-secret"]) {
+			const headers = new Headers({
+				"X-Forwarded-Proto": "https",
+				"X-Forwarded-Host": "console.example.com",
+			});
+			if (presented !== undefined) {
+				headers.set("X-OMA-Proxy-Secret", presented);
+			}
+			expect(normalizeRequestUrl(direct, headers, true, proxySecret)).toBe(
+				direct,
+			);
+		}
+	});
+
+	test("falls back to direct URL for malformed trusted values", () => {
+		for (const forwarded of [
+			{ "X-Forwarded-Proto": "ftp", "X-Forwarded-Host": "example.com" },
+			{ "X-Forwarded-Proto": "https", "X-Forwarded-Host": "" },
+			{ "X-Forwarded-Proto": "https", "X-Forwarded-Host": "bad host" },
+			{ "X-Forwarded-Proto": "https", "X-Forwarded-Host": "host:" },
+		]) {
+			expect(
+				normalizeRequestUrl(
+					direct,
+					new Headers({
+						"X-OMA-Proxy-Secret": proxySecret,
+						...forwarded,
+					}),
+					true,
+					proxySecret,
+				),
+			).toBe(direct);
+		}
+	});
+
+	test("loopback mode ignores forwarded scheme and host", () => {
+		expect(
+			normalizeRequestUrl(
+				direct,
+				new Headers({
+					"X-OMA-Proxy-Secret": proxySecret,
+					"X-Forwarded-Proto": "https",
+					"X-Forwarded-Host": "console.example.com",
+				}),
+				false,
+				proxySecret,
+			),
+		).toBe(direct);
+	});
+});
+
+describe("external console origin", () => {
+	test("persists and returns the configured HTTPS origin without the operator token", async () => {
+		const announced: Array<string | undefined> = [];
+		const agentDir = await tempDir();
+		const handle = await bootDaemon({
+			env: {
+				OMA_REMOTE: "1",
+				OMA_CONSOLE_ORIGIN: "https://console.example.com:8443",
+			},
+			agentDir,
+			projectDir: await tempDir(),
+			workerFactory: stubWorkerFactory,
+			announce: (url) => announced.push(url),
+		});
+		cleanups.push(() => handle.close());
+
+		expect(handle.consoleUrl).toBe("https://console.example.com:8443/");
+		expect(announced).toEqual([handle.consoleUrl]);
+		expect(
+			await readFile(join(agentDir, "oh-my-agent", "console-url"), "utf8"),
+		).toBe(handle.consoleUrl as string);
+		expect(handle.consoleUrl).not.toContain("token=");
+		const stdout: string[] = [];
+		expect(
+			await runCli(["console"], {
+				agentDir,
+				io: {
+					stdout: (text) => stdout.push(text),
+					stderr: () => {},
+				},
+			}),
+		).toBe(0);
+		expect(stdout.join("").trim()).toBe(handle.consoleUrl as string);
+	});
+
+	test("refuses malformed or unsafe external origins before claiming the daemon", async () => {
+		for (const origin of [
+			"http://console.example.com",
+			"https://user:pass@console.example.com",
+			"https://console.example.com/?tenant=one",
+			"https://console.example.com/#rooms",
+			"not a URL",
+		]) {
+			const agentDir = await tempDir();
+			await expect(
+				bootDaemon({
+					env: { OMA_REMOTE: "1", OMA_CONSOLE_ORIGIN: origin },
+					agentDir,
+					projectDir: await tempDir(),
+					workerFactory: stubWorkerFactory,
+				}),
+			).rejects.toThrow(/OMA_CONSOLE_ORIGIN/);
+			expect(
+				await Bun.file(join(agentDir, "oh-my-agent", "daemon.pid")).exists(),
+			).toBe(false);
+		}
+	});
+
+	test("refuses a missing or empty external origin before pidfile or listeners", async () => {
+		for (const env of [
+			{ OMA_REMOTE: "1" },
+			{ OMA_REMOTE: "1", OMA_CONSOLE_ORIGIN: "" },
+		]) {
+			const agentDir = await tempDir();
+			const serve = spyOn(Bun, "serve");
+			try {
+				await expect(
+					bootDaemon({
+						env,
+						agentDir,
+						projectDir: await tempDir(),
+						workerFactory: stubWorkerFactory,
+					}),
+				).rejects.toThrow(/OMA_CONSOLE_ORIGIN/);
+				expect(serve).not.toHaveBeenCalled();
+			} finally {
+				serve.mockRestore();
+			}
+			expect(
+				await Bun.file(join(agentDir, "oh-my-agent", "daemon.pid")).exists(),
+			).toBe(false);
+		}
+	});
+
+	test("a headless remote daemon starts without an external origin", async () => {
+		const { handle } = await boot({
+			OMA_REMOTE: "1",
+			OMA_CONSOLE: "0",
+			OMA_CONSOLE_ORIGIN: undefined,
+		});
+		expect(handle.consoleUrl).toBeUndefined();
+	});
+
+	test("forged forwarded headers cannot replace the persisted console URL", async () => {
+		const { handle, stateDir, localUrl } = await bootRemoteConsole();
+		const original = handle.consoleUrl as string;
+		const token = (
+			await readFile(join(stateDir, "console-token"), "utf8")
+		).trim();
+		await fetch(anonymous(handle, "/api/agents", localUrl), {
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"X-Forwarded-Proto": "https",
+				"X-Forwarded-Host": "forged.example.com",
+			},
+		});
+
+		expect(handle.consoleUrl).toBe(original);
+		expect(await readFile(join(stateDir, "console-url"), "utf8")).toBe(
+			original,
+		);
+	});
+});
 
 describe("forwarded identity", () => {
 	test("forged X-Forwarded-* gains nothing without the proxy secret", async () => {
-		const { handle, stateDir } = await boot({ OMA_REMOTE: "1" });
+		const { handle, stateDir, localUrl } = await bootRemoteConsole();
 		const token = (
 			await readFile(join(stateDir, "console-token"), "utf8")
 		).trim();
 
-		// A direct loopback caller holding the real operator token and setting
-		// every forwarded header it likes: refused, because the headers are
-		// anonymous client input until the proxy secret says otherwise.
-		const forged = await fetch(anonymous(handle, "/api/agents"), {
+		// A direct loopback caller holding the real operator token may set any
+		// forwarded headers, but without the proxy secret they are ignored rather
+		// than trusted as request identity.
+		const forged = await fetch(anonymous(handle, "/api/agents", localUrl), {
 			headers: {
 				Authorization: `Bearer ${token}`,
 				"X-Forwarded-For": "203.0.113.8",
 				"X-Forwarded-User": "operator",
 				"X-Forwarded-Proto": "https",
+				"X-Forwarded-Host": "console.example.com",
 			},
 		});
-		expect(forged.status).toBe(401);
+		expect(forged.status).toBe(200);
 
 		const proxySecret = (
 			await readFile(join(stateDir, "console-proxy-secret"), "utf8")
 		).trim();
-		const authenticated = await fetch(anonymous(handle, "/api/agents"), {
-			headers: {
-				Authorization: `Bearer ${token}`,
-				"X-OMA-Proxy-Secret": proxySecret,
+		const authenticated = await fetch(
+			anonymous(handle, "/api/agents", localUrl),
+			{
+				headers: {
+					Authorization: `Bearer ${token}`,
+					"X-OMA-Proxy-Secret": proxySecret,
+				},
 			},
-		});
+		);
 		expect(authenticated.status).toBe(200);
 	});
 
-	test("a wrong proxy secret is refused even with the operator token", async () => {
-		const { handle, stateDir } = await boot({ OMA_REMOTE: "1" });
+	test("a wrong proxy secret leaves forwarded headers untrusted", async () => {
+		const { handle, stateDir, localUrl } = await bootRemoteConsole();
 		const token = (
 			await readFile(join(stateDir, "console-token"), "utf8")
 		).trim();
-		const response = await fetch(anonymous(handle, "/api/agents"), {
+		const response = await fetch(anonymous(handle, "/api/agents", localUrl), {
 			headers: {
 				Authorization: `Bearer ${token}`,
 				"X-OMA-Proxy-Secret": "not-the-proxy-secret",
+				"X-Forwarded-Proto": "https",
+				"X-Forwarded-Host": "console.example.com",
 			},
 		});
-		expect(response.status).toBe(401);
+		expect(response.status).toBe(200);
 	});
 
 	test("the proxy secret alone, without the operator token, is refused", async () => {
-		const { handle, stateDir } = await boot({ OMA_REMOTE: "1" });
+		const { handle, stateDir, localUrl } = await bootRemoteConsole();
 		const proxySecret = (
 			await readFile(join(stateDir, "console-proxy-secret"), "utf8")
 		).trim();
-		const response = await fetch(anonymous(handle, "/api/agents"), {
+		const response = await fetch(anonymous(handle, "/api/agents", localUrl), {
 			headers: { "X-OMA-Proxy-Secret": proxySecret },
 		});
 		expect(response.status).toBe(401);
@@ -372,6 +610,9 @@ describe("loopback default", () => {
 		expect(new URL(handle.consoleUrl as string).hostname).toBe("127.0.0.1");
 		// The announced URL carries the token and works as it always has.
 		expect((await fetch(handle.consoleUrl as string)).status).toBe(200);
+		expect(new URL(handle.consoleUrl as string).searchParams.get("token")).toBe(
+			(await readFile(join(stateDir, "console-token"), "utf8")).trim(),
+		);
 
 		const token = (
 			await readFile(join(stateDir, "console-token"), "utf8")
@@ -432,7 +673,7 @@ describe("loopback default", () => {
  * `workerMethods` surface in both (clause (b), T-1004), because T-1204's
  * parentage enforcement is defined over the identity that resolves here.
  */
-describe("remote mode control-socket bearer", () => {
+describe("remote mode control-socket hierarchy enforced", () => {
 	/** A peer definition, so a real boot mints a scoped worker token. */
 	async function writePeer(agentDir: string): Promise<void> {
 		const root = join(agentDir, "oh-my-agent", "agents");
@@ -456,7 +697,7 @@ describe("remote mode control-socket bearer", () => {
 		await writePeer(agentDir);
 		const workerTokens: string[] = [];
 		const handle = await bootDaemon({
-			env,
+			env: withRemoteConsoleOrigin(env),
 			agentDir,
 			projectDir: await tempDir(),
 			workerFactory: async (options) => {
@@ -474,26 +715,38 @@ describe("remote mode control-socket bearer", () => {
 	}
 
 	test("answers the operator token in remote mode", async () => {
-		const { handle, operator } = await bootWithWorker({ OMA_REMOTE: "1" });
+		const { handle, operator } = await bootWithWorker({
+			OMA_REMOTE: "1",
+			OMA_CONSOLE: "0",
+		});
 		expect(await control(handle.socketPath, operator)).toHaveProperty("result");
 	});
 
 	test("refuses an unauthenticated control connection in remote mode", async () => {
-		const { handle } = await bootWithWorker({ OMA_REMOTE: "1" });
+		const { handle } = await bootWithWorker({
+			OMA_REMOTE: "1",
+			OMA_CONSOLE: "0",
+		});
 		expect(await control(handle.socketPath)).toMatchObject({
 			error: { code: ERROR_CODE.UNAUTHORIZED },
 		});
 	});
 
 	test("refuses an unregistered bearer in remote mode", async () => {
-		const { handle } = await bootWithWorker({ OMA_REMOTE: "1" });
+		const { handle } = await bootWithWorker({
+			OMA_REMOTE: "1",
+			OMA_CONSOLE: "0",
+		});
 		expect(
 			await control(handle.socketPath, "not-a-registered-token"),
 		).toMatchObject({ error: { code: ERROR_CODE.UNAUTHORIZED } });
 	});
 
 	test("a scoped worker token keeps its own surface in remote mode", async () => {
-		const { handle, worker } = await bootWithWorker({ OMA_REMOTE: "1" });
+		const { handle, worker } = await bootWithWorker({
+			OMA_REMOTE: "1",
+			OMA_CONSOLE: "0",
+		});
 		// Clause (b) first: a worker-callable method succeeds on the worker's
 		// own bearer over a real boot. Refusing everything would satisfy
 		// clause (a) without any worker on this socket still working, so the
@@ -541,5 +794,415 @@ describe("remote mode control-socket bearer", () => {
 		expect(await control(handle.socketPath)).toMatchObject({
 			error: { code: ERROR_CODE.UNAUTHORIZED },
 		});
+	});
+});
+
+interface AuditConnection {
+	identity: string;
+	class: string;
+	source: string;
+	connectedAt: string;
+}
+
+interface AuditOutput {
+	trustModel: "loopback" | "remote";
+	connections: AuditConnection[];
+}
+
+async function auditCli(agentDir: string): Promise<AuditOutput> {
+	const stdout: string[] = [];
+	const stderr: string[] = [];
+	const code = await runCli(["--json", "audit"], {
+		agentDir,
+		io: {
+			stdout: (text) => stdout.push(text),
+			stderr: (text) => stderr.push(text),
+		},
+	});
+	expect(code).toBe(0);
+	expect(stderr).toEqual([]);
+	return JSON.parse(stdout.join("")) as AuditOutput;
+}
+
+async function openRemoteConsoleSocket(
+	booted: Booted & { localUrl: string },
+	operatorToken: string,
+	proxySecret: string,
+	forwardedFor?: string,
+): Promise<{ socket: WebSocket; ticket: string }> {
+	const forwarded = {
+		"X-OMA-Proxy-Secret": proxySecret,
+		"X-Forwarded-Proto": "https",
+		"X-Forwarded-Host": "console.example.com",
+		...(forwardedFor === undefined ? {} : { "X-Forwarded-For": forwardedFor }),
+	};
+	const ticketResponse = await fetch(
+		anonymous(booted.handle, "/api/ws-ticket", booted.localUrl),
+		{
+			method: "POST",
+			headers: {
+				...forwarded,
+				Authorization: `Bearer ${operatorToken}`,
+			},
+		},
+	);
+	expect(ticketResponse.status).toBe(200);
+	const { ticket } = (await ticketResponse.json()) as { ticket: string };
+	const events = new URL("/api/events", booted.localUrl);
+	events.protocol = "ws:";
+	events.searchParams.set("ticket", ticket);
+	const socket = new WebSocket(events.href, { headers: forwarded });
+	await new Promise<void>((resolve, reject) => {
+		socket.addEventListener("open", () => resolve(), { once: true });
+		socket.addEventListener("error", () => reject(new Error("socket error")), {
+			once: true,
+		});
+	});
+	return { socket, ticket };
+}
+
+async function closeSocket(socket: WebSocket): Promise<void> {
+	if (socket.readyState === WebSocket.CLOSED) return;
+	await new Promise<void>((resolve) => {
+		socket.addEventListener("close", () => resolve(), { once: true });
+		socket.close();
+	});
+}
+
+describe("authenticated connection audit", () => {
+	test("loopback audit changes no persisted listener state", async () => {
+		const { stateDir } = await boot();
+		expect(await auditCli(join(stateDir, ".."))).toEqual({
+			trustModel: "loopback",
+			connections: [],
+		});
+		expect(
+			await Bun.file(join(stateDir, "connection-audit.json")).exists(),
+		).toBe(false);
+		const stdout: string[] = [];
+		expect(
+			await runCli(["audit"], {
+				agentDir: join(stateDir, ".."),
+				io: { stdout: (text) => stdout.push(text), stderr: () => {} },
+			}),
+		).toBe(0);
+		expect(stdout.join("")).toBe("trust model: loopback\nconnections: 0\n");
+	});
+
+	test("records truthful sources without trusting unauthenticated forwarding", async () => {
+		const booted = await bootRemoteConsole();
+		const operatorToken = (
+			await readFile(join(booted.stateDir, "console-token"), "utf8")
+		).trim();
+		const proxySecret = (
+			await readFile(join(booted.stateDir, "console-proxy-secret"), "utf8")
+		).trim();
+		const written: string[] = [];
+		const stderr = spyOn(process.stderr, "write").mockImplementation(
+			(chunk: string | Uint8Array) => {
+				written.push(typeof chunk === "string" ? chunk : chunk.toString());
+				return true;
+			},
+		);
+		try {
+			expect(
+				await control(booted.handle.socketPath, operatorToken),
+			).toHaveProperty("result");
+			const direct = await fetch(
+				anonymous(booted.handle, "/api/agents", booted.localUrl),
+				{
+					headers: {
+						Authorization: `Bearer ${operatorToken}`,
+						"X-Forwarded-For": "198.51.100.9",
+					},
+				},
+			);
+			expect(direct.status).toBe(200);
+			const proxied = await fetch(
+				anonymous(booted.handle, "/api/agents", booted.localUrl),
+				{
+					headers: {
+						Authorization: `Bearer ${operatorToken}`,
+						"X-OMA-Proxy-Secret": proxySecret,
+						"X-Forwarded-For": "203.0.113.8, 127.0.0.1",
+						"X-Forwarded-Proto": "https",
+						"X-Forwarded-Host": "console.example.com",
+					},
+				},
+			);
+			expect(proxied.status).toBe(200);
+			const { socket } = await openRemoteConsoleSocket(
+				booted,
+				operatorToken,
+				proxySecret,
+				"203.0.113.8",
+			);
+			const live = await auditCli(join(booted.stateDir, ".."));
+			expect(live.connections).toEqual([
+				expect.objectContaining({
+					identity: "operator",
+					class: "console-proxied",
+					source: "203.0.113.8",
+				}),
+			]);
+			await closeSocket(socket);
+		} finally {
+			stderr.mockRestore();
+		}
+
+		const connects = written
+			.join("")
+			.trim()
+			.split("\n")
+			.filter((line) => line.startsWith("audit: "))
+			.map(
+				(line) =>
+					JSON.parse(line.slice("audit: ".length)) as Record<string, string>,
+			)
+			.filter((record) => record.event === "connect");
+		expect(
+			connects.some((record) => record.source === booted.handle.socketPath),
+		).toBe(true);
+		expect(connects.some((record) => record.source === "198.51.100.9")).toBe(
+			false,
+		);
+		expect(connects.some((record) => record.source === "203.0.113.8")).toBe(
+			true,
+		);
+		expect(
+			connects.some((record) =>
+				/^(?:127\.0\.0\.1|::1)$/.test(record.source ?? ""),
+			),
+		).toBe(true);
+		for (const record of connects)
+			expect(Date.parse(record.at as string)).not.toBeNaN();
+		const text = written.join("");
+		expect(text).not.toContain(operatorToken);
+		expect(text).not.toContain(proxySecret);
+	});
+
+	test("does not use the predictable legacy audit temporary name", async () => {
+		const agentDir = await tempDir();
+		const stateDir = join(agentDir, "oh-my-agent");
+		await mkdir(stateDir, { recursive: true });
+		const victim = join(agentDir, "victim");
+		await writeFile(victim, "untouched", { mode: 0o600 });
+		const auditPath = join(stateDir, "connection-audit.json");
+		await symlink(victim, `${auditPath}.${process.pid}.0.tmp`);
+
+		persistConnectionAuditState(auditPath, "audit-state");
+		expect(await readFile(victim, "utf8")).toBe("untouched");
+		expect(await readFile(auditPath, "utf8")).toBe("audit-state");
+		expect(statSync(auditPath).mode & 0o777).toBe(0o600);
+	});
+
+	test("refuses an audit temporary symlink collision", async () => {
+		const agentDir = await tempDir();
+		const stateDir = join(agentDir, "oh-my-agent");
+		await mkdir(stateDir, { recursive: true });
+		const victim = join(agentDir, "victim");
+		await writeFile(victim, "untouched", { mode: 0o600 });
+		const auditPath = join(stateDir, "connection-audit.json");
+		await symlink(victim, `${auditPath}.fixed.tmp`);
+
+		expect(() =>
+			persistConnectionAuditState(auditPath, "audit-state", "fixed"),
+		).toThrow();
+		expect(await readFile(victim, "utf8")).toBe("untouched");
+	});
+
+	test("refuses an existing audit temporary file", async () => {
+		const agentDir = await tempDir();
+		const stateDir = join(agentDir, "oh-my-agent");
+		await mkdir(stateDir, { recursive: true });
+		const auditPath = join(stateDir, "connection-audit.json");
+		const temporary = `${auditPath}.fixed.tmp`;
+		await writeFile(temporary, "attacker-content", { mode: 0o644 });
+
+		expect(() =>
+			persistConnectionAuditState(auditPath, "audit-state", "fixed"),
+		).toThrow();
+		expect(await readFile(temporary, "utf8")).toBe("attacker-content");
+		expect(statSync(temporary).mode & 0o777).toBe(0o644);
+	});
+
+	test("refuses audit persistence in an unsafe state directory", async () => {
+		const agentDir = await tempDir();
+		const stateDir = join(agentDir, "oh-my-agent");
+		await mkdir(stateDir, { recursive: true });
+		await chmod(stateDir, 0o770);
+
+		await expect(
+			bootDaemon({
+				env: withRemoteConsoleOrigin({ OMA_REMOTE: "1", OMA_CONSOLE: "0" }),
+				agentDir,
+				projectDir: await tempDir(),
+				workerFactory: stubWorkerFactory,
+				logger: () => {},
+			}),
+		).rejects.toThrow("unsafe audit state directory");
+		expect(
+			await Bun.file(join(stateDir, "connection-audit.json")).exists(),
+		).toBe(false);
+	});
+
+	test("logs authenticated session, websocket-ticket, and static connections", async () => {
+		const booted = await bootRemoteConsole();
+		const operatorToken = (
+			await readFile(join(booted.stateDir, "console-token"), "utf8")
+		).trim();
+		const proxySecret = (
+			await readFile(join(booted.stateDir, "console-proxy-secret"), "utf8")
+		).trim();
+		const forwarded = {
+			"X-OMA-Proxy-Secret": proxySecret,
+			"X-Forwarded-Proto": "https",
+			"X-Forwarded-Host": "console.example.com",
+		};
+		const written: string[] = [];
+		const stderr = spyOn(process.stderr, "write").mockImplementation(
+			(chunk: string | Uint8Array) => {
+				written.push(typeof chunk === "string" ? chunk : chunk.toString());
+				return true;
+			},
+		);
+		let ticket = "";
+		try {
+			const session = await fetch(
+				anonymous(booted.handle, "/api/session", booted.localUrl),
+				{
+					method: "POST",
+					headers: {
+						...forwarded,
+						Authorization: `Bearer ${operatorToken}`,
+					},
+				},
+			);
+			expect(session.status).toBe(200);
+			const sessionBody: unknown = await session.json();
+			if (
+				typeof sessionBody !== "object" ||
+				sessionBody === null ||
+				!("ticket" in sessionBody) ||
+				typeof sessionBody.ticket !== "string"
+			) {
+				throw new Error("Session response carried no ticket");
+			}
+			ticket = sessionBody.ticket;
+			const wsTicket = await fetch(
+				anonymous(booted.handle, "/api/ws-ticket", booted.localUrl),
+				{
+					method: "POST",
+					headers: {
+						...forwarded,
+						Authorization: `Bearer ${operatorToken}`,
+					},
+				},
+			);
+			expect(wsTicket.status).toBe(200);
+			const root = anonymous(booted.handle, "/", booted.localUrl);
+			root.searchParams.set("ticket", ticket);
+			expect((await fetch(root, { headers: forwarded })).status).toBe(200);
+		} finally {
+			stderr.mockRestore();
+		}
+		const records = written
+			.join("")
+			.trim()
+			.split("\n")
+			.filter((line) => line.startsWith("audit: "));
+		expect(records).toHaveLength(6);
+		expect(
+			records.every((line) => line.includes('"class":"console-proxied"')),
+		).toBe(true);
+		expect(written.join("")).not.toContain(operatorToken);
+		expect(written.join("")).not.toContain(proxySecret);
+		expect(written.join("")).not.toContain(ticket);
+	});
+
+	test("audit lists a live remote console and removes it on close", async () => {
+		const booted = await bootRemoteConsole();
+		const operatorToken = (
+			await readFile(join(booted.stateDir, "console-token"), "utf8")
+		).trim();
+		const proxySecret = (
+			await readFile(join(booted.stateDir, "console-proxy-secret"), "utf8")
+		).trim();
+		const { socket, ticket } = await openRemoteConsoleSocket(
+			booted,
+			operatorToken,
+			proxySecret,
+		);
+
+		const live = await auditCli(join(booted.stateDir, ".."));
+		expect(live).toEqual({
+			trustModel: "remote",
+			connections: [
+				{
+					identity: "operator",
+					class: "console-proxied",
+					source: expect.any(String),
+					connectedAt: expect.any(String),
+				},
+			],
+		});
+		expect(JSON.stringify(live)).not.toContain(ticket);
+
+		await closeSocket(socket);
+		expect(await auditCli(join(booted.stateDir, ".."))).toEqual({
+			trustModel: "remote",
+			connections: [],
+		});
+	});
+
+	test("refuses a connection beyond the live audit cap before logging it", async () => {
+		const booted = await bootRemoteConsole();
+		const operatorToken = (
+			await readFile(join(booted.stateDir, "console-token"), "utf8")
+		).trim();
+		const proxySecret = (
+			await readFile(join(booted.stateDir, "console-proxy-secret"), "utf8")
+		).trim();
+		const written: string[] = [];
+		const stderr = spyOn(process.stderr, "write").mockImplementation(
+			(chunk: string | Uint8Array) => {
+				written.push(typeof chunk === "string" ? chunk : chunk.toString());
+				return true;
+			},
+		);
+		const sockets: WebSocket[] = [];
+		try {
+			for (let index = 0; index < 32; index += 1) {
+				const opened = await openRemoteConsoleSocket(
+					booted,
+					operatorToken,
+					proxySecret,
+				);
+				sockets.push(opened.socket);
+			}
+			written.length = 0;
+			const refused = await fetch(
+				anonymous(booted.handle, "/api/ws-ticket", booted.localUrl),
+				{
+					method: "POST",
+					headers: {
+						Authorization: `Bearer ${operatorToken}`,
+						"X-OMA-Proxy-Secret": proxySecret,
+						"X-Forwarded-For": "203.0.113.8",
+						"X-Forwarded-Proto": "https",
+						"X-Forwarded-Host": "console.example.com",
+					},
+				},
+			);
+			expect(refused.status).toBe(503);
+			expect(written.join("")).not.toContain("audit: ");
+			const persisted = JSON.parse(
+				await readFile(join(booted.stateDir, "connection-audit.json"), "utf8"),
+			) as { connections: AuditConnection[] };
+			expect(persisted.connections).toHaveLength(32);
+		} finally {
+			for (const socket of sockets) await closeSocket(socket);
+			stderr.mockRestore();
+		}
 	});
 });

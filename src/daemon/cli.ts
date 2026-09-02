@@ -45,6 +45,26 @@ const STATE_DIR = "oh-my-agent";
 const CONSOLE_URL_FILE = "console-url";
 const CONSOLE_TOKEN_FILE = "console-token";
 const PID_FILE = "daemon.pid";
+const CONNECTION_AUDIT_FILE = "connection-audit.json";
+
+interface AuditConnectionFile {
+	id: string;
+	identity: string;
+	class: "control-socket" | "console-loopback" | "console-proxied";
+	source: string;
+	connectedAt: string;
+}
+
+interface AuditFile {
+	version: 1;
+	trustModel: "loopback" | "remote";
+	connections: AuditConnectionFile[];
+}
+
+export interface AuditResult {
+	trustModel: "loopback" | "remote";
+	connections: Array<Omit<AuditConnectionFile, "id">>;
+}
 
 /**
  * The daemon binary, resolved from this module rather than from `process.argv`.
@@ -75,7 +95,7 @@ export class DaemonUnavailableError extends Error {
 	}
 }
 
-class UsageError extends Error {}
+export class UsageError extends Error {}
 
 /** A daemon replied with an error frame; its message is operator-safe output. */
 class DaemonRpcError extends Error {}
@@ -89,11 +109,13 @@ never JSON.
 
 Verbs:
   status
+  audit
   agents
   agent create <name> <file|->
   agent show <name>
   agent edit <name> <file|->
   spawn <name> [--parent <parent>]
+  daemon [--worker-backend rpc|in-process]
   kill <name> [--keep-children]
   rooms
   rooms read <room>
@@ -107,6 +129,36 @@ Verbs:
   daemon stop
   daemon restart
 `;
+
+export type WorkerBackend = "rpc" | "in-process";
+
+export interface DaemonStartOptions {
+	json: boolean;
+	workerBackend: WorkerBackend;
+}
+
+/** Parse only daemon-start forms; lifecycle and other verbs stay in runCli. */
+export function parseDaemonStartArgs(
+	argv: readonly string[],
+): DaemonStartOptions | undefined {
+	if (argv.length === 0) return { json: false, workerBackend: "rpc" };
+	const json = argv[0] === "--json";
+	const args = json ? argv.slice(1) : argv;
+	if (args[0] !== "daemon" || args[1] === "stop" || args[1] === "restart") {
+		return undefined;
+	}
+	if (args.length === 1) return { json, workerBackend: "rpc" };
+	if (args.length !== 3 || args[1] !== "--worker-backend") {
+		throw new UsageError();
+	}
+	const workerBackend = args[2];
+	if (workerBackend !== "rpc" && workerBackend !== "in-process") {
+		throw new UsageError(
+			`unknown worker backend ${JSON.stringify(workerBackend)}`,
+		);
+	}
+	return { json, workerBackend };
+}
 
 /** Equivalent to the extension client, kept local so daemon never imports UI. */
 export function createCliClient(
@@ -214,6 +266,68 @@ async function status(
 		result,
 		json,
 		`protocol: ${result.protocolVersion}\nuptime: ${result.uptimeMs}ms\nagents: ${result.agents.length}`,
+	);
+}
+
+async function audit(
+	client: DaemonClient,
+	stateDir: string,
+	io: CliIo,
+	json: boolean,
+): Promise<void> {
+	// Prove the state belongs to a live daemon first. The completed request is
+	// also a barrier for any WebSocket close callback already entered.
+	await client.call<StatusResult>("status", {});
+	let raw: string | undefined;
+	try {
+		raw = await readFile(join(stateDir, CONNECTION_AUDIT_FILE), "utf8");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+	const parsed =
+		raw === undefined
+			? ({ version: 1, trustModel: "loopback", connections: [] } as const)
+			: (JSON.parse(raw) as Partial<AuditFile>);
+	if (
+		parsed.version !== 1 ||
+		(parsed.trustModel !== "loopback" && parsed.trustModel !== "remote") ||
+		!Array.isArray(parsed.connections)
+	) {
+		throw new DaemonRpcError("Daemon connection audit state is malformed.");
+	}
+	const connections = parsed.connections.map((connection) => {
+		if (
+			typeof connection !== "object" ||
+			connection === null ||
+			typeof connection.identity !== "string" ||
+			typeof connection.source !== "string" ||
+			(connection.class !== "control-socket" &&
+				connection.class !== "console-loopback" &&
+				connection.class !== "console-proxied") ||
+			typeof connection.connectedAt !== "string"
+		) {
+			throw new DaemonRpcError("Daemon connection audit state is malformed.");
+		}
+		return {
+			identity: connection.identity,
+			class: connection.class,
+			source: connection.source,
+			connectedAt: connection.connectedAt,
+		};
+	});
+	const result: AuditResult = { trustModel: parsed.trustModel, connections };
+	output(
+		io,
+		result,
+		json,
+		[
+			`trust model: ${result.trustModel}`,
+			`connections: ${connections.length}`,
+			...connections.map(
+				(connection) =>
+					`${connection.identity}\t${connection.class}\t${connection.source}\t${connection.connectedAt}`,
+			),
+		].join("\n"),
 	);
 }
 
@@ -811,6 +925,10 @@ export async function runCli(
 				if (args.length !== 1) throw new UsageError();
 				await status(client, io, json);
 				return 0;
+			case "audit":
+				if (args.length !== 1) throw new UsageError();
+				await audit(client, stateDir, io, json);
+				return 0;
 			case "agents":
 				if (args.length !== 1) throw new UsageError();
 				await agents(client, io, json);
@@ -855,6 +973,7 @@ export async function runCli(
 			return 3;
 		}
 		if (error instanceof UsageError) {
+			if (error.message.length > 0) write(io, false, error.message, false);
 			write(io, false, USAGE, false);
 			return 2;
 		}

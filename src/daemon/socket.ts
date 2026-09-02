@@ -32,7 +32,18 @@
  * reaction state checks scan public message listings across known rooms.
  * `close()` wakes polling sleeps so shutdown never waits out a long poll.
  */
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+	closeSync,
+	constants,
+	openSync,
+	renameSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { unlink } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import type { RoomStore, RoomMessage as StoredMessage } from "../rooms/store";
 import type { PeerDefinition } from "../shared/agent-definition";
@@ -112,6 +123,142 @@ const DEFAULT_WAIT_MS = 30_000;
 
 /** How often a parked wait re-reads the room. Woken early on close. */
 const WAIT_POLL_MS = 50;
+
+/** Maximum live connections retained and exposed by `omp-agent audit`. */
+const MAX_AUDIT_CONNECTIONS = 32;
+
+/** Maximum copied peer-identity length, bounding serialized audit state. */
+const MAX_AUDIT_IDENTITY_LENGTH = 256;
+
+export type AuditConnectionClass =
+	| "control-socket"
+	| "console-loopback"
+	| "console-proxied";
+
+export interface AuditConnection {
+	id: string;
+	identity: string;
+	class: AuditConnectionClass;
+	source: string;
+	connectedAt: string;
+}
+
+export interface ConnectionAuditRecorder {
+	connect(
+		identity: string,
+		connectionClass: AuditConnectionClass,
+		source: string,
+	): Promise<AuditConnection | undefined>;
+	disconnect(connection: AuditConnection): Promise<void>;
+}
+
+/** Per-daemon bridge: both listeners receive the same `Operations` instance. */
+const auditRecorders = new WeakMap<Operations, ConnectionAuditRecorder>();
+
+/** Resolve the recorder registered by the control socket for this daemon. */
+export function connectionAuditRecorder(
+	operations: Operations,
+): ConnectionAuditRecorder | undefined {
+	return auditRecorders.get(operations);
+}
+
+export function persistConnectionAuditState(
+	path: string,
+	serialized: string,
+	suffix = randomBytes(16).toString("hex"),
+): void {
+	const temporary = `${path}.${suffix}.tmp`;
+	let descriptor: number | undefined;
+	let created = false;
+	try {
+		descriptor = openSync(
+			temporary,
+			constants.O_WRONLY |
+				constants.O_CREAT |
+				constants.O_EXCL |
+				constants.O_NOFOLLOW,
+			0o600,
+		);
+		created = true;
+		writeFileSync(descriptor, serialized, { encoding: "utf8" });
+		closeSync(descriptor);
+		descriptor = undefined;
+		renameSync(temporary, path);
+	} finally {
+		if (descriptor !== undefined) closeSync(descriptor);
+		if (created) {
+			try {
+				unlinkSync(temporary);
+			} catch {
+				// Best effort: rename already consumed successful temporary files.
+			}
+		}
+	}
+}
+
+async function createConnectionAuditRecorder(
+	path: string,
+	trustModel: "loopback" | "remote",
+): Promise<ConnectionAuditRecorder> {
+	const directory = statSync(dirname(path));
+	const uid = process.getuid?.();
+	if (
+		uid === undefined ||
+		directory.uid !== uid ||
+		(directory.mode & (constants.S_IWGRP | constants.S_IWOTH)) !== 0
+	) {
+		throw new Error(
+			`Refusing unsafe audit state directory: ${dirname(path)} must be owned by this user and not group- or world-writable`,
+		);
+	}
+	let connections: AuditConnection[] = [];
+	const persist = (): void => {
+		persistConnectionAuditState(
+			path,
+			JSON.stringify({ version: 1, trustModel, connections }),
+		);
+	};
+
+	const emit = (
+		event: "connect" | "disconnect",
+		connection: AuditConnection,
+	): void => {
+		process.stderr.write(
+			`audit: ${JSON.stringify({
+				event,
+				identity: connection.identity,
+				class: connection.class,
+				source: connection.source,
+				at: new Date().toISOString(),
+			})}\n`,
+		);
+	};
+
+	persist();
+	return {
+		connect: async (identity, connectionClass, source) => {
+			if (connections.length >= MAX_AUDIT_CONNECTIONS) return undefined;
+			const connection: AuditConnection = {
+				id: randomBytes(12).toString("base64url"),
+				identity: identity.slice(0, MAX_AUDIT_IDENTITY_LENGTH),
+				class: connectionClass,
+				source: source.slice(0, MAX_AUDIT_IDENTITY_LENGTH),
+				connectedAt: new Date().toISOString(),
+			};
+			connections = [...connections, connection];
+			emit("connect", connection);
+			persist();
+			return connection;
+		},
+		disconnect: async (connection) => {
+			connections = connections.filter(
+				(candidate) => candidate.id !== connection.id,
+			);
+			emit("disconnect", connection);
+			persist();
+		},
+	};
+}
 
 /**
  * Definition fields the wire carries, in `METHODS`' own order.
@@ -305,10 +452,9 @@ export type ControlIdentity =
  * method outside `workerMethods`, plus `logs_tail`'s `source: "daemon"`
  * selector, which is operator-only inside a worker-callable method.
  *
- * Clause (b) is why the worker surface is otherwise untouched: a worker's
- * scoped token still reaches `workerMethods` in remote mode, and that resolved
- * identity is what T-1204's parentage enforcement is defined over. The
- * constant-time resolution below never varies with the flag.
+ * Clause (b) keeps worker methods reachable with scoped tokens in both modes.
+ * Remote mode additionally binds worker-created parentage to that resolved
+ * identity; loopback keeps cooperative parent delegation.
  */
 export interface StartControlSocketOptions {
 	socketPath: string;
@@ -325,11 +471,14 @@ export interface StartControlSocketOptions {
 	 * which is what every existing caller composes.
 	 *
 	 * Read by `authorize`, and only there: it selects which refusal a worker
-	 * bearer gets on an operator-only surface. Loopback answers `forbidden` —
-	 * a registered caller outside its scope — which is byte-identical to the
+	 * bearer gets on an operator-only surface and whether worker spawns require
+	 * self-parentage. Loopback answers `forbidden` on operator-only surfaces — a
+	 * registered caller outside its scope — which is byte-identical to the
 	 * behavior that predates this flag. Remote answers `unauthorized`, because
 	 * ADR-012 clause (a) makes the operator token the credential the operator
 	 * surface authenticates against, and a worker token is not that credential.
+	 * Remote worker spawns must name their caller as parent; loopback preserves
+	 * cooperative foreign or omitted parents.
 	 *
 	 * Applied at both operator-only surfaces, so the rule is the surface's
 	 * rather than the method table's: the methods outside `workerMethods`, and
@@ -338,10 +487,8 @@ export interface StartControlSocketOptions {
 	 * surface, not an operator resource.
 	 *
 	 * What it deliberately does not change: the bearer requirement itself,
-	 * which is unconditional in both modes, and the worker surface, which
-	 * clause (b) and T-1004 require keep working on scoped tokens over this
-	 * same unix path. T-1204 owns the second read — loopback-versus-remote
-	 * parentage — and reads the same threaded value.
+	 * which is unconditional in both modes, or access to worker methods with a
+	 * scoped token over this same unix path.
 	 */
 	remoteMode?: boolean;
 }
@@ -517,6 +664,21 @@ export async function startControlSocket(
 				? {}
 				: { daemonLog: context.daemonLog.bind(context) }),
 		});
+	const audit = remoteMode
+		? await createConnectionAuditRecorder(
+				join(dirname(socketPath), "connection-audit.json"),
+				"remote",
+			)
+		: undefined;
+	if (audit === undefined) {
+		await unlink(join(dirname(socketPath), "connection-audit.json")).catch(
+			(error: NodeJS.ErrnoException) => {
+				if (error.code !== "ENOENT") throw error;
+			},
+		);
+	} else {
+		auditRecorders.set(operations, audit);
+	}
 
 	let closing = false;
 
@@ -1040,6 +1202,7 @@ export async function startControlSocket(
 				: forbidden(id, `Workers may not call ${method}`);
 		}
 		if (
+			remoteMode &&
 			method === "agent_spawn" &&
 			(typeof params !== "object" ||
 				params === null ||
@@ -1201,7 +1364,24 @@ export async function startControlSocket(
 			if (identity === undefined) {
 				return Response.json(unauthorized(0));
 			}
-			return await dispatch(await request.text(), identity);
+			if (!remoteMode || audit === undefined) {
+				return await dispatch(await request.text(), identity);
+			}
+			const auditConnection = await audit.connect(
+				identity.kind === "operator" ? "operator" : identity.peerName,
+				"control-socket",
+				socketPath,
+			);
+			if (auditConnection === undefined) {
+				return new Response("Connection audit capacity reached", {
+					status: 503,
+				});
+			}
+			try {
+				return await dispatch(await request.text(), identity);
+			} finally {
+				await audit.disconnect(auditConnection);
+			}
 		},
 		// Cast: the unix variant's type pins `idleTimeout` to `undefined`, so the
 		// supported runtime option is unexpressible without going through unknown.
@@ -1217,6 +1397,7 @@ export async function startControlSocket(
 			// interval and returns, so `server.stop(true)` has no long-lived
 			// in-flight request to wait out.
 			closing = true;
+			auditRecorders.delete(operations);
 			server.stop(true);
 		},
 	};
