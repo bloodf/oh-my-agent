@@ -1,20 +1,24 @@
 /**
- * Standalone repro: a runtime `Bun.plugin` `onResolve` handler that resolves
- * the same specifier it matched re-enters itself, and `import.meta.resolve`
- * stops returning what it returns with no hook installed.
+ * Standalone repro: with a runtime `Bun.plugin` `onResolve` hook installed,
+ * `import.meta.resolve` stops returning what the same call returns in a
+ * process with no hook installed.
  *
- * Observation only. This file records what each configuration prints. The
- * single claim it makes is the one its own output evidences: a runtime
- * `onResolve` handler is re-entered by the resolution it performs. The two
- * cases end differently — the hand-written control throws, upstream's handler
- * returns a long `file:`-prefixed string — and this file records both without
- * explaining either. No further mechanism is asserted.
+ * Observation only. What this file produces is three pairs of counts, and the
+ * counts are the whole claim. Every raw resolution is printed verbatim so the
+ * strings are in the record rather than a summary of them. No mechanism is
+ * asserted: "the handler is re-entered by the resolution it performs" is a
+ * reading of upstream source, not something these counts measure, and it is
+ * kept in the README's Context section instead of being claimed here. The two
+ * hooked configurations end differently — the hand-written control throws,
+ * upstream's handler returns a long `file:`-prefixed string — and this file
+ * records both without explaining either.
  *
- * An earlier cross-package memoization theory is falsified by upstream's
- * per-specifier cache key
+ * Sourced from upstream code, not measured here: an earlier cross-package
+ * memoization theory is falsified by upstream's per-specifier cache key
  * (`@oh-my-pi/pi-coding-agent/src/extensibility/plugins/legacy-pi-compat.ts`,
- * `getResolvedSpecifier`, ~1127-1135): that cache is keyed by the exact
+ * `getResolvedSpecifier`, ~1127-1135) — that cache is keyed by the exact
  * specifier string, so it cannot carry one package's path into another's.
+ * Nothing in this file measures that; it is read off the installed source.
  *
  * Correct/corrupted is decided by difference, not by any validity rule this
  * file invents. The parent process installs no hook, so its own resolution is
@@ -29,23 +33,38 @@
  *   bare       — a hand-written minimal onResolve hook, in a temp directory
  *                with its own trivial local package, no OMP package present
  *                and no OMP code loaded, `--no-install`, isolated HOME and
- *                BUN_INSTALL
+ *                BUN_INSTALL, no inherited BUN_* variables, and an audited
+ *                ancestry
  *
- * The `bare` outcome selects the filing target. It is deliberately built so
- * that it cannot borrow anything from this directory: it runs against a
- * package fixture it creates itself, so "no OMP in the process" is a property
- * of the filesystem it runs in and not a promise made in a comment.
+ * The `bare` outcome selects the filing target. "It cannot borrow anything
+ * from this directory" is checked rather than asserted: before the first
+ * sandbox spawn the run walks from the sandbox to the filesystem root and
+ * refuses the case if any ancestor carries a `bunfig.toml` variant or a
+ * `node_modules` (see `auditAncestry`). A refused case is a control that did
+ * not run, not a result.
+ *
+ * The verdict line is only a tracker recommendation when there is something to
+ * recommend: it prints `file against: <target>` only when the failure
+ * reproduced *and* the bare control was decisive, and otherwise prints an
+ * explicit deferral naming why.
  *
  * Exit codes:
  *   0  reproduced, and the bare control decided a filing target
  *   1  ran cleanly, the reported failure did not appear
  *   2  could not run: wrong Bun, or the plugin-free baseline itself threw
- *   3  reproduced, but the bare control was inconclusive — nothing to file
+ *   3  reproduced, but the bare control was not decisive — nothing to file
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const REQUIRED_BUN = "1.3.14";
 const N = 10;
@@ -53,10 +72,20 @@ const N = 10;
 /**
  * The specifier our own workaround avoids resolving, and the one the corrupted
  * resolution was observed on. It matches upstream's `@(scope)/pi-*` filter and
- * is resolvable under the package's exports map. Corruption is
- * specifier-dependent: `@oh-my-pi/pi-coding-agent/extensibility/skills` matches
- * the same filter and resolves normally, so the specifier is part of the
- * record, not an interchangeable detail.
+ * is resolvable under the package's exports map.
+ *
+ * Two different kinds of statement about it, kept apart on purpose:
+ *
+ *   recorded here  — with the shim installed this specifier resolves to a
+ *                    4282-character `file:file:file:...` artifact instead of
+ *                    the 134-character `file://` URL the same call returns
+ *                    with no hook. That is measured output, printed verbatim.
+ *   inferred       — that the artifact comes from an `onResolve` handler being
+ *                    re-entered by its own `resolveSync` call is a reading of
+ *                    upstream source (`legacy-pi-compat.ts:2867-2891`), not
+ *                    something these counts establish.
+ *
+ * This file records one specifier and makes no claim about any other.
  */
 const SPECIFIER = "@oh-my-pi/pi-coding-agent/package.json";
 
@@ -71,9 +100,24 @@ const CHILD_CASES: Case[] = ["installed", "removed"];
 type Counts = { differs: number; threw: number };
 const VOID_COUNTS: Counts = { differs: -1, threw: -1 };
 
-/** Runtime gate. Runs before any hook is installed, in every process. */
+/**
+ * What the `bare` control amounts to. `not-run` and `ambiguous` are kept
+ * apart because they are different failures: the first has no counts to read,
+ * the second has counts that do not decide. Only `decisive` names a tracker.
+ */
+type ControlVerdict =
+	| { state: "decisive"; target: "oven-sh/bun" | "oh-my-pi" }
+	| { state: "ambiguous" }
+	| { state: "not-run" };
+
+/**
+ * Runtime gate. Runs before any hook is installed, in every process. Both
+ * lines go to stderr: the version reading is the premise of the refusal
+ * beneath it, and splitting them across streams separates a message from its
+ * own reason.
+ */
 function requireExactBun(): void {
-	console.log(`Bun.version: ${Bun.version}`);
+	console.error(`Bun.version: ${Bun.version}`);
 	if (Bun.version !== REQUIRED_BUN) {
 		console.error(
 			`This repro is recorded against Bun ${REQUIRED_BUN} exactly; refusing to run on ${Bun.version}.`,
@@ -169,7 +213,7 @@ const N = ${N};
 const SPECIFIER = ${JSON.stringify(BARE_SPECIFIER)};
 const FILTER = /^plainpkg(?:\\/.*)?$/;
 
-console.log("[bare] Bun.version: " + Bun.version);
+console.error("[bare] Bun.version: " + Bun.version);
 if (Bun.version !== REQUIRED_BUN) {
 	console.error("[bare] requires Bun " + REQUIRED_BUN + "; got " + Bun.version);
 	process.exit(2);
@@ -242,19 +286,69 @@ function parseResult(label: Case, out: string): Counts | null {
 	return { differs: Number(match[1]), threw: Number(match[2]) };
 }
 
+/** The file names Bun reads project configuration from, in directory order. */
+const BUNFIG_NAMES = ["bunfig.toml", ".bunfig.toml"];
+
+/**
+ * Proves, rather than asserts, that the sandbox is alone.
+ *
+ * `cwd`, `--no-install` and an isolated HOME/BUN_INSTALL only control what the
+ * sandbox process starts from; they say nothing about what sits *above* it.
+ * Bun walks parent directories for both `bunfig.toml` and `node_modules`, so a
+ * temp directory created underneath a checkout — or under a `TMPDIR` someone
+ * pointed at one — would silently inherit configuration and packages while the
+ * comment above it still claimed isolation.
+ *
+ * So the walk runs for real: from the sandbox's canonical parent to the
+ * filesystem root, refusing on the first ancestor that carries a `bunfig.toml`
+ * variant or a `node_modules`. The sandbox itself is excluded — it owns a
+ * `node_modules` by design, that being the fixture under test.
+ *
+ * Returns the offending path, or `null` when the ancestry is clean.
+ */
+function auditAncestry(sandboxDir: string): string | null {
+	let dir = dirname(realpathSync(sandboxDir));
+	for (;;) {
+		for (const name of [...BUNFIG_NAMES, "node_modules"]) {
+			const candidate = join(dir, name);
+			if (existsSync(candidate)) return candidate;
+		}
+		const parent = dirname(dir);
+		if (parent === dir) return null;
+		dir = parent;
+	}
+}
+
 /**
  * The `bare` case, in a temp directory it builds itself: a package fixture
  * with one trivial local package and nothing else, `--no-install` so Bun
- * cannot fetch anything, and HOME/BUN_INSTALL pointed inside the sandbox so no
- * global cache or global install directory is consulted.
+ * cannot fetch anything, HOME/BUN_INSTALL pointed inside the sandbox so no
+ * global cache or global install directory is consulted, every inherited
+ * `BUN_*` variable explicitly unset, and an ancestry audited before the first
+ * spawn.
  *
  * Two sandbox processes: one with no hook to establish that directory's own
  * plugin-free baseline, one with the hook installed. Returns `null` when the
- * control could not be established, which is not a result.
+ * control could not be established — a refused ancestry, a sandbox that could
+ * not resolve its own fixture, a non-zero exit — which is a control that did
+ * not run, not a result to read.
  */
 function runBareCase(): Counts | null {
 	const dir = mkdtempSync(join(tmpdir(), "bun-onresolve-bare-"));
 	console.log(`[bare] sandbox ${dir}`);
+
+	const contaminant = auditAncestry(dir);
+	if (contaminant) {
+		console.error(
+			`[bare] control void: an ancestor of the sandbox holds ${contaminant}, which the sandbox would inherit, so it cannot be shown to resolve only its own fixture. The bare case did not run.`,
+		);
+		rmSync(dir, { recursive: true, force: true });
+		return null;
+	}
+	console.log(
+		`[bare] ancestry audited to the filesystem root: no bunfig.toml variant, no node_modules above the sandbox`,
+	);
+
 	try {
 		mkdirSync(join(dir, "node_modules", "plainpkg"), { recursive: true });
 		mkdirSync(join(dir, "home"), { recursive: true });
@@ -273,7 +367,29 @@ function runBareCase(): Counts | null {
 		);
 		writeFileSync(join(dir, "sandbox.ts"), sandboxSource());
 
-		const env = {
+		// Isolation must not rest on Bun choosing replace-semantics over merge for
+		// this object. Two layers, both unconditional:
+		//
+		//   1. every config variable that could reintroduce what the ancestry
+		//      audit just ruled out is named and set to `undefined` whether or
+		//      not this process carries it, so the removal is a property of this
+		//      literal rather than of the parent environment at scan time,
+		//   2. any other inherited `BUN_*` variable is swept the same way, so a
+		//      knob added by a future Bun does not arrive silently.
+		//
+		// `NODE_OPTIONS` is included because it can preload code. Ours are
+		// assigned last, so neither layer can take them with it.
+		const swept = Object.fromEntries(
+			Object.keys(process.env)
+				.filter((key) => key.startsWith("BUN_"))
+				.map((key) => [key, undefined]),
+		);
+		const env: Record<string, string | undefined> = {
+			...swept,
+			BUN_CONFIG: undefined,
+			BUN_CONFIG_FILE: undefined,
+			BUN_ENV: undefined,
+			NODE_OPTIONS: undefined,
 			PATH: process.env.PATH ?? "/usr/bin:/bin",
 			HOME: join(dir, "home"),
 			BUN_INSTALL: join(dir, "bun-install"),
@@ -396,17 +512,21 @@ async function runAll(): Promise<void> {
 	// a string that is not the baseline — is the hook changing what the same
 	// call returns without it, with no OMP package on disk and no OMP code in
 	// the process, so either routes to Bun. Only a clean N/N of one kind, or a
-	// clean 0/0, decides anything; a mixed count is ambiguous evidence and must
-	// not be filed anywhere as if it were not.
-	const target = !bare
-		? "inconclusive"
-		: bare.threw === N
-			? "oven-sh/bun"
-			: bare.threw === 0 && bare.differs === N
-				? "oven-sh/bun"
-				: bare.threw === 0 && bare.differs === 0
-					? "oh-my-pi"
-					: "inconclusive";
+	// clean 0/0, decides anything.
+	//
+	// Two non-decisive endings exist and they are not the same thing, so they
+	// are not collapsed: a control that could not run at all (refused ancestry,
+	// a sandbox that could not resolve its own fixture, a non-zero exit) has no
+	// counts to read, while a control that ran and returned a mixed count has
+	// counts that simply do not decide. Both block filing; only the second is
+	// evidence of anything.
+	const control: ControlVerdict = !bare
+		? { state: "not-run" }
+		: bare.threw === N || (bare.threw === 0 && bare.differs === N)
+			? { state: "decisive", target: "oven-sh/bun" }
+			: bare.threw === 0 && bare.differs === 0
+				? { state: "decisive", target: "oh-my-pi" }
+				: { state: "ambiguous" };
 
 	console.log("\n=== summary ===");
 	console.log(`bun: ${Bun.version}`);
@@ -422,20 +542,45 @@ async function runAll(): Promise<void> {
 		);
 	}
 	console.log(`reproduced: ${reproduced}`);
-	console.log(`file against: ${target}`);
+	console.log(
+		`bare control: ${
+			control.state === "decisive"
+				? `decisive (${control.target})`
+				: control.state === "ambiguous"
+					? "ran, but its counts decide nothing"
+					: "did not run"
+		}`,
+	);
+
+	// A tracker recommendation is printed only when there is one to make. If
+	// the failure did not reproduce, or the control did not decide, printing
+	// `file against: <target>` would put a filing target in stdout for a run
+	// that earned none — so the line explicitly defers instead, and names why.
+	if (reproduced && control.state === "decisive") {
+		console.log(`file against: ${control.target}`);
+		process.exit(0);
+	}
+	console.log(
+		`file against: deferred — ${
+			!reproduced
+				? "the reported failure did not reproduce in this run"
+				: control.state === "ambiguous"
+					? "the bare control ran but its counts decide no tracker"
+					: "the bare control could not be established"
+		}`,
+	);
 
 	// Non-zero when the recorded failure does not appear: there is then nothing
 	// to file, and a green run would be misleading. A reproduction whose
-	// control came back ambiguous is also not filing-ready, and says so with
-	// its own code rather than passing as if the target were known.
+	// control did not decide is also not filing-ready, and says so with its own
+	// code rather than passing as if the target were known.
 	if (!reproduced) process.exit(1);
-	if (target === "inconclusive") {
-		console.error(
-			"reproduced, but the bare control decided no tracker; read the raw [bare] lines before filing.",
-		);
-		process.exit(3);
-	}
-	process.exit(0);
+	console.error(
+		control.state === "ambiguous"
+			? "reproduced, but the bare control returned a mixed count; read the raw [bare] lines before filing."
+			: "reproduced, but the bare control could not run; there is no control result to read.",
+	);
+	process.exit(3);
 }
 
 const caseFlag = process.argv.indexOf("--case");
