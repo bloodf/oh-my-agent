@@ -319,13 +319,26 @@ export async function startConsoleApi(
 		// Contained: the frame describes something that already happened, and
 		// this runs inside the supervisor's post-commit emitters. A sink
 		// throwing here would otherwise fail a park that already parked.
-		try {
-			publishSink(event);
-		} catch (error) {
-			process.stderr.write(
-				`console: publish sink threw: ${error instanceof Error ? error.message : String(error)}\n`,
-			);
-		}
+		//
+		// Both halves of "throwing" are caught. The sink is typed `void`, which
+		// admits an async function, and an async sink signals failure by
+		// rejecting rather than by throwing — a rejection a plain `try` never
+		// sees, and which is fatal under Bun's default. Awaiting the call
+		// inside the `try` normalizes the two: a synchronous sink is
+		// unaffected, because its `undefined` return awaits to itself.
+		//
+		// `void` on the call: this promise is deliberately detached, since
+		// `emit` answers the supervisor synchronously and has no caller to
+		// hand a failure back to.
+		void (async () => {
+			try {
+				await publishSink(event);
+			} catch (error) {
+				process.stderr.write(
+					`console: publish sink threw: ${error instanceof Error ? error.message : String(error)}\n`,
+				);
+			}
+		})();
 	};
 
 	/**
@@ -672,6 +685,20 @@ export async function startConsoleApi(
 
 	const handle = async (request: Request, url: URL): Promise<Response> => {
 		const path = url.pathname;
+
+		// Every route below decodes the segments it captures, and a malformed
+		// escape makes `decodeURIComponent` throw. Caught here, once, rather
+		// than at each call site: a throw that reached the server's outer catch
+		// would answer 500 for a request the client got wrong.
+		//
+		// The whole path stands in for its segments because a percent-escape
+		// cannot straddle a separator: `/` is never a UTF-8 continuation byte,
+		// so a segment that ends mid-sequence fails this decode too.
+		try {
+			decodeURIComponent(path);
+		} catch {
+			return fail(400, "invalid_request", `Malformed escape in ${path}`);
+		}
 
 		if (path === "/api/agents") {
 			if (request.method === "GET") {

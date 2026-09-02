@@ -633,6 +633,56 @@ describe("channels", () => {
 	});
 });
 
+// ── Malformed request targets ────────────────────────────────────────────────
+
+/**
+ * A percent-escape no decoder can complete: `%E0%A4%A` is a truncated UTF-8
+ * sequence, so `decodeURIComponent` throws on it. It is a bad request, and a
+ * route that lets that throw reach the server's outer catch answers 500 —
+ * telling an operator the daemon broke when their URL did.
+ */
+const MALFORMED = "%E0%A4%A";
+
+describe("malformed percent-escapes", () => {
+	test("every route decoding a path segment answers 400, not 500", async () => {
+		const h = await harness();
+		await h.registerPeer("reviewer", ["#reviews"]);
+
+		const targets: { path: string; init?: RequestInit }[] = [
+			{ path: `/api/agents/${MALFORMED}/kill`, init: { method: "POST" } },
+			{
+				path: `/api/accounts/${MALFORMED}/bump`,
+				init: { method: "POST", body: JSON.stringify({ budgetUsd: 5 }) },
+			},
+			{
+				path: `/api/agents/${MALFORMED}/rooms`,
+				init: { method: "POST", body: JSON.stringify({ room: "#ops" }) },
+			},
+			// The room segment decodes separately, and only after the peer
+			// resolves — so this one needs a peer that exists to reach it.
+			{
+				path: `/api/agents/reviewer/rooms/${MALFORMED}`,
+				init: { method: "DELETE" },
+			},
+			{
+				path: `/api/agents/${MALFORMED}`,
+				init: { method: "PATCH", body: JSON.stringify({ model: "x/y" }) },
+			},
+			{ path: `/api/channels/${MALFORMED}/messages` },
+		];
+
+		for (const { path, init } of targets) {
+			const res = await h.call(path, init ?? {});
+			expect({ path, status: res.status }).toEqual({ path, status: 400 });
+			const body = (await res.json()) as { error: { code: string } };
+			expect({ path, code: body.error.code }).toEqual({
+				path,
+				code: "invalid_request",
+			});
+		}
+	});
+});
+
 // ── Messages ─────────────────────────────────────────────────────────────────
 
 describe("messages", () => {
@@ -1509,6 +1559,42 @@ describe("typed frames", () => {
 		await until("the channel frame despite the broken sink", () =>
 			frames.some((frame) => frame.type === "channel"),
 		);
+		expect((await h.call("/api/channels")).status).toBe(200);
+	});
+
+	test("an async sink that rejects is contained, not fatal", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.ensureRoom("#reviews");
+
+		// No listener installed on purpose: an unhandled rejection is fatal by
+		// default under Bun, and the test runner fails the test that produced
+		// one. Escaping is therefore observable as this test failing, and a
+		// listener would only convert that into something quieter.
+		//
+		// `void` admits a promise-returning function, so an async sink is a
+		// sink the type allows and a synchronous try/catch cannot see.
+		h.api.setPublishSink(async () => {
+			throw new Error("async sink is broken");
+		});
+
+		// Called bare rather than wrapped in an assertion: `emit` returns void,
+		// so there is nothing to assert about its return, and wrapping the call
+		// captures the rejection the escape has to be observable through.
+		h.emit({ type: "budget", account: "acct-1", state: "parked" });
+
+		// One macrotask, which is where a rejection left unhandled by `emit`
+		// is delivered — a barrier for the escape rather than a wait for it.
+		const tick = Promise.withResolvers<void>();
+		setTimeout(tick.resolve, 0);
+		await tick.promise;
+
+		// Contained means the daemon kept serving: the route still answers and
+		// the console still gets its frames.
+		const res = await h.call("/api/channels", {
+			method: "POST",
+			body: JSON.stringify({ id: "#ops" }),
+		});
+		expect(res.status).toBe(201);
 		expect((await h.call("/api/channels")).status).toBe(200);
 	});
 

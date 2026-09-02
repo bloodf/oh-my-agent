@@ -908,14 +908,19 @@ export async function startControlSocket(
 	};
 
 	/**
-	 * The attribution field each chat method carries, and the reason ADR-014
-	 * has anything to bind: these are the only worker-callable methods whose
-	 * payload names who spoke.
+	 * The attribution field each method carries, and the reason ADR-014 has
+	 * anything to bind: these are the only worker-callable methods whose
+	 * payload names who spoke. `task_handoff` belongs here for the same reason
+	 * `chat_send` does — it posts into a room under the name it is handed, so
+	 * a caller-supplied `fromAgent` is a forgeable author.
 	 */
-	const ATTRIBUTION_FIELD: Partial<Record<MethodName, "author" | "actor">> = {
+	const ATTRIBUTION_FIELD: Partial<
+		Record<MethodName, "author" | "actor" | "fromAgent">
+	> = {
 		chat_send: "author",
 		chat_react: "actor",
 		chat_unreact: "actor",
+		task_handoff: "fromAgent",
 	};
 
 	/**

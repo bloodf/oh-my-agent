@@ -1382,6 +1382,59 @@ describe("bootDaemon — shutdown", () => {
 		expect(existsSync(handle.socketPath)).toBe(true);
 	});
 
+	test("the deferred close leaves a pidfile another daemon has claimed", async () => {
+		const { handle } = await boot();
+
+		// The window this test exists for: ownership is checked when the stop
+		// is requested, and the close that acts on it runs a macrotask later.
+		// Capturing the scheduled callback is what makes that window a place a
+		// test can stand in rather than a race to hit.
+		const realSetTimeout = globalThis.setTimeout;
+		const deferred: (() => void)[] = [];
+		let acked: DaemonStopResult;
+		try {
+			globalThis.setTimeout = ((
+				fn: (...args: unknown[]) => void,
+				ms?: number,
+				...args: unknown[]
+			) => {
+				if (ms === 0) {
+					deferred.push(() => fn(...args));
+					// A live no-op timer, so a caller holding this handle gets
+					// something it can clear or unref like any other.
+					return realSetTimeout(() => {}, 0);
+				}
+				return realSetTimeout(fn, ms, ...args);
+			}) as typeof setTimeout;
+			acked = await call<DaemonStopResult>(handle.socketPath, "daemon_stop");
+		} finally {
+			globalThis.setTimeout = realSetTimeout;
+		}
+		expect(acked).toEqual({ stopping: true, pid: process.pid });
+		// The interception held: without a captured close, everything below
+		// would assert against a shutdown that never ran.
+		expect(deferred).toHaveLength(1);
+
+		// Between the ack and the close, another daemon claims the pidfile —
+		// the exact takeover `ownsPidfile` refuses a stop for.
+		const successor = Bun.spawn([process.execPath, "-e", "process.exit(0)"], {
+			stdio: ["ignore", "ignore", "ignore"],
+		});
+		await successor.exited;
+		await writeFile(handle.pidPath, String(successor.pid), "utf8");
+
+		for (const run of deferred) run();
+		// Memoized, so this joins the close the ack scheduled rather than
+		// starting a second one.
+		await handle.close();
+
+		// The stopping daemon tore down its own state, and left the lock it no
+		// longer owns to the daemon that does.
+		expect(existsSync(handle.pidPath)).toBe(true);
+		expect(await Bun.file(handle.pidPath).text()).toBe(String(successor.pid));
+		expect(existsSync(handle.socketPath)).toBe(false);
+	});
+
 	test("daemon_stop is operator-only", async () => {
 		const dir = await tempAgentDir();
 		const rooms = await RoomStore.open(join(dir, "stop-scope.db"));

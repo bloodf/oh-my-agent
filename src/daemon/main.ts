@@ -1616,7 +1616,13 @@ export async function bootDaemon(
 			await gateway.close();
 			await rooms.close();
 			await hosting.close();
-			await rm(pidPath, { force: true });
+			// Re-checked here, not just where the stop was requested: the close
+			// `daemon_stop` schedules runs a macrotask after its ack, and a
+			// successor daemon can claim the pidfile inside that window. An
+			// unconditional unlink would delete the new owner's lock.
+			if (await ownsPidfile(pidPath)) {
+				await rm(pidPath, { force: true });
+			}
 			await rm(socketPath, { force: true });
 			await rm(join(stateDir, "console-url"), { force: true });
 		});

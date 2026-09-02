@@ -454,6 +454,29 @@ describe("control-socket attribution", () => {
 			),
 		).toMatchObject({ result: { actor: "other" } });
 	});
+
+	test("a worker handing off as another peer is recorded under its own name", async () => {
+		const { socketPath, rooms } = await socketHarness();
+
+		const frame = await rpc(
+			socketPath,
+			"task_handoff",
+			{
+				fromAgent: "other",
+				toAgent: "other",
+				summary: "finish the audit",
+			},
+			"worker-token",
+		);
+
+		// A handoff names who is handing work over, and a worker that can
+		// forge that name can hand its own work off in another peer's voice.
+		// Overwritten rather than refused, exactly as chat_send is.
+		expect(frame).toHaveProperty("result");
+		expect(await rooms.listMessages("#general", {})).toMatchObject([
+			{ author: "reviewer", body: expect.stringContaining("from @reviewer") },
+		]);
+	});
 });
 
 // ── Identity negatives (T-1609) ──────────────────────────────────────────────
