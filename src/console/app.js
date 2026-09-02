@@ -6,10 +6,8 @@
  *
  * Wire shape consumed: `RoomMessage` and `RoomInfo` from src/shared/protocol
  * over /api/channels and /api/channels/:id/messages; `ConsoleEvent` frames
- * from /api/events. Token arrives as ?token= on the page URL, is sent on
- * HTTP as X-Operator-Token (the serving layer promotes it to Authorization),
- * and rides the WebSocket handshake as ?token= because a browser socket
- * cannot set headers.
+ * from /api/events. Remote operator tokens remain in sessionStorage and HTTP
+ * headers; one-time tickets authenticate static assets and WebSocket upgrades.
  *
  * Failure modes: a dropped socket reconnects with backoff and refetches the
  * open transcript plus background-room activity, healing missed frames.
@@ -55,10 +53,24 @@
 	const RECONNECT_BASE_MS = 200;
 	const RECONNECT_CAP_MS = 5_000;
 
-	// ── Config from the page URL ─────────────────────────────────────────────
+	// ── Authentication and page state ────────────────────────────────────────
 
 	const params = new URLSearchParams(location.search);
-	const token = params.get("token") ?? "";
+	const remoteMode = document.documentElement.dataset.authMode === "remote";
+	const token = remoteMode
+		? (sessionStorage.getItem("oh-my-agent.operator-token") ?? "")
+		: (params.get("token") ?? "");
+	if (remoteMode && params.has("ticket")) {
+		params.delete("ticket");
+		history.replaceState(
+			null,
+			"",
+			`${location.pathname}${params.size ? `?${params}` : ""}${location.hash}`,
+		);
+	}
+	let authenticationRequired = false;
+	const AUTHENTICATION_REQUIRED = new Error("Operator authentication required");
+
 	/** @type {string | null} */
 	let currentRoom = params.get("room");
 	/** @type {number | null} Message id whose thread is open in the side pane. */
@@ -184,6 +196,7 @@
 	 * @returns {Promise<any>} parsed JSON; throws on an error envelope.
 	 */
 	const api = async (path, init = {}) => {
+		if (remoteMode && authenticationRequired) throw AUTHENTICATION_REQUIRED;
 		const response = await fetch(path, {
 			method: init.method ?? "GET",
 			headers: {
@@ -198,6 +211,14 @@
 			},
 			...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
 		});
+		if (remoteMode && response.status === 401) {
+			if (!authenticationRequired) {
+				authenticationRequired = true;
+				for (const socket of sockets) socket.close();
+				window.__showOperatorAuth?.();
+			}
+			throw AUTHENTICATION_REQUIRED;
+		}
 		const payload = await response.json();
 		if (!response.ok) {
 			// The daemon's own message, verbatim — for a refused definition it
@@ -220,7 +241,9 @@
 	 * @param {Promise<unknown>} promise
 	 */
 	const run = (promise) => {
-		void promise.catch((error) => console.error(error));
+		void promise.catch((error) => {
+			if (error !== AUTHENTICATION_REQUIRED) console.error(error);
+		});
 	};
 
 	// ── Rendering ────────────────────────────────────────────────────────────
@@ -1321,6 +1344,7 @@
 		try {
 			payload = await api(`/api/channels/${encodeURIComponent(room)}/messages`);
 		} catch (error) {
+			if (error === AUTHENTICATION_REQUIRED) return;
 			if (request !== refreshRequest || room !== currentRoom) return;
 			showState(
 				"load-failure",
@@ -1820,20 +1844,27 @@
 	window.__consoleSockets = sockets;
 	window.__consoleReconcilePasses = 0;
 
-	/**
-	 * Connect, and on drop reconnect with backoff and refetch. The refetch is
-	 * the correctness point: frames missed while deaf are not replayed, so the
-	 * transcript must be rebuilt from the store.
-	 */
+	/** Connect, and on drop reconnect with backoff and refetch. */
 	let reconnectAttempts = 0;
-	const connect = () => {
+	const connect = async () => {
+		if (authenticationRequired) return;
 		const url = new URL("/api/events", location.origin);
 		url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-		url.searchParams.set("token", token);
+		if (remoteMode) {
+			const payload = await api("/api/ws-ticket", { method: "POST" });
+			if (authenticationRequired) return;
+			url.searchParams.set("ticket", payload.ticket);
+		} else {
+			url.searchParams.set("token", token);
+		}
 		const socket = new WebSocket(url);
 		sockets.push(socket);
 
 		socket.addEventListener("open", () => {
+			if (authenticationRequired) {
+				socket.close();
+				return;
+			}
 			reconnectAttempts = 0;
 			// Refetch on open, not before it: activity landing between the close
 			// and the new socket's open is missed by a pre-connect refetch.
@@ -1842,6 +1873,7 @@
 		});
 
 		socket.addEventListener("message", (event) => {
+			if (authenticationRequired) return;
 			/** @type {ConsoleEvent} */
 			let frame;
 			try {
@@ -1894,13 +1926,14 @@
 		socket.addEventListener("close", () => {
 			const index = sockets.indexOf(socket);
 			if (index !== -1) sockets.splice(index, 1);
+			if (authenticationRequired) return;
 			reconnectAttempts += 1;
 			const delay = Math.min(
 				RECONNECT_BASE_MS * 2 ** reconnectAttempts,
 				RECONNECT_CAP_MS,
 			);
 			setTimeout(() => {
-				connect();
+				run(connect());
 			}, delay);
 		});
 	};
@@ -1917,13 +1950,15 @@
 		try {
 			payload = await api("/api/channels");
 		} catch (error) {
-			showState(
-				"offline",
-				"Daemon offline",
-				error instanceof Error ? error.message : String(error),
-				"Retry",
-				() => run(boot()),
-			);
+			if (error !== AUTHENTICATION_REQUIRED) {
+				showState(
+					"offline",
+					"Daemon offline",
+					error instanceof Error ? error.message : String(error),
+					"Retry",
+					() => run(boot()),
+				);
+			}
 			return;
 		}
 		clearState();
@@ -1941,7 +1976,7 @@
 		// open channel, so painting agents first would show every one of them
 		// as a non-member.
 		await refreshAgents();
-		connect();
+		await connect();
 	};
 
 	run(boot());

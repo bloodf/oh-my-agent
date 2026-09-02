@@ -7,6 +7,16 @@
 		<link rel="stylesheet" href="/style.css" />
 	</head>
 	<body>
+		<section id="operator-auth" aria-labelledby="operator-auth-title" hidden>
+			<h1 id="operator-auth-title">Operator authentication</h1>
+			<p>Enter the operator token to open this remote console.</p>
+			<form id="operator-auth-form">
+				<label for="operator-token">Operator token</label>
+				<input id="operator-token" type="password" autocomplete="off" required aria-describedby="operator-auth-error" />
+				<button type="submit">Open console</button>
+				<p id="operator-auth-error" role="alert"></p>
+			</form>
+		</section>
 		<a class="skip-link" href="#composer-input">Skip to composer</a>
 		<nav id="sidebar" aria-label="Channels and agents">
 			<h1>Channels</h1>
@@ -182,6 +192,62 @@
 				</p>
 			</form>
 		</aside>
+		<script>
+			(() => {
+				const key = "oh-my-agent.operator-token";
+				const section = document.getElementById("operator-auth");
+				const form = document.getElementById("operator-auth-form");
+				const input = document.getElementById("operator-token");
+				const error = document.getElementById("operator-auth-error");
+				window.__showOperatorAuth = (
+					message = "Operator token refused. Re-enter the token.",
+					clearToken = true,
+					refusedToken,
+				) => {
+					const preserveReentry =
+						!section.hidden &&
+						form.contains(document.activeElement) &&
+						input.value !== "" &&
+						(refusedToken === undefined || input.value !== refusedToken);
+					if (clearToken) sessionStorage.removeItem(key);
+					section.hidden = false;
+					for (const child of document.body.children) {
+						if (child !== section && child.tagName !== "SCRIPT") child.hidden = true;
+					}
+					error.textContent = message;
+					if (!preserveReentry) {
+						input.value = "";
+						input.focus();
+					}
+				};
+				const authenticate = async (token) => {
+					const response = await fetch("/api/session", {
+						method: "POST",
+						headers: { "X-Operator-Token": token },
+					});
+					if (!response.ok) {
+						window.__showOperatorAuth(undefined, true, token);
+						return;
+					}
+					const payload = await response.json();
+					sessionStorage.setItem(key, token);
+					location.replace(`/?ticket=${encodeURIComponent(payload.ticket)}`);
+				};
+				form.addEventListener("submit", (event) => {
+					event.preventDefault();
+					error.textContent = "";
+					void authenticate(input.value).catch(() => {
+						error.textContent = "Authentication unavailable. Try again.";
+						input.focus();
+					});
+				});
+				if (document.documentElement.hasAttribute("data-auth-bootstrap")) {
+					const stored = sessionStorage.getItem(key);
+					window.__showOperatorAuth("", false);
+					if (stored) void authenticate(stored);
+				}
+			})();
+		</script>
 		<script src="/app.js"></script>
 	</body>
 </html>

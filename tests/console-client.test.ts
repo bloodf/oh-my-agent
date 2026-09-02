@@ -192,6 +192,14 @@ async function openPage(): Promise<TrackedPage> {
 	return { page, errors };
 }
 
+function unexpectedPageErrors(errors: string[]): string[] {
+	return errors.filter(
+		(error) =>
+			error !==
+			"Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+	);
+}
+
 // ── Event-driven waits ───────────────────────────────────────────────────────
 
 /** Poll a condition until it holds; failure names the last observed value. */
@@ -274,6 +282,7 @@ const transcriptText = (page: Page): Promise<string> =>
 // ── Daemon harness (mirrors tests/console-api.test.ts) ──────────────────────
 
 const TOKEN = "operator-token";
+const OPERATOR_TOKEN_KEY = "oh-my-agent.operator-token";
 
 function stubWorker(name = "reviewer", fingerprint?: string) {
 	const prompts: string[] = [];
@@ -321,7 +330,9 @@ const MIME: Record<string, string> = {
  * plus a static server for the client files and a transparent API proxy.
  * Everything the browser talks to is here.
  */
-async function harness(options: { pollIntervalMs?: number } = {}) {
+async function harness(
+	options: { pollIntervalMs?: number; remoteMode?: boolean } = {},
+) {
 	const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-console-client-"));
 	cleanups.push(async function cleanupRm() {
 		await rm(dir, { recursive: true, force: true });
@@ -431,6 +442,9 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		operations,
 		token: TOKEN,
 		pollIntervalMs: options.pollIntervalMs ?? 25,
+		...(options.remoteMode
+			? { remoteMode: true, proxySecret: "console-client-proxy-secret" }
+			: {}),
 	});
 	// The supervisor's transitions go through the swappable sink, which
 	// defaults to the socket broadcast; route emissions use `publish`.
@@ -550,8 +564,21 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		holdConnect: null as Promise<void> | null,
 		/** Handshakes attempted, held or not. */
 		connects: 0,
+		/** Refuse WebSocket tickets after a test has observed initial success. */
+		refuseWsTickets: false,
+		/** Force message POSTs to expire for auth-race coverage. */
+		unauthorizedApi: false,
+		/** Hold concurrent session refusals until a test releases each response. */
+		holdSessionRefusals: false,
+		sessionRefusalReleases: [] as Array<() => void>,
 		sendRaw: (data: string) => {
-			for (const socket of downstreamByUpstream.values()) socket.send(data);
+			let recipients = 0;
+			for (const [upstream, socket] of downstreamByUpstream) {
+				if (upstream.readyState !== WebSocket.OPEN) continue;
+				socket.send(data);
+				recipients += 1;
+			}
+			return recipients;
 		},
 	};
 	const web = Bun.serve<WebSocket>({
@@ -571,7 +598,17 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 				const upstreamUrl = new URL(api.url + url.pathname + url.search);
 				upstreamUrl.protocol =
 					upstreamUrl.protocol === "https:" ? "wss:" : "ws:";
-				const upstream = new WebSocket(upstreamUrl.href);
+				const upstream = new WebSocket(upstreamUrl.href, {
+					...(options.remoteMode
+						? {
+								headers: {
+									"X-OMA-Proxy-Secret": "console-client-proxy-secret",
+									"X-Forwarded-Host": "remote.example",
+									"X-Forwarded-Proto": "https",
+								},
+							}
+						: {}),
+				});
 				pendingFrames.set(upstream, []);
 				upstream.addEventListener("message", (event) => {
 					const data = String(event.data);
@@ -611,6 +648,50 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 			}
 
 			if (url.pathname.startsWith("/api/")) {
+				if (
+					request.method === "POST" &&
+					url.pathname === "/api/session" &&
+					feed.holdSessionRefusals
+				) {
+					const held = Promise.withResolvers<void>();
+					feed.sessionRefusalReleases.push(held.resolve);
+					await held.promise;
+					return Response.json(
+						{
+							error: {
+								code: "unauthorized",
+								message: "Operator token refused",
+							},
+						},
+						{ status: 401 },
+					);
+				}
+				if (
+					request.method === "POST" &&
+					/^\/api\/channels\/[^/]+\/messages$/.test(url.pathname) &&
+					feed.unauthorizedApi
+				) {
+					return Response.json(
+						{
+							error: {
+								code: "unauthorized",
+								message: "Operator token refused",
+							},
+						},
+						{ status: 401 },
+					);
+				}
+				if (url.pathname === "/api/ws-ticket" && feed.refuseWsTickets) {
+					return Response.json(
+						{
+							error: {
+								code: "unauthorized",
+								message: "Operator token refused",
+							},
+						},
+						{ status: 401 },
+					);
+				}
 				const messagesRoute = /^\/api\/channels\/([^/]+)\/messages$/.exec(
 					url.pathname,
 				);
@@ -645,6 +726,11 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 					headers.set("Authorization", `Bearer ${presented}`);
 					headers.delete("X-Operator-Token");
 				}
+				if (options.remoteMode) {
+					headers.set("X-OMA-Proxy-Secret", "console-client-proxy-secret");
+					headers.set("X-Forwarded-Host", "remote.example");
+					headers.set("X-Forwarded-Proto", "https");
+				}
 
 				const upstream = new URL(api.url + url.pathname + url.search);
 				return fetch(
@@ -664,6 +750,18 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 			// noise that pollutes page-error assertions, so answer it empty.
 			if (path === "/favicon.ico") {
 				return new Response(null, { status: 204 });
+			}
+			if (options.remoteMode) {
+				const headers = new Headers(request.headers);
+				headers.set("X-OMA-Proxy-Secret", "console-client-proxy-secret");
+				headers.set("X-Forwarded-Host", "remote.example");
+				headers.set("X-Forwarded-Proto", "https");
+				return fetch(
+					new Request(api.url + url.pathname + url.search, {
+						method: request.method,
+						headers,
+					}),
+				);
 			}
 			const file = Bun.file(join(staticRoot, path));
 			if (!(await file.exists())) {
@@ -706,6 +804,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 
 	const consoleUrl = (room = "#reviews") =>
 		`http://127.0.0.1:${web.port}/?token=${TOKEN}&room=${encodeURIComponent(room)}`;
+	const remoteConsoleUrl = `http://127.0.0.1:${web.port}/`;
 
 	return {
 		rooms,
@@ -715,6 +814,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		reload,
 		promptsContaining,
 		consoleUrl,
+		remoteConsoleUrl,
 		/** Proxy-level feed and fault control; see its declaration above. */
 		feed,
 		/** The console API itself, for writes made behind the browser's back. */
@@ -2181,6 +2281,501 @@ describe("message presentation", () => {
 		const text = await transcriptText(page);
 		expect(text).toContain("Patch below:");
 		expect(text).toContain("Apply it.");
+		expect(errors).toEqual([]);
+	});
+});
+
+async function operatorAuthState(page: Page) {
+	return {
+		visible: await page.$eval(
+			"#operator-auth",
+			(node) => !node.hasAttribute("hidden"),
+		),
+		appHidden: await page.$eval("#main", (node) => node.hasAttribute("hidden")),
+		error: await page.$eval(
+			"#operator-auth-error",
+			(node) => node.textContent ?? "",
+		),
+		focused: await page.$eval(
+			"#operator-token",
+			(node) => node === document.activeElement,
+		),
+		value: await page.$eval("#operator-token", (node) =>
+			"value" in node ? String(node.value) : "",
+		),
+		stored: await page.evaluate(
+			(key) => sessionStorage.getItem(key),
+			OPERATOR_TOKEN_KEY,
+		),
+	};
+}
+
+describe("remote operator authentication", () => {
+	browserTest(
+		"keyboard token entry refuses bad tokens, persists good tokens, and keeps them out of URLs",
+		async () => {
+			const h = await harness({ remoteMode: true });
+			await h.ensureRoom("#reviews");
+			const { page } = await openPage();
+			const urls: string[] = [];
+			page.on("request", (request) => urls.push(request.url()));
+
+			await page.goto(h.remoteConsoleUrl, { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#operator-token");
+			expect(
+				await page.$eval("label[for=operator-token]", (node) =>
+					node.getAttribute("for"),
+				),
+			).toBe("operator-token");
+			expect(
+				await page.$eval(
+					"#operator-token",
+					(node) => node === document.activeElement,
+				),
+			).toBe(true);
+
+			await page.keyboard.type("wrong-token");
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#operator-auth-error:not(:empty)");
+			expect(
+				await page.$eval("#operator-auth-error", (node) =>
+					node.getAttribute("role"),
+				),
+			).toBe("alert");
+			expect(
+				await page.$eval(
+					"#operator-token",
+					(node) => node === document.activeElement,
+				),
+			).toBe(true);
+
+			await page.keyboard.type(TOKEN);
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#operator-auth[hidden]");
+			await waitFor(
+				"root ticket removal",
+				() => Promise.resolve(page.url()),
+				(url) => !url.includes("ticket="),
+			);
+			expect(page.url()).not.toContain(TOKEN);
+			expect(urls.every((url) => !url.includes(TOKEN))).toBe(true);
+
+			await page.reload({ waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#operator-auth[hidden]");
+			await waitFor(
+				"reload ticket removal",
+				() => Promise.resolve(page.url()),
+				(url) => !url.includes("ticket="),
+			);
+			expect(page.url()).not.toContain("token=");
+		},
+	);
+
+	browserTest(
+		"a stale stored token returns a reloaded console to token entry",
+		async () => {
+			const h = await harness({ remoteMode: true });
+			const { page, errors } = await openPage();
+
+			const response = await page.goto(h.remoteConsoleUrl, {
+				waitUntil: "domcontentloaded",
+			});
+			expect(response?.headers()["referrer-policy"]).toBe("no-referrer");
+			await page.evaluate(
+				(key) => sessionStorage.setItem(key, "stale-token"),
+				OPERATOR_TOKEN_KEY,
+			);
+			await page.reload({ waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#operator-auth-error:not(:empty)");
+
+			expect(await operatorAuthState(page)).toEqual({
+				visible: true,
+				appHidden: true,
+				error: "Operator token refused. Re-enter the token.",
+				focused: true,
+				value: "",
+				stored: null,
+			});
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"concurrent session refusals preserve active token re-entry",
+		async () => {
+			const h = await harness({ remoteMode: true });
+			h.feed.holdSessionRefusals = true;
+			const { page, errors } = await openPage();
+
+			await page.goto(h.remoteConsoleUrl, { waitUntil: "domcontentloaded" });
+			await page.type("#operator-token", "refused-token");
+			await page.keyboard.press("Enter");
+			await page.keyboard.press("Enter");
+			await waitFor(
+				"two concurrent session attempts",
+				() => Promise.resolve(h.feed.sessionRefusalReleases.length),
+				(count) => count === 2,
+			);
+
+			h.feed.sessionRefusalReleases.shift()?.();
+			await page.waitForSelector("#operator-auth-error:not(:empty)");
+			await page.type("#operator-token", "replacement-in-progress");
+			await page.evaluate(
+				(key) => sessionStorage.setItem(key, "must-clear"),
+				OPERATOR_TOKEN_KEY,
+			);
+
+			h.feed.sessionRefusalReleases.shift()?.();
+			await waitFor(
+				"second refusal storage clear",
+				() =>
+					page.evaluate(
+						(key) => sessionStorage.getItem(key),
+						OPERATOR_TOKEN_KEY,
+					),
+				(stored) => stored === null,
+			);
+
+			expect(await operatorAuthState(page)).toMatchObject({
+				visible: true,
+				appHidden: true,
+				error: "Operator token refused. Re-enter the token.",
+				focused: true,
+				value: "replacement-in-progress",
+				stored: null,
+			});
+			expect(
+				await page.evaluate(
+					() => Reflect.get(globalThis, "__consoleSockets") === undefined,
+				),
+			).toBe(true);
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"a refused reconnect ticket returns the console to token entry",
+		async () => {
+			const h = await harness({ remoteMode: true });
+			await h.ensureRoom("#reviews");
+			const { page, errors } = await openPage();
+
+			await page.goto(h.remoteConsoleUrl, { waitUntil: "domcontentloaded" });
+			await page.type("#operator-token", TOKEN);
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#operator-auth[hidden]");
+			await waitFor(
+				"initial remote socket",
+				() =>
+					page.evaluate(() => {
+						const sockets = Reflect.get(globalThis, "__consoleSockets");
+						return (
+							Array.isArray(sockets) &&
+							sockets.some(
+								(socket) =>
+									socket instanceof WebSocket &&
+									socket.readyState === WebSocket.OPEN,
+							)
+						);
+					}),
+				Boolean,
+			);
+
+			h.feed.refuseWsTickets = true;
+			await page.evaluate(() => {
+				const sockets = Reflect.get(globalThis, "__consoleSockets");
+				if (!Array.isArray(sockets)) return;
+				for (const socket of sockets) {
+					if (
+						socket instanceof WebSocket &&
+						socket.readyState === WebSocket.OPEN
+					) {
+						socket.close();
+						break;
+					}
+				}
+			});
+			await page.waitForSelector("#operator-auth-error:not(:empty)", {
+				timeout: 5_000,
+			});
+
+			expect(await operatorAuthState(page)).toEqual({
+				visible: true,
+				appHidden: true,
+				error: "Operator token refused. Re-enter the token.",
+				focused: true,
+				value: "",
+				stored: null,
+			});
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"revocation drops queued socket work and blocks stale HTTP requests",
+		async () => {
+			const h = await harness({ remoteMode: true });
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+			const { page, errors } = await openPage();
+			const requests: string[] = [];
+			page.on("request", (request) => {
+				const url = new URL(request.url());
+				if (url.pathname.startsWith("/api/")) requests.push(url.pathname);
+			});
+
+			await page.goto(h.remoteConsoleUrl, { waitUntil: "domcontentloaded" });
+			await page.type("#operator-token", TOKEN);
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#operator-auth[hidden]");
+			await waitFor(
+				"initial remote socket",
+				() =>
+					page.evaluate(() =>
+						(
+							(globalThis as { __consoleSockets?: WebSocket[] })
+								.__consoleSockets ?? []
+						).some((socket) => socket.readyState === WebSocket.OPEN),
+					),
+				Boolean,
+			);
+
+			await waitFor(
+				"initial reconcile pass",
+				() =>
+					page.evaluate(
+						() =>
+							(globalThis as { __consoleReconcilePasses?: number })
+								.__consoleReconcilePasses ?? 0,
+					),
+				(count) => count > 0,
+			);
+			const queuedFrame = JSON.stringify({
+				type: "message",
+				message: { room: "#ops" },
+			});
+
+			await page.evaluate(() => {
+				const sockets = Reflect.get(globalThis, "__consoleSockets");
+				if (!Array.isArray(sockets)) throw new Error("Missing console sockets");
+				const socket = sockets.find(
+					(candidate) => candidate.readyState === WebSocket.OPEN,
+				);
+				if (!(socket instanceof WebSocket))
+					throw new Error("Missing open socket");
+				const close = socket.close;
+				Reflect.set(socket, "close", () => {});
+				Reflect.set(globalThis, "__releaseRevokedSocket", () => {
+					close.call(socket);
+				});
+			});
+			h.feed.unauthorizedApi = true;
+			await page.type("#composer-input", "expire this session");
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#operator-auth-error:not(:empty)");
+			const requestsAtRevocation = requests.length;
+			const reconcilePasses = await page.evaluate(
+				() =>
+					(globalThis as { __consoleReconcilePasses?: number })
+						.__consoleReconcilePasses ?? 0,
+			);
+			const rawRecipients = h.feed.sendRaw(queuedFrame);
+			expect(rawRecipients).toBeGreaterThan(0);
+			await page.evaluate(() => {
+				const input = document.querySelector("#composer-input");
+				const form = document.querySelector("#composer");
+				if (input === null) throw new Error("Missing #composer-input");
+				if (form === null) throw new Error("Missing #composer");
+				Reflect.set(input, "value", "must not reuse revoked token");
+				Reflect.get(form, "requestSubmit").call(form);
+			});
+			await page.evaluate(() => fetch("/favicon.ico").then(() => undefined));
+			await page.evaluate(() => {
+				const release = Reflect.get(globalThis, "__releaseRevokedSocket");
+				if (typeof release !== "function") {
+					throw new Error("Missing revoked socket release");
+				}
+				release();
+			});
+			await waitFor(
+				"revoked sockets drained",
+				() =>
+					page.evaluate(() => {
+						const sockets = Reflect.get(globalThis, "__consoleSockets");
+						return Array.isArray(sockets) ? sockets.length : -1;
+					}),
+				(count) => count === 0,
+			);
+
+			expect(requests).toHaveLength(requestsAtRevocation);
+			expect(
+				await page.evaluate(
+					() =>
+						(globalThis as { __consoleReconcilePasses?: number })
+							.__consoleReconcilePasses ?? 0,
+				),
+			).toBe(reconcilePasses);
+			expect((await unreadLabels(page)).join(" ")).not.toContain("#ops");
+			expect(await stateOnPage(page)).not.toMatchObject({
+				kind: "load-failure",
+			});
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"authentication expiry cancels a scheduled reconnect without wiping re-entry",
+		async () => {
+			const h = await harness({ remoteMode: true });
+			await h.ensureRoom("#reviews");
+			const { page, errors } = await openPage();
+			const requests: Array<{
+				method: string;
+				path: string;
+				token: string | undefined;
+			}> = [];
+			page.on("request", (request) => {
+				const url = new URL(request.url());
+				if (!url.pathname.startsWith("/api/")) return;
+				requests.push({
+					method: request.method(),
+					path: url.pathname,
+					token: request.headers()["x-operator-token"],
+				});
+			});
+
+			await page.goto(h.remoteConsoleUrl, { waitUntil: "domcontentloaded" });
+			await page.type("#operator-token", TOKEN);
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#operator-auth[hidden]");
+			await waitFor(
+				"initial remote socket",
+				() =>
+					page.evaluate(() => {
+						const sockets = Reflect.get(globalThis, "__consoleSockets");
+						return (
+							Array.isArray(sockets) &&
+							sockets.some(
+								(socket) =>
+									socket instanceof WebSocket &&
+									socket.readyState === WebSocket.OPEN,
+							)
+						);
+					}),
+				Boolean,
+			);
+
+			const cdp = await page.createCDPSession();
+			await page.evaluate(() => {
+				const sockets = Reflect.get(globalThis, "__consoleSockets");
+				if (!Array.isArray(sockets)) return;
+				sockets
+					.find(
+						(socket) =>
+							socket instanceof WebSocket &&
+							socket.readyState === WebSocket.OPEN,
+					)
+					?.close();
+			});
+			await waitFor(
+				"closed socket removed after reconnect was scheduled",
+				() =>
+					page.evaluate(() => {
+						const sockets = Reflect.get(globalThis, "__consoleSockets");
+						return Array.isArray(sockets) ? sockets.length : -1;
+					}),
+				(count) => count === 0,
+			);
+			await cdp.send("Emulation.setVirtualTimePolicy", { policy: "pause" });
+
+			h.feed.unauthorizedApi = true;
+			await page.type("#composer-input", "expired session");
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#operator-auth-error:not(:empty)");
+			await page.type("#operator-token", "replacement-in-progress");
+			h.feed.refuseWsTickets = true;
+
+			const wsTicketsBefore = requests.filter(
+				(request) => request.path === "/api/ws-ticket",
+			);
+			const readsBefore = requests.filter(
+				(request) => request.method === "GET",
+			).length;
+			const connectsBefore = h.feed.connects;
+			const socketsBefore = await page.evaluate(() => {
+				const sockets = Reflect.get(globalThis, "__consoleSockets");
+				return Array.isArray(sockets) ? sockets.length : -1;
+			});
+
+			const budgetExpired = new Promise<void>((resolve) => {
+				cdp.once("Emulation.virtualTimeBudgetExpired", () => resolve());
+			});
+			await cdp.send("Emulation.setVirtualTimePolicy", {
+				policy: "advance",
+				budget: 1_000,
+			});
+			await budgetExpired;
+			await page.evaluate(() => Promise.resolve());
+
+			const wsTicketsAfter = requests.filter(
+				(request) => request.path === "/api/ws-ticket",
+			);
+			expect(wsTicketsAfter).toEqual(wsTicketsBefore);
+			expect(wsTicketsAfter.map((request) => request.token)).toEqual([TOKEN]);
+			expect(h.feed.connects).toBe(connectsBefore);
+			expect(
+				await page.evaluate(() => {
+					const sockets = Reflect.get(globalThis, "__consoleSockets");
+					return Array.isArray(sockets) ? sockets.length : -1;
+				}),
+			).toBe(socketsBefore);
+			expect(
+				requests.filter((request) => request.method === "GET").length,
+			).toBe(readsBefore);
+			expect(await operatorAuthState(page)).toMatchObject({
+				visible: true,
+				appHidden: true,
+				value: "replacement-in-progress",
+				stored: null,
+			});
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest("an unauthenticated remote websocket is refused", async () => {
+		const h = await harness({ remoteMode: true });
+		const socket = new WebSocket(
+			`${h.apiUrl.replace("http://", "ws://")}/api/events`,
+			{
+				headers: {
+					"X-OMA-Proxy-Secret": "console-client-proxy-secret",
+					"X-Forwarded-Host": "remote.example",
+					"X-Forwarded-Proto": "https",
+				},
+			},
+		);
+		const result = await Promise.race([
+			new Promise<string>((resolve) =>
+				socket.addEventListener("open", () => resolve("open")),
+			),
+			new Promise<string>((resolve) =>
+				socket.addEventListener("error", () => resolve("refused")),
+			),
+		]);
+		socket.close();
+		expect(result).toBe("refused");
+	});
+
+	browserTest("loopback console opens without an operator prompt", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const { page, errors } = await openPage();
+
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector('#channels [role="option"]');
+		expect(
+			await page.$eval("#operator-auth", (node) => node.hasAttribute("hidden")),
+		).toBe(true);
 		expect(errors).toEqual([]);
 	});
 });

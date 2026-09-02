@@ -7,8 +7,8 @@
  * logs, raise an account's ceiling). New messages, reactions, and daemon
  * transitions are pushed over a WebSocket so an open console does not poll.
  *
- * Public API: `startConsoleApi`, `ConsoleApi`, `StartConsoleApiOptions`,
- * `ConsoleEvent`.
+ * Public API: `startConsoleApi`, `normalizeRequestUrl`, `ConsoleApi`,
+ * `StartConsoleApiOptions`, `ConsoleEvent`.
  *
  * Upstream deps: `../rooms/store` (durable rooms, threads, reactions),
  * `./supervisor` (the seam that wakes peers, and the sole writer of a live
@@ -46,7 +46,7 @@
  * per room.
  */
 
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { join, resolve, sep } from "node:path";
 
 import type { MessageReaction, RoomMessage, RoomStore } from "../rooms/store";
@@ -81,6 +81,54 @@ export function isLoopback(hostname: string): boolean {
 	return (
 		match !== null && hostname.split(".").every((part) => Number(part) <= 255)
 	);
+}
+
+/**
+ * Apply a proxy-supplied origin only when remote mode and its shared secret
+ * authenticate the forwarded headers. Otherwise preserve the direct URL.
+ */
+export function normalizeRequestUrl(
+	url: URL,
+	headers: Headers,
+	remoteMode: boolean,
+	proxySecret?: string,
+): URL {
+	const presentedSecret = headers.get("X-OMA-Proxy-Secret");
+	if (
+		!remoteMode ||
+		proxySecret === undefined ||
+		presentedSecret === null ||
+		!tokenMatches(presentedSecret, proxySecret)
+	) {
+		return url;
+	}
+
+	const protocol = headers
+		.get("X-Forwarded-Proto")
+		?.split(",", 1)[0]
+		?.trim()
+		.toLowerCase();
+	const host = headers.get("X-Forwarded-Host")?.split(",", 1)[0]?.trim();
+	if (
+		(protocol !== "http" && protocol !== "https") ||
+		host === undefined ||
+		host.length === 0 ||
+		host.endsWith(":") ||
+		/[\s/@?#\\]/.test(host)
+	) {
+		return url;
+	}
+
+	try {
+		const origin = new URL(`${protocol}://${host}`);
+		if (origin.hostname.length === 0) return url;
+		const normalized = new URL(url);
+		normalized.protocol = origin.protocol;
+		normalized.host = origin.host;
+		return normalized;
+	} catch {
+		return url;
+	}
 }
 
 /** How often the live feed re-reads rooms while a console is connected. */
@@ -201,21 +249,18 @@ export interface StartConsoleApiOptions {
 	/**
 	 * Remote mode (ADR-012): authentication and enforcement only.
 	 *
-	 * The bind stays loopback in every mode — this never widens it. What it
-	 * changes is what a request must carry: the operator token becomes
-	 * mandatory on every path including the ones a browser can only reach
-	 * with a query token, and forwarded identity is ignored until the proxy
-	 * secret below proves the request actually came through the operator's
-	 * own reverse proxy.
+	 * The bind stays loopback in every mode — this never widens it. Operator
+	 * authentication remains mandatory on every path. Forwarded scheme and host
+	 * remain anonymous input until the proxy secret below proves the request came
+	 * through the operator's own reverse proxy.
 	 */
 	remoteMode?: boolean;
 	/**
-	 * Per-install secret the reverse proxy presents, required in remote mode.
+	 * Per-install secret gating forwarded-origin trust in remote mode only.
 	 *
-	 * Minted at boot beside the operator token. Without it, `X-Forwarded-*`
-	 * is anonymous client input — a direct loopback caller can set those
-	 * headers freely — so remote mode refuses a request that lacks it rather
-	 * than reading an identity out of a header anyone can forge.
+	 * It never admits or refuses a request; the operator token does that. A
+	 * missing or wrong request header leaves `X-Forwarded-*` anonymous input, so
+	 * scheme and host are ignored and direct loopback behavior remains intact.
 	 */
 	proxySecret?: string;
 	hostname?: string;
@@ -348,10 +393,7 @@ export async function startConsoleApi(
 	const fail = (status: number, code: string, message: string): Response =>
 		Response.json({ error: { code, message } }, { status });
 
-	/**
-	 * The presented operator token, from a header a client can set or the query
-	 * parameter a browser is stuck with on a handshake or a sub-resource load.
-	 */
+	/** Read an operator token from headers, and from queries only on loopback. */
 	const presentedToken = (
 		request: Request,
 		url: URL,
@@ -359,17 +401,32 @@ export async function startConsoleApi(
 	): string | undefined => {
 		const header = request.headers.get("Authorization");
 		if (header?.startsWith("Bearer ")) return header.slice("Bearer ".length);
-		// What the browser client sends on every API call (`app.js:177`). The
-		// header is the client's own choice, not a browser constraint — a
-		// same-origin fetch could set `Authorization` — but it is what ships, so
-		// refusing it here is a console whose every request 401s.
 		const operator = request.headers.get("X-Operator-Token");
 		if (operator !== null && operator.length > 0) return operator;
-		// The query parameter exists for the WebSocket handshake and the static
-		// client, the two places a browser cannot set a header at all; honoring
-		// it on an API call would plant the token in browser history.
 		if (!allowQuery) return undefined;
 		return url.searchParams.get("token") ?? undefined;
+	};
+
+	const tickets = new Map<string, { path: string; expiresAt: number }>();
+	const mintTicket = (path: string): string => {
+		const now = Date.now();
+		for (const [value, ticket] of tickets) {
+			if (ticket.expiresAt < now) tickets.delete(value);
+		}
+		const ticket = randomBytes(32).toString("base64url");
+		tickets.set(ticket, { path, expiresAt: now + 30_000 });
+		return ticket;
+	};
+	const consumeTicket = (url: URL): boolean => {
+		const value = url.searchParams.get("ticket");
+		if (value === null) return false;
+		const ticket = tickets.get(value);
+		tickets.delete(value);
+		return (
+			ticket !== undefined &&
+			ticket.path === url.pathname &&
+			ticket.expiresAt >= Date.now()
+		);
 	};
 
 	// ── Live feed ─────────────────────────────────────────────────────────────
@@ -1404,73 +1461,56 @@ export async function startConsoleApi(
 
 	const consoleRoot = resolve(join(import.meta.dir, "..", "console"));
 
-	/**
-	 * Serve one client file, with the token carried into the shell's asset URLs.
-	 *
-	 * The `<link>` and `<script>` are rewritten to append `?token=` because
-	 * every route here is gated and a browser sends nothing of its own on a
-	 * sub-resource load: unrewritten, the console arrives as unstyled HTML with
-	 * a 401'd script. The token is already in the page URL the operator pasted
-	 * — `app.js` reads it from `location.search` — so this moves it nowhere new.
-	 *
-	 * A cookie is the other way to carry it, and is deliberately not used:
-	 * cookies are scoped by host and ignore the port, so one set here would ride
-	 * along to every other service on `127.0.0.1`, handing the operator token to
-	 * any unrelated local dev server the browser later visits.
-	 */
+	/** Serve one allowlisted console asset after its enclosing auth gate. */
 	const serveStatic = async (
 		request: Request,
 		pathname: string,
-		presented: string,
+		presented?: string,
+		remoteRequest = false,
 	): Promise<Response> => {
 		const notFound = (): Response =>
 			fail(404, "not_found", `Unknown route: ${pathname}`);
-
-		// The client is read-only: a browser only ever GETs these. Answering a
-		// POST with the shell would make the static half of this server look
-		// like it accepts writes it does nothing with.
 		if (request.method !== "GET" && request.method !== "HEAD") {
 			return fail(405, "method_not_allowed", `${request.method} not allowed`);
 		}
 
-		// Decode before resolving. The server sees the request target close to
-		// verbatim — Bun collapses a literal `/../`, but leaves `%2e%2e%2f`
-		// alone — so a path checked only in its encoded form is checked against
-		// something other than what will be opened.
 		let requested: string;
 		try {
 			requested = decodeURIComponent(pathname);
 		} catch {
-			// A malformed escape cannot name a file worth serving.
 			return notFound();
 		}
 		if (requested.includes("\0")) return notFound();
-
-		// Resolve-and-contain, the same standard as the peer-store write, and
-		// applied to the request's own path so it is what refuses a traversal
-		// rather than a formality sitting behind a lookup table.
 		const path = resolve(
 			join(consoleRoot, requested === "/" ? "index.html" : requested),
 		);
 		if (!path.startsWith(consoleRoot + sep)) return notFound();
-
-		// Contained, and one of the files this console publishes: containment
-		// alone would serve anything that happened to sit in `src/console/`.
 		const filename = path.slice(consoleRoot.length + 1);
 		if (!STATIC_FILES.has(filename)) return notFound();
-
 		const file = Bun.file(path);
 		if (!(await file.exists())) return notFound();
 
 		if (filename !== "index.html") return new Response(file);
-
-		const query = `?token=${encodeURIComponent(presented)}`;
-		const html = (await file.text()).replace(
-			/(<(?:script|link)\b[^>]*?\b(?:src|href)=")(\/[^"?]*)(")/g,
-			`$1$2${query}$3`,
-		);
+		let html = await file.text();
+		if (remoteRequest) {
+			const assetTicket = (asset: string): string =>
+				`${asset}?ticket=${encodeURIComponent(mintTicket(asset))}`;
+			html = html
+				.replace('<html lang="en">', '<html lang="en" data-auth-mode="remote">')
+				.replace('href="/style.css"', `href="${assetTicket("/style.css")}"`)
+				.replace('src="/app.js"', `src="${assetTicket("/app.js")}"`);
+		} else if (presented !== undefined) {
+			const query = `?token=${encodeURIComponent(presented)}`;
+			html = html.replace(
+				/(<(?:script|link)\b[^>]*?\b(?:src|href)=")(\/[^"?]*)(")/g,
+				`$1$2${query}$3`,
+			);
+		}
 		return new Response(html, {
-			headers: { "content-type": "text/html;charset=utf-8" },
+			headers: {
+				"content-type": "text/html;charset=utf-8",
+				...(remoteRequest ? { "Referrer-Policy": "no-referrer" } : {}),
+			},
 		});
 	};
 
@@ -1481,36 +1521,81 @@ export async function startConsoleApi(
 		// default idle timeout would sever its live feed.
 		idleTimeout: 0,
 		fetch: async (request, self): Promise<Response | undefined> => {
-			const url = new URL(request.url);
+			let url = new URL(request.url);
+			const directUrl = url;
 			const isUpgrade = url.pathname === "/api/events";
-			// The client's own files are the other place a query token is
-			// unavoidable: a stylesheet or a script tag carries no headers.
 			const isStatic = !url.pathname.startsWith("/api/");
-			const presented = presentedToken(request, url, isUpgrade || isStatic);
-			if (presented === undefined || !tokenMatches(presented, token)) {
-				return fail(401, "unauthorized", "Operator token required");
-			}
-			// Remote mode only. The forwarded headers a proxy sets are also
-			// headers a direct loopback caller can set, so they mean nothing
-			// until this per-install secret proves the request came through
-			// the operator's own proxy. Checked before any route runs, so
-			// there is no path on which forged `X-Forwarded-*` is read first
-			// and refused second.
-			if (remoteMode && proxySecret !== undefined) {
-				const presentedSecret = request.headers.get("X-OMA-Proxy-Secret");
-				if (
-					presentedSecret === null ||
-					!tokenMatches(presentedSecret, proxySecret)
-				) {
-					return fail(401, "unauthorized", "Proxy shared secret required");
+			// Only an authenticated proxy can select remote behavior. An untrusted
+			// Host header must not turn a direct loopback request into remote mode.
+			url = normalizeRequestUrl(url, request.headers, remoteMode, proxySecret);
+			const remoteRequest =
+				remoteMode &&
+				url.origin !== directUrl.origin &&
+				!isLoopback(url.hostname);
+
+			if (remoteRequest) {
+				if (request.method === "POST" && url.pathname === "/api/session") {
+					const presented = presentedToken(request, url, false);
+					if (presented === undefined || !tokenMatches(presented, token)) {
+						return fail(401, "unauthorized", "Operator token refused");
+					}
+					return json(200, { ticket: mintTicket("/") });
 				}
+				if (request.method === "POST" && url.pathname === "/api/ws-ticket") {
+					const presented = presentedToken(request, url, false);
+					if (presented === undefined || !tokenMatches(presented, token)) {
+						return fail(401, "unauthorized", "Operator token refused");
+					}
+					return json(200, { ticket: mintTicket("/api/events") });
+				}
+				if (isStatic) {
+					if (!consumeTicket(url)) {
+						if (url.pathname === "/") {
+							const shell = await Bun.file(
+								join(consoleRoot, "index.html"),
+							).text();
+							const bootstrap = shell
+								.replace(
+									'<html lang="en">',
+									'<html lang="en" data-auth-mode="remote" data-auth-bootstrap>',
+								)
+								.replace(
+									/\s*<link rel="stylesheet" href="\/style\.css" \/>/,
+									"",
+								)
+								.replace(/\s*<script src="\/app\.js"><\/script>/, "");
+							return new Response(bootstrap, {
+								status: 401,
+								headers: {
+									"content-type": "text/html;charset=utf-8",
+									"Referrer-Policy": "no-referrer",
+								},
+							});
+						}
+						return fail(401, "unauthorized", "Static ticket required");
+					}
+					return await serveStatic(request, url.pathname, undefined, true);
+				}
+				if (isUpgrade) {
+					if (!consumeTicket(url)) {
+						return fail(401, "unauthorized", "WebSocket ticket required");
+					}
+				} else {
+					const presented = presentedToken(request, url, false);
+					if (presented === undefined || !tokenMatches(presented, token)) {
+						return fail(401, "unauthorized", "Operator token required");
+					}
+				}
+			} else {
+				const presented = presentedToken(request, url, isUpgrade || isStatic);
+				if (presented === undefined || !tokenMatches(presented, token)) {
+					return fail(401, "unauthorized", "Operator token required");
+				}
+				if (isStatic)
+					return await serveStatic(request, url.pathname, presented);
 			}
 
-			if (isStatic) {
-				return await serveStatic(request, url.pathname, presented);
-			}
-
-			if (url.pathname === "/api/events") {
+			if (isUpgrade) {
 				const upgraded = self.upgrade(request, {
 					data: { id: nextSocketId++ },
 				});
