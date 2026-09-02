@@ -16,6 +16,24 @@ const PACKAGE_ROOT = resolve(import.meta.dir, "..");
 const COMMAND_TIMEOUT_MS = 120_000;
 const EXPECTED_RPC_CLIENT_PID = "absent" as const;
 
+function extractNpmPackMetadata(stdout: string): { filename: string } {
+	// npm pack --json output can be preceded by prepack lifecycle logs
+	// (typecheck/test output), so scan backward from the end for the
+	// final valid JSON value that carries pack metadata.
+	for (let i = stdout.length - 1; i >= 0; i--) {
+		const ch = stdout[i];
+		if (ch !== "[" && ch !== "{") continue;
+		try {
+			const parsed = JSON.parse(stdout.slice(i));
+			const entry = Array.isArray(parsed) ? parsed[0] : parsed;
+			if (entry && typeof entry.filename === "string") return entry;
+		} catch {
+			// not a valid JSON start here; keep scanning backward
+		}
+	}
+	throw new Error(`npm pack JSON not found in stdout:\n${stdout}`);
+}
+
 type Installer = "npm" | "bun";
 
 interface CommandResult {
@@ -389,7 +407,7 @@ test("packed package installs with fresh npm, bun, and OMP consumers and boots t
 				},
 			);
 			expectSuccess(pack, "npm pack");
-			const [{ filename }] = JSON.parse(pack.stdout) as [{ filename: string }];
+			const { filename } = extractNpmPackMetadata(pack.stdout);
 			tarball = join(packDir, filename);
 		}
 		expect(existsSync(tarball), `${tarball} missing`).toBe(true);

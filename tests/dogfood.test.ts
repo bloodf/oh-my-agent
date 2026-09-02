@@ -145,6 +145,7 @@ async function fixture(): Promise<Fixture> {
 			// Real network latency is the fixture behavior under test; fake timers
 			// cannot advance time inside independently spawned real CLI processes.
 			await Bun.sleep(2);
+			if (harness.hangMethod === frame.method) await Bun.sleep(1_000);
 			if (harness.failMethod === frame.method) {
 				const occurrence = state.methods.filter(
 					(method) => method === frame.method,
@@ -486,8 +487,8 @@ describe("dogfood JSON scenario driver", () => {
 			["schedule"],
 			["schedule", "parent:schedule:0", "off"],
 			["schedule"],
-			["agents"],
-			["schedule", "parent:schedule:0", "off"],
+			["kill", "child"],
+			["kill", "parent"],
 			["daemon", "stop"],
 		];
 
@@ -590,12 +591,28 @@ describe("dogfood JSON scenario driver", () => {
 		expect(failureLog).toContain('"type":"cleanup-failure"');
 		expect(failureLog).toContain("injected cleanup error frame");
 	}, 5_000);
+	test("does not disarm a schedule when restart fails", async () => {
+		const harness = await fixture();
+		harness.options.command = harness.fastCommand;
+		harness.failMethod = "fixture_restart";
+
+		const error = await captureError(() => runDogfood(harness.options));
+		expect(error.message).toContain(
+			"Step 17: Restart daemon and exercise schedule controls failed",
+		);
+		expect(harness.state.methods).not.toContain("schedules_arm");
+		expect(harness.state.methods.slice(-3)).toEqual([
+			"kill",
+			"kill",
+			"fixture_stop",
+		]);
+	}, 5_000);
 
 	test("disarms schedules and stops workers when schedule control fails", async () => {
 		const harness = await fixture();
 		harness.options.command = harness.fastCommand;
 		harness.failMethod = "schedules_list";
-		harness.failMethodOccurrence = 3;
+		harness.failMethodOccurrence = 4;
 
 		const error = await captureError(() => runDogfood(harness.options));
 		expect(error.message).toContain(
@@ -608,8 +625,8 @@ describe("dogfood JSON scenario driver", () => {
 		).toBe(true);
 		expect(harness.state.scheduleEnabled).toBe(false);
 		expect(harness.state.methods.slice(-4)).toEqual([
-			"schedules_list",
-			"agent_status",
+			"kill",
+			"kill",
 			"schedules_arm",
 			"fixture_stop",
 		]);

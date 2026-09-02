@@ -243,7 +243,8 @@ If harness hangs or CLI cleanup cannot reach daemon, use this OS-level fallback.
 ```sh
 DAEMON_PID_FILE="$PI_CODING_AGENT_DIR/oh-my-agent/daemon.pid"
 DAEMON_PID="$(cat -- "$DAEMON_PID_FILE")"
-case "$DAEMON_PID" in (*[!0-9]*|''|0) printf '%s\n' "invalid daemon pid: $DAEMON_PID" >&2; exit 1;; esac
+case "$DAEMON_PID" in (*[!0-9]*|'') printf '%s\n' "invalid daemon pid: $DAEMON_PID" >&2; exit 1;; esac
+case "$DAEMON_PID" in (*[!0]*) :;; (*) printf '%s\n' "invalid daemon pid: $DAEMON_PID" >&2; exit 1;; esac
 WORKER_PIDS=""
 FRONTIER="$DAEMON_PID"
 while [ -n "$FRONTIER" ]; do

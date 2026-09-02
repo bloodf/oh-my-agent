@@ -725,7 +725,6 @@ export async function runDogfood(
 			"Restart daemon and exercise schedule controls",
 			async () => {
 				await run(["daemon", "restart"]);
-				armedSchedules.add(scheduleId);
 				await run(["status"]);
 				const restartedSchedule = requireSchedule(
 					schedulesFrom(await run(["schedule"])),
@@ -735,6 +734,7 @@ export async function runDogfood(
 						`runtime schedule ${scheduleId} is not enabled after restart`,
 					);
 				}
+				armedSchedules.add(scheduleId);
 				const enabled = requireObject(
 					(await run(["schedule", scheduleId, "on"])).json,
 					"schedule on result must be an object",
@@ -758,9 +758,10 @@ export async function runDogfood(
 				if (requireSchedule(schedulesFrom(await run(["schedule"]))).enabled) {
 					throw new Error("listed schedule is not disabled");
 				}
+				armedSchedules.delete(scheduleId);
 			},
 		);
-		currentStep = "Step 18: Begin unconditional cleanup";
+		await step(18, "Begin unconditional cleanup", async () => {});
 		await log.sync();
 		report = {
 			logPath,
@@ -786,19 +787,7 @@ export async function runDogfood(
 				// via cleanupErrors and the thrown primaryFailure below.
 			}
 		};
-		let agentsToKill = [...spawnedAgents].reverse();
-		try {
-			const liveNames = new Set(
-				agentsFrom(await run(["agents"]))
-					.filter((agent) => agent.state === "running")
-					.map((agent) => agent.name),
-			);
-			agentsToKill = agentsToKill.filter((agent) => liveNames.has(agent));
-		} catch (error) {
-			await logCleanupFailure(
-				`list live agents: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
+		const agentsToKill = [...spawnedAgents].reverse();
 		for (const agent of agentsToKill) {
 			try {
 				await run(["kill", agent]);
