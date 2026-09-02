@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -38,9 +38,16 @@ ADR-014 is enforced: console actions speak as the human and worker chat actions 
 
 ## Acceptance
 
-- [ ] A worker posting with author='@other' is recorded under its own peer name, suite-proven.
-- [ ] A console post with a forged author stores @you.
-- [ ] Operator-token attribution override still works and is documented as privileged.
+- [x] A worker posting with author='@other' is recorded under its own peer name, suite-proven.
+- [x] A console post with a forged author stores @you.
+- [x] Operator-token attribution override still works and is documented as privileged.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| console derives HUMAN_AUTHOR server-side; worker attribution overwritten with identity | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) |
+| Commit | `4e0410e` |
 
 ## Out of scope
 

@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -38,8 +38,16 @@ Reaction removals propagate through the WebSocket so an external chat_unreact up
 
 ## Acceptance
 
-- [ ] Browser-proven: an out-of-band unreact clears the chip in an open console.
-- [ ] The frame schema asserts reacted is boolean.
+- [x] Browser-proven: an out-of-band unreact clears the chip in an open console.
+- [x] The frame schema asserts reacted is boolean.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| two-way poller diff with floor guard; frames carry reacted:boolean | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) |
+| out-of-band unreact clears the chip without reload | [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) |
+| Commit | `75efdd3` |
 
 ## Out of scope
 

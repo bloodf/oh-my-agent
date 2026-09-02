@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -39,8 +39,15 @@ Async tests wait on observable behavior with deadline-bounded polls instead of f
 
 ## Acceptance
 
-- [ ] No Bun.sleep/fixed setTimeout remains in those four files outside deadline-bounded poll helpers.
-- [ ] Each replaced wait fails fast when the behavior it waits for is broken, with one spot-verified by revert.
+- [x] No Bun.sleep/fixed setTimeout remains in those four files outside deadline-bounded poll helpers.
+- [x] Each replaced wait fails fast when the behavior it waits for is broken, with one spot-verified by revert.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| zero fixed sleeps; burst-hardened unread test | [`tests/daemon-main.test.ts`](../../../tests/daemon-main.test.ts) |
+| Commit | `6e181c5` |
 
 ## Out of scope
 

@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -33,7 +33,14 @@ Every CLI verb's --json output is parsed by one parametrized contract, with the 
 
 ## Acceptance
 
-- [ ] A parametrized test covers all verbs' --json output parsing; the console verb's documented deviation is asserted as the exception.
+- [x] A parametrized test covers all verbs' --json output parsing; the console verb's documented deviation is asserted as the exception.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| --json parametrized across every verb; console verb deviation explicit | [`tests/daemon-cli.test.ts`](../../../tests/daemon-cli.test.ts) |
+| Commit | `ee8aed5` |
 
 ## Out of scope
 

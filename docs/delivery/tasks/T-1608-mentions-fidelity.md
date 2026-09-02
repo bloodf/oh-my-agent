@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -45,8 +45,15 @@ Mentions reach every consumer through the shared RoomMessage wire type and rende
 
 ## Acceptance
 
-- [ ] The contract suite asserts mentions on the wire shape.
-- [ ] Browser-proven: a message mentioning @agent renders the mention affordance.
+- [x] The contract suite asserts mentions on the wire shape.
+- [x] Browser-proven: a message mentioning @agent renders the mention affordance.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| mentions on the wire and rendered in the console | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) |
+| Commit | `f31ae27` |
 
 ## Out of scope
 

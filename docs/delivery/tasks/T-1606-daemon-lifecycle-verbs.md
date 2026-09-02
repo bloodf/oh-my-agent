@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -47,9 +47,16 @@ The CLI can stop and restart a pidfile-validated daemon gracefully, daemon stder
 
 ## Acceptance
 
-- [ ] Stop is refused for a stale pidfile, graceful for a live one, and verified gone.
-- [ ] The daemon log file captures stderr across restarts.
-- [ ] Protocol contract coverage includes daemon_stop params and result.
+- [x] Stop is refused for a stale pidfile, graceful for a live one, and verified gone.
+- [x] The daemon log file captures stderr across restarts.
+- [x] Protocol contract coverage includes daemon_stop params and result.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| daemon_stop deferred ack-before-close; CLI stop/restart; daemon log persisted 0600 | [`src/daemon/main.ts`](../../../src/daemon/main.ts) |
+| Commit | `8cff74b` |
 
 ## Out of scope
 

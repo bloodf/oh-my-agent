@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -38,9 +38,16 @@ Every repaint site in the console preserves keyboard context: focus is restored 
 
 ## Acceptance
 
-- [ ] Focus restore is by control identity, never by ordinal; a control whose identity vanished drops focus to the container or body, never a wrong sibling — browser-proven for transcript, thread pane, and channels.
-- [ ] A scrolled-up user's position survives a repaint; a user at the bottom stays pinned.
-- [ ] The repaint regression test covers transcript, thread pane, and channels, and the thread keyboard suite stays green.
+- [x] Focus restore is by control identity, never by ordinal; a control whose identity vanished drops focus to the container or body, never a wrong sibling — browser-proven for transcript, thread pane, and channels.
+- [x] A scrolled-up user's position survives a repaint; a user at the bottom stays pinned.
+- [x] The repaint regression test covers transcript, thread pane, and channels, and the thread keyboard suite stays green.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| identity-keyed focus restore across all three repaint sites; sticky-bottom scroll | [`src/console/app.js`](../../../src/console/app.js) |
+| Commit | `75efdd3` |
 
 ## Out of scope
 

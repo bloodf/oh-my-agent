@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -20,6 +20,7 @@ CLI agent create/show/edit verbs and console definition read/edit complete defin
 - `src/daemon/console-api.ts`
 - `src/console/app.js`
 - `src/console/index.html`
+- `src/console/style.css`
 - `tests/daemon-cli.test.ts`
 - `tests/console-client.test.ts`
 
@@ -31,6 +32,7 @@ CLI agent create/show/edit verbs and console definition read/edit complete defin
 | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | Adds definition read beside the existing PATCH route. |
 | [`src/console/app.js`](../../../src/console/app.js) | Edited | Loads, edits, saves, and renders strict-parser errors inline. |
 | [`src/console/index.html`](../../../src/console/index.html) | Edited | Adds the semantic definition editor surface. |
+| [`src/console/style.css`](../../../src/console/style.css) | Edited | Token-only editor rules for the definition dialog. |
 | [`tests/daemon-cli.test.ts`](../../../tests/daemon-cli.test.ts) | Edited | Round-trips all three verbs against a real daemon. |
 | [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) | Edited | Browser-proves definition edit and bad-key errors. |
 
@@ -42,8 +44,15 @@ CLI agent create/show/edit verbs and console definition read/edit complete defin
 
 ## Acceptance
 
-- [ ] The three CLI verbs round-trip against a real daemon with clean errors.
-- [ ] Browser-proven: edit a definition in the console and the strict parser's error renders inline on a bad key.
+- [x] The three CLI verbs round-trip against a real daemon with clean errors.
+- [x] Browser-proven: edit a definition in the console and the strict parser's error renders inline on a bad key.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| agent create/show/edit verbs + console definition editor with inline parser errors | [`src/daemon/cli.ts`](../../../src/daemon/cli.ts) |
+| Commit | `cf59131` |
 
 ## Out of scope
 

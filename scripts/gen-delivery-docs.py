@@ -4116,7 +4116,7 @@ TASKS += [
     # ── EP-16: fidelity and hardening ────────────────────────────────────────
     Task(
         id="T-1601", slug="console-thread-parentage", title="Console thread replies preserve parentage",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="A thread reply posted from the console lands in the thread because parentId flows from the console POST through the API and supervisor into RoomStore.post().",
         read_first=[
             ("Console API post handler", "src/daemon/console-api.ts"),
@@ -4145,10 +4145,15 @@ TASKS += [
             "The stale workaround comment in the thread keyboard test is gone.",
             "Store validation errors surface as a 400 the client renders.",
         ],
+        evidence=[
+            ("parentId threaded console POST -> supervisor -> store with 400 mapping; 500s no longer laundered", "src/daemon/console-api.ts"),
+            ("keyboard reply renders inside the thread pane", "tests/console-client.test.ts"),
+            ("Commit", "de5bc1f"),
+        ],
     ),
     Task(
         id="T-1602", slug="reaction-removal-frames", title="Reaction removal frames",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="Reaction removals propagate through the WebSocket so an external chat_unreact updates an open console.",
         read_first=[
             ("Console WebSocket poller", "src/daemon/console-api.ts"),
@@ -4171,10 +4176,15 @@ TASKS += [
             "Browser-proven: an out-of-band unreact clears the chip in an open console.",
             "The frame schema asserts reacted is boolean.",
         ],
+        evidence=[
+            ("two-way poller diff with floor guard; frames carry reacted:boolean", "src/daemon/console-api.ts"),
+            ("out-of-band unreact clears the chip without reload", "tests/console-client.test.ts"),
+            ("Commit", "75efdd3"),
+        ],
     ),
     Task(
         id="T-1603", slug="attribution-enforcement", title="Enforce attribution from connection identity",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="ADR-014 is enforced: console actions speak as the human and worker chat actions speak as the authenticated peer.",
         read_first=[
             ("Attribution policy", "docs/delivery/adr/ADR-014-attribution-policy.md"),
@@ -4198,10 +4208,14 @@ TASKS += [
             "A console post with a forged author stores @you.",
             "Operator-token attribution override still works and is documented as privileged.",
         ],
+        evidence=[
+            ("console derives HUMAN_AUTHOR server-side; worker attribution overwritten with identity", "src/daemon/socket.ts"),
+            ("Commit", "4e0410e"),
+        ],
     ),
     Task(
         id="T-1604", slug="typed-daemon-events", title="Typed daemon state events",
-        epic="EP-16", sprint="SP-17", status="Blocked",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="ADR-015 is implemented with typed agent, definition, membership, channel, budget, and schedule frames that refresh only the affected console panel.",
         read_first=[
             ("Typed event decision", "docs/delivery/adr/ADR-015-typed-daemon-events.md"),
@@ -4230,11 +4244,16 @@ TASKS += [
             "Browser-proven: an agent spawn or kill updates the agents panel without a manual refresh; a schedule arm/fire and a budget park emit frames the client handles.",
             "Every frame type has a schema assertion.",
         ],
+        evidence=[
+            ("typed frames through a load-bearing redirectable publish sink", "src/daemon/console-api.ts"),
+            ("production wiring via construction-order closure", "src/daemon/main.ts"),
+            ("Commit", "75efdd3, cec420c"),
+        ],
         depends_on=["T-1602"],
     ),
     Task(
         id="T-1605", slug="console-ops-panel", title="Console operations panel",
-        epic="EP-16", sprint="SP-17", status="Blocked",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="Kill, inject, logs tail, and budget bump are operable from the authenticated console with subtree confirmation for kills.",
         read_first=[
             ("Typed panel state", "docs/delivery/tasks/T-1604-typed-daemon-events.md"),
@@ -4267,11 +4286,16 @@ TASKS += [
             "Browser-proven kill with subtree confirmation, inject, a logs tail view, and a bump with the new budget visible.",
             "All four pass the console's accessibility assertions keyboard-only.",
         ],
+        evidence=[
+            ("operations.ts single source for kill/inject/logs/bump across socket and console", "src/daemon/operations.ts"),
+            ("ops panel with subtree-naming dialog, keyboard-only", "src/console/index.html"),
+            ("Commit", "cec420c"),
+        ],
         depends_on=["T-1604"],
     ),
     Task(
         id="T-1606", slug="daemon-lifecycle-verbs", title="Daemon lifecycle verbs and logs",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="The CLI can stop and restart a pidfile-validated daemon gracefully, daemon stderr persists across restarts, and logs can select worker or daemon source.",
         read_first=[
             ("Daemon boot and detached launcher", "src/daemon/main.ts"),
@@ -4304,11 +4328,15 @@ TASKS += [
             "The daemon log file captures stderr across restarts.",
             "Protocol contract coverage includes daemon_stop params and result.",
         ],
+        evidence=[
+            ("daemon_stop deferred ack-before-close; CLI stop/restart; daemon log persisted 0600", "src/daemon/main.ts"),
+            ("Commit", "8cff74b"),
+        ],
         out_of_scope=["Follow or tail -f mode."],
     ),
     Task(
         id="T-1607", slug="authoring-parity", title="Definition authoring parity",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="CLI agent create/show/edit verbs and console definition read/edit complete definition-authoring parity over existing protocol methods.",
         read_first=[
             ("CLI command surface", "src/daemon/cli.ts"),
@@ -4317,13 +4345,14 @@ TASKS += [
         ],
         files=[
             "src/daemon/cli.ts", "src/daemon/console-api.ts", "src/console/app.js", "src/console/index.html",
-            "tests/daemon-cli.test.ts", "tests/console-client.test.ts",
+            "src/console/style.css", "tests/daemon-cli.test.ts", "tests/console-client.test.ts",
         ],
         assets=[
             ("src/daemon/cli.ts", "Edited", "Adds agent create/show/edit over agent_create, definition_get, and definition_update."),
             ("src/daemon/console-api.ts", "Edited", "Adds definition read beside the existing PATCH route."),
             ("src/console/app.js", "Edited", "Loads, edits, saves, and renders strict-parser errors inline."),
             ("src/console/index.html", "Edited", "Adds the semantic definition editor surface."),
+            ("src/console/style.css", "Edited", "Token-only editor rules for the definition dialog."),
             ("tests/daemon-cli.test.ts", "Edited", "Round-trips all three verbs against a real daemon."),
             ("tests/console-client.test.ts", "Edited", "Browser-proves definition edit and bad-key errors."),
         ],
@@ -4336,10 +4365,14 @@ TASKS += [
             "The three CLI verbs round-trip against a real daemon with clean errors.",
             "Browser-proven: edit a definition in the console and the strict parser's error renders inline on a bad key.",
         ],
+        evidence=[
+            ("agent create/show/edit verbs + console definition editor with inline parser errors", "src/daemon/cli.ts"),
+            ("Commit", "cf59131"),
+        ],
     ),
     Task(
         id="T-1608", slug="mentions-fidelity", title="Mention fidelity on every surface",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="Mentions reach every consumer through the shared RoomMessage wire type and render distinctly in the console.",
         read_first=[
             ("RoomMessage wire type", "src/shared/protocol.ts"),
@@ -4369,11 +4402,15 @@ TASKS += [
             "The contract suite asserts mentions on the wire shape.",
             "Browser-proven: a message mentioning @agent renders the mention affordance.",
         ],
+        evidence=[
+            ("mentions on the wire and rendered in the console", "src/shared/protocol.ts"),
+            ("Commit", "f31ae27"),
+        ],
         out_of_scope=["Mention autocomplete in the composer."],
     ),
     Task(
         id="T-1609", slug="identity-negatives", title="Identity negative-path proofs",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="The security ticket's unproven identity bullets become mutation-verified tests for forbidden worker inject and room-peer handoff prompting.",
         read_first=[
             ("Worker identity suite", "tests/socket-identity.test.ts"),
@@ -4391,10 +4428,14 @@ TASKS += [
         acceptance=[
             "Both tests fail when the dispatcher's workerMethods/authorize entries are removed, mutation-verified.",
         ],
+        evidence=[
+            ("worker inject FORBIDDEN + task_handoff worker flow, mutation-verified", "tests/socket-identity.test.ts"),
+            ("Commit", "4e0410e"),
+        ],
     ),
     Task(
         id="T-1610", slug="unreact-contract", title="Unreact contract parity",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="chat_unreact mirrors chat_react by rejecting an unknown messageId as INVALID_PARAMS instead of silently succeeding.",
         read_first=[
             ("Reaction dispatch", "src/daemon/socket.ts"),
@@ -4412,10 +4453,14 @@ TASKS += [
         acceptance=[
             "Unknown messageId returns INVALID_PARAMS with data.field === 'messageId'; the parallel react path's test pattern is reused.",
         ],
+        evidence=[
+            ("unreact mirrors react: unknown messageId is INVALID_PARAMS", "src/daemon/socket.ts"),
+            ("Commit", "fb88dfe"),
+        ],
     ),
     Task(
         id="T-1611", slug="cli-json-everywhere", title="CLI JSON coverage for every verb",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="Every CLI verb's --json output is parsed by one parametrized contract, with the console verb's documented deviation asserted explicitly.",
         read_first=[
             ("CLI verbs", "src/daemon/cli.ts"),
@@ -4434,10 +4479,14 @@ TASKS += [
         acceptance=[
             "A parametrized test covers all verbs' --json output parsing; the console verb's documented deviation is asserted as the exception.",
         ],
+        evidence=[
+            ("--json parametrized across every verb; console verb deviation explicit", "tests/daemon-cli.test.ts"),
+            ("Commit", "ee8aed5"),
+        ],
     ),
     Task(
         id="T-1612", slug="shared-supervisor-contract", title="Shared supervisor backend contract",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="One supervisor contract suite drives both worker backends and boot-level tests prove the default backend decision.",
         read_first=[
             ("Subprocess worker behavior", "tests/worker-lifecycle.test.ts"),
@@ -4459,10 +4508,14 @@ TASKS += [
             "The same suite runs against startWorker and startInProcessWorker.",
             "A boot with no workerFactory and inProcessWorkers true/false asserts the selected backend's invariants (pid, sandboxed).",
         ],
+        evidence=[
+            ("one supervisor contract drives both backends; boot-selection proven without a factory", "tests/contracts/supervisor-contract.test.ts"),
+            ("Commit", "2f5325b"),
+        ],
     ),
     Task(
         id="T-1613", slug="build-hygiene-test", title="Dependency-free console build hygiene",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="A machine-enforced manifest test preserves the dependency-free console by rejecting a build script or runtime dependency.",
         read_first=[
             ("Package manifest", "package.json"),
@@ -4480,10 +4533,14 @@ TASKS += [
         acceptance=[
             "The test fails when a fixture manifest adds a build script or a dependency.",
         ],
+        evidence=[
+            ("package.json build-script/dependency guard with poisoned-fixture self-tests", "tests/build-hygiene.test.ts"),
+            ("Commit", "ee8aed5"),
+        ],
     ),
     Task(
         id="T-1614", slug="test-timing-hygiene", title="Deadline-bounded test timing",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="Async tests wait on observable behavior with deadline-bounded polls instead of fixed sleeps, including unread recovery across the socket reconnect race.",
         read_first=[
             ("Daemon timing wait", "tests/daemon-main.test.ts"),
@@ -4507,10 +4564,14 @@ TASKS += [
             "No Bun.sleep/fixed setTimeout remains in those four files outside deadline-bounded poll helpers.",
             "Each replaced wait fails fast when the behavior it waits for is broken, with one spot-verified by revert.",
         ],
+        evidence=[
+            ("zero fixed sleeps; burst-hardened unread test", "tests/daemon-main.test.ts"),
+            ("Commit", "6e181c5"),
+        ],
     ),
     Task(
         id="T-1615", slug="repaint-focus-stability", title="Repaint stability: identity-keyed focus, thread-pane restore, and sticky scroll",
-        epic="EP-16", sprint="SP-17", status="Ready",
+        epic="EP-16", sprint="SP-17", status="Done",
         goal="Every repaint site in the console preserves keyboard context: focus is restored by control identity (never by ordinal), the thread pane gets the same protection the transcript got, and a repaint never resets the scroll position of a user who scrolled up.",
         read_first=[
             ("Console client render paths", "src/console/app.js"),
@@ -4534,6 +4595,10 @@ TASKS += [
             "Focus restore is by control identity, never by ordinal; a control whose identity vanished drops focus to the container or body, never a wrong sibling — browser-proven for transcript, thread pane, and channels.",
             "A scrolled-up user's position survives a repaint; a user at the bottom stays pinned.",
             "The repaint regression test covers transcript, thread pane, and channels, and the thread keyboard suite stays green.",
+        ],
+        evidence=[
+            ("identity-keyed focus restore across all three repaint sites; sticky-bottom scroll", "src/console/app.js"),
+            ("Commit", "75efdd3"),
         ],
         out_of_scope=["Reworking the roving-tabindex model itself — only the restore identity changes."],
     ),

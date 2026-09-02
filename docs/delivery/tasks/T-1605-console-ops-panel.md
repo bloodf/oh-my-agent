@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -31,7 +31,7 @@ Kill, inject, logs tail, and budget bump are operable from the authenticated con
 | Path | Role | Note |
 |---|---|---|
 | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | Exposes operator-authenticated kill, inject, logs-tail, and budget-bump routes. |
-| `src/daemon/operations.ts` (to be created) | New | Kill, inject, logs-tail, and bump extracted from the socket handler bodies into one module over DaemonContext; socket handlers and the console API both consume it, so the destructive paths have a single source of truth. |
+| [`src/daemon/operations.ts`](../../../src/daemon/operations.ts) | New | Kill, inject, logs-tail, and bump extracted from the socket handler bodies into one module over DaemonContext; socket handlers and the console API both consume it, so the destructive paths have a single source of truth. |
 | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Edited | The four handler bodies become thin delegations to operations.ts. |
 | [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | Wires operations.ts into both the socket context and the console API options at the single construction site. |
 | [`src/console/app.js`](../../../src/console/app.js) | Edited | Runs all four operations, including subtree confirmation and typed-event refresh. |
@@ -49,8 +49,16 @@ Kill, inject, logs tail, and budget bump are operable from the authenticated con
 
 ## Acceptance
 
-- [ ] Browser-proven kill with subtree confirmation, inject, a logs tail view, and a bump with the new budget visible.
-- [ ] All four pass the console's accessibility assertions keyboard-only.
+- [x] Browser-proven kill with subtree confirmation, inject, a logs tail view, and a bump with the new budget visible.
+- [x] All four pass the console's accessibility assertions keyboard-only.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| operations.ts single source for kill/inject/logs/bump across socket and console | [`src/daemon/operations.ts`](../../../src/daemon/operations.ts) |
+| ops panel with subtree-naming dialog, keyboard-only | [`src/console/index.html`](../../../src/console/index.html) |
+| Commit | `cec420c` |
 
 ## Out of scope
 

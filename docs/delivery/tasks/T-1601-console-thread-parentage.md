@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -41,9 +41,17 @@ A thread reply posted from the console lands in the thread because parentId flow
 
 ## Acceptance
 
-- [ ] Browser-proven: a keyboard reply from the thread pane renders inside the pane and never as a root.
-- [ ] The stale workaround comment in the thread keyboard test is gone.
-- [ ] Store validation errors surface as a 400 the client renders.
+- [x] Browser-proven: a keyboard reply from the thread pane renders inside the pane and never as a root.
+- [x] The stale workaround comment in the thread keyboard test is gone.
+- [x] Store validation errors surface as a 400 the client renders.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| parentId threaded console POST -> supervisor -> store with 400 mapping; 500s no longer laundered | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) |
+| keyboard reply renders inside the thread pane | [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) |
+| Commit | `de5bc1f` |
 
 ## Out of scope
 

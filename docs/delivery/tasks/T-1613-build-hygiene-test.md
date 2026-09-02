@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -32,7 +32,14 @@ A machine-enforced manifest test preserves the dependency-free console by reject
 
 ## Acceptance
 
-- [ ] The test fails when a fixture manifest adds a build script or a dependency.
+- [x] The test fails when a fixture manifest adds a build script or a dependency.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| package.json build-script/dependency guard with poisoned-fixture self-tests | [`tests/build-hygiene.test.ts`](../../../tests/build-hygiene.test.ts) |
+| Commit | `ee8aed5` |
 
 ## Out of scope
 

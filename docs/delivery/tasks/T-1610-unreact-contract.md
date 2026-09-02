@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -32,7 +32,14 @@ chat_unreact mirrors chat_react by rejecting an unknown messageId as INVALID_PAR
 
 ## Acceptance
 
-- [ ] Unknown messageId returns INVALID_PARAMS with data.field === 'messageId'; the parallel react path's test pattern is reused.
+- [x] Unknown messageId returns INVALID_PARAMS with data.field === 'messageId'; the parallel react path's test pattern is reused.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| unreact mirrors react: unknown messageId is INVALID_PARAMS | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) |
+| Commit | `fb88dfe` |
 
 ## Out of scope
 

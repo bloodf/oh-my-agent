@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -43,8 +43,16 @@ ADR-015 is implemented with typed agent, definition, membership, channel, budget
 
 ## Acceptance
 
-- [ ] Browser-proven: an agent spawn or kill updates the agents panel without a manual refresh; a schedule arm/fire and a budget park emit frames the client handles.
-- [ ] Every frame type has a schema assertion.
+- [x] Browser-proven: an agent spawn or kill updates the agents panel without a manual refresh; a schedule arm/fire and a budget park emit frames the client handles.
+- [x] Every frame type has a schema assertion.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| typed frames through a load-bearing redirectable publish sink | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) |
+| production wiring via construction-order closure | [`src/daemon/main.ts`](../../../src/daemon/main.ts) |
+| Commit | `75efdd3, cec420c` |
 
 ## Out of scope
 

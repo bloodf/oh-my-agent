@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-16](../epics/EP-16-fidelity-and-hardening.md) | [SP-17](../sprints/SP-17-fidelity-and-hardening.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -31,7 +31,14 @@ The security ticket's unproven identity bullets become mutation-verified tests f
 
 ## Acceptance
 
-- [ ] Both tests fail when the dispatcher's workerMethods/authorize entries are removed, mutation-verified.
+- [x] Both tests fail when the dispatcher's workerMethods/authorize entries are removed, mutation-verified.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| worker inject FORBIDDEN + task_handoff worker flow, mutation-verified | [`tests/socket-identity.test.ts`](../../../tests/socket-identity.test.ts) |
+| Commit | `4e0410e` |
 
 ## Out of scope
 
