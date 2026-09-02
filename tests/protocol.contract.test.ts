@@ -116,6 +116,7 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 				author: "reviewer",
 				body: "looks good",
 				createdAt: 1750000000000,
+				mentions: ["agent"],
 				parentId: null,
 				threadRootId: null,
 				replyCount: 0,
@@ -588,6 +589,7 @@ describe("result validation", () => {
 			["threadRootId", "1"],
 			["replyCount", "0"],
 			["reactions", [{ actor: "reviewer", emoji: 1 }]],
+			["mentions", ["agent", 1]],
 		] as const) {
 			const result = METHODS.chat_wait.validateResult({
 				messages: [{ ...legacy, [field]: value }],

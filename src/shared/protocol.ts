@@ -76,6 +76,7 @@ export interface RoomMessage {
 	author: string;
 	body: string;
 	createdAt: number;
+	mentions?: string[];
 	parentId?: number | null;
 	threadRootId?: number | null;
 	replyCount?: number;

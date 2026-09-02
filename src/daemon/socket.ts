@@ -336,9 +336,9 @@ type Handlers = {
 	[K in MethodName]: (params: ParamsByMethod[K]) => Promise<unknown>;
 };
 
-/** Preserve additive threading and reaction metadata on the wire. */
+/** Preserve additive mention, threading, and reaction metadata on the wire. */
 function toWireMessage(message: StoredMessage): RoomMessage {
-	return {
+	const wire: RoomMessage = {
 		id: message.id,
 		room: message.room,
 		author: message.author,
@@ -349,6 +349,8 @@ function toWireMessage(message: StoredMessage): RoomMessage {
 		replyCount: message.replyCount,
 		reactions: message.reactions,
 	};
+	if (message.mentions.length > 0) wire.mentions = message.mentions;
+	return wire;
 }
 
 /**

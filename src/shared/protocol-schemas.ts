@@ -143,6 +143,13 @@ function explainRoomMessage(value: unknown): string | null {
 	if (typeof value.author !== "string") return "author";
 	if (typeof value.body !== "string") return "body";
 	if (!isFiniteNumber(value.createdAt)) return "createdAt";
+	if (value.mentions !== undefined) {
+		if (!Array.isArray(value.mentions)) return "mentions";
+		const invalid = value.mentions.findIndex(
+			(mention) => typeof mention !== "string",
+		);
+		if (invalid !== -1) return `mentions[${invalid}]`;
+	}
 	if (
 		value.parentId !== undefined &&
 		value.parentId !== null &&

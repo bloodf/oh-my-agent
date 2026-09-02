@@ -30,6 +30,7 @@
 	 * @property {string} author
 	 * @property {string} body
 	 * @property {number} createdAt
+	 * @property {string[]} [mentions]
 	 * @property {number | null} parentId
 	 * @property {number | null} threadRootId
 	 * @property {number} replyCount
@@ -393,6 +394,13 @@
 		}
 
 		row.append(renderBody(message.body));
+
+		for (const mention of message.mentions ?? []) {
+			const chip = document.createElement("span");
+			chip.className = "mention";
+			chip.textContent = `@${mention}`;
+			row.append(chip);
+		}
 
 		const chips = document.createElement("span");
 		chips.className = "reactions";

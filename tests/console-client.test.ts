@@ -256,6 +256,12 @@ const renderedMessages = (page: Page): Promise<string[]> =>
 		nodes.map((n) => (n.textContent ?? "").trim()),
 	);
 
+/** Mention affordances rendered for one message: agent names include `@`. */
+const renderedMentions = (page: Page, messageId: number): Promise<string[]> =>
+	page.$$eval(`#messages .message[data-id="${messageId}"] .mention`, (nodes) =>
+		nodes.map((n) => (n.textContent ?? "").trim()),
+	);
+
 /** Reaction chips rendered for one message: raw text like "👀 2". */
 const renderedReactions = (page: Page, messageId: number): Promise<string[]> =>
 	page.$$eval(`#messages .message[data-id="${messageId}"] .reaction`, (nodes) =>
@@ -691,6 +697,27 @@ describe("rendering", () => {
 			expect(errors).toEqual([]);
 		},
 	);
+
+	browserTest("message mentions render as distinct affordances", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const posted = await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "Please review this, @agent.",
+		});
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+
+		await waitFor(
+			"mention affordance",
+			() => renderedMentions(page, posted.id),
+			(mentions) => mentions.includes("@agent"),
+		);
+		expect(await renderedMentions(page, posted.id)).toEqual(["@agent"]);
+		expect(errors).toEqual([]);
+	});
 });
 
 // ── Posting ─────────────────────────────────────────────────────────────────
