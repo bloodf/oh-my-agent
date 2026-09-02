@@ -478,6 +478,16 @@
 				id: row instanceof HTMLElement ? (row.dataset.account ?? "") : "",
 			};
 		}
+		// The definition opener repeats once per agent in the rail, and it
+		// carries its own agent name — the row it sits in is `.agent`, not an
+		// ops row, so it needs its own case. Without one, `captureFocus`
+		// returns null for it and the editor's Escape has nothing to restore.
+		if (element.classList.contains("definition-edit")) {
+			return {
+				kind: "definition-edit",
+				id: element.dataset.name ?? "",
+			};
+		}
 		return null;
 	};
 
@@ -685,6 +695,11 @@
 	 * @param {{ name: string, state: string, rooms?: string[] }[]} agents
 	 */
 	const renderAgents = (agents) => {
+		// The rail repaints on every agent/definition/membership frame, and it
+		// now holds a keyboard-reachable control per row. Without capture and
+		// restore, a frame landing while the operator is on an "Edit" button
+		// drops focus to `<body>` mid-keystroke (T-1615).
+		const focusKey = captureFocus(agentsEl);
 		agentsEl.replaceChildren();
 		for (const agent of agents) {
 			const item = document.createElement("li");
@@ -711,8 +726,27 @@
 				});
 				item.append(toggle);
 			}
+
+			// The definition opener, per agent. In the agents rail rather than
+			// the ops panel: editing a definition is authoring, not an
+			// operation on a running worker — a stopped agent is just as
+			// editable as a live one.
+			const edit = document.createElement("button");
+			edit.type = "button";
+			edit.className = "definition-edit";
+			edit.dataset.name = agent.name;
+			// The name rides in the accessible name: a rail of identical
+			// "Edit" buttons tells a screen-reader user nothing about which
+			// definition they are about to open.
+			edit.setAttribute("aria-label", `Edit ${agent.name}'s definition`);
+			edit.textContent = "Edit";
+			edit.addEventListener("click", () => {
+				void openDefinition(agent.name);
+			});
+			item.append(edit);
 			agentsEl.append(item);
 		}
+		restoreFocus(agentsEl, focusKey);
 	};
 
 	// ── Operations (T-1605) ──────────────────────────────────────────────────
@@ -1052,6 +1086,161 @@
 		killDialog.returnValue = "";
 		closeKillDialog();
 		if (confirmed && target !== null) void killAgent(target, keepChildren);
+	});
+
+	// ── Definition editing (T-1607) ──────────────────────────────────────────
+
+	const definitionDialog = /** @type {HTMLDialogElement} */ (
+		el("definition-dialog")
+	);
+	const definitionHeadingEl = el("definition-heading");
+	const definitionPathEl = el("definition-path");
+	const definitionChangesEl = /** @type {HTMLTextAreaElement} */ (
+		el("definition-changes")
+	);
+	const definitionErrorEl = el("definition-error");
+
+	/** Which agent the open editor is about; `null` when closed. */
+	let definitionTarget = /** @type {string | null} */ (null);
+
+	/**
+	 * Where focus was when the editor opened, as a T-1615 identity key.
+	 *
+	 * A key rather than the node: the agents rail repaints on every frame the
+	 * daemon sends, so the button that opened the dialog is very likely a
+	 * different element by the time it closes. Restoring the held node would
+	 * focus something detached — a silent no-op that drops the keyboard back
+	 * to `<body>`.
+	 */
+	let definitionOpenerKey = /** @type {FocusKey | null} */ (null);
+
+	/**
+	 * Load one agent's definition and open the editor on it.
+	 *
+	 * The document is fetched rather than reconstructed from the agents list:
+	 * that list carries only name, state, and rooms, so composing an edit
+	 * from it would silently drop every other field the daemon holds.
+	 * @param {string} name
+	 */
+	const openDefinition = async (name) => {
+		definitionErrorEl.textContent = "";
+		definitionOpenerKey = captureFocus(agentsEl);
+		/** @type {any} */
+		let loaded;
+		try {
+			loaded = await api(`/api/agents/${encodeURIComponent(name)}/definition`);
+		} catch (error) {
+			// Rendered where the operator is looking — beside the agent rail,
+			// not inside a dialog that never opened.
+			showOpsError(error);
+			definitionOpenerKey = null;
+			return;
+		}
+		definitionTarget = name;
+		definitionHeadingEl.textContent = `Edit ${name}'s definition`;
+		definitionPathEl.textContent = String(loaded.filePath ?? "");
+		// `name` is stripped rather than shown: it identifies the file, the
+		// PATCH refuses to rename through an edit, and `definition_update`
+		// forbids it in `changes` outright. Pre-filling it would present an
+		// immutable field as editable — a change the operator makes and the
+		// daemon silently ignores, which is exactly the class of lie this
+		// editor's strict validation exists to prevent.
+		const { name: _immutable, ...editable } = loaded.definition;
+		// Pretty-printed: this is a document a human edits by hand, and a
+		// single-line JSON blob is not one.
+		definitionChangesEl.value = JSON.stringify(editable, null, 2);
+		definitionDialog.showModal();
+		// `showModal` focuses the first tabbable node; here that is the
+		// textarea, which is where the work happens.
+		definitionChangesEl.focus();
+	};
+
+	/** Close the editor and hand focus back to the control that opened it. */
+	const closeDefinitionDialog = () => {
+		definitionTarget = null;
+		if (definitionDialog.open) definitionDialog.close();
+		const key = definitionOpenerKey;
+		definitionOpenerKey = null;
+		// Through the shared restore, which re-resolves by identity: a
+		// keyboard operator who dismissed the editor must not be dropped to
+		// `<body>` and have to tab in from the top again.
+		restoreFocus(agentsEl, key);
+	};
+
+	/**
+	 * Save the edited changes document through the definition PATCH.
+	 *
+	 * Two refusals are possible and both stay in the dialog with the text
+	 * intact: malformed JSON, which is caught here, and a document the
+	 * daemon's strict parser rejects — an unknown key, a room without its
+	 * sigil — whose message is the daemon's own words. Losing an operator's
+	 * edit to a validation failure is how editors get hated.
+	 * @param {string} name
+	 * @param {string} raw
+	 */
+	const saveDefinition = async (name, raw) => {
+		definitionErrorEl.textContent = "";
+		/** @type {unknown} */
+		let changes;
+		try {
+			changes = JSON.parse(raw);
+		} catch (error) {
+			definitionErrorEl.textContent = `Changes must be a JSON object: ${
+				error instanceof Error ? error.message : String(error)
+			}`;
+			return false;
+		}
+		if (
+			typeof changes !== "object" ||
+			changes === null ||
+			Array.isArray(changes)
+		) {
+			definitionErrorEl.textContent = "Changes must be a JSON object.";
+			return false;
+		}
+
+		/** @type {any} */
+		let result;
+		try {
+			result = await api(`/api/agents/${encodeURIComponent(name)}`, {
+				method: "PATCH",
+				body: changes,
+			});
+		} catch (error) {
+			definitionErrorEl.textContent =
+				error instanceof Error ? error.message : String(error);
+			return false;
+		}
+		// The daemon's own words about what took effect: a policy edit waits
+		// for the next turn's rebuild, a rooms-only edit is already live.
+		noticeEl.textContent =
+			typeof result.notice === "string" ? result.notice : "";
+		await refreshAgents();
+		return true;
+	};
+
+	el("definition-cancel").addEventListener("click", () => {
+		closeDefinitionDialog();
+	});
+
+	// The form is `method="dialog"`, so an unprevented submit would close the
+	// dialog before the save resolves — and a refused edit has to keep the
+	// operator's text, and the parser's message, on screen. The default is
+	// prevented here and the dialog closes only once the daemon accepted it.
+	el("definition-form").addEventListener("submit", (event) => {
+		event.preventDefault();
+		const name = definitionTarget;
+		if (name === null) return;
+		void saveDefinition(name, definitionChangesEl.value).then((saved) => {
+			if (saved) closeDefinitionDialog();
+		});
+	});
+
+	// Escape closes a <dialog> natively; this returns focus to the opener on
+	// that path too, rather than leaving the keyboard wherever the browser
+	// dropped it when the modal went away.
+	definitionDialog.addEventListener("close", () => {
+		if (definitionTarget !== null) closeDefinitionDialog();
 	});
 
 	// ── First-class states ───────────────────────────────────────────────────

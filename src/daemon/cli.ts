@@ -13,15 +13,20 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { getAgentDir } from "@oh-my-pi/pi-utils";
+import { getAgentDir, parseFrontmatter } from "@oh-my-pi/pi-utils";
+
+import { parsePeerDefinition } from "../shared/agent-definition";
 
 import type {
+	AgentCreateResult,
 	AgentSpawnResult,
 	AgentStatus,
 	AgentStatusResult,
 	BumpResult,
 	ChatReadResult,
 	DaemonStopResult,
+	DefinitionGetResult,
+	DefinitionUpdateResult,
 	InjectResult,
 	JsonRpcFailure,
 	JsonRpcSuccess,
@@ -85,6 +90,9 @@ never JSON.
 Verbs:
   status
   agents
+  agent create <name> <file|->
+  agent show <name>
+  agent edit <name> <file|->
   spawn <name> [--parent <parent>]
   kill <name> [--keep-children]
   rooms
@@ -397,6 +405,235 @@ async function bump(
 	output(io, result, json, `${result.account}\t${result.budgetUsd}`);
 }
 
+/**
+ * How a document reaches `agent create`/`agent edit`: a file path, or `-` for
+ * stdin.
+ *
+ * The source is always an explicit argument rather than "a path, or stdin when
+ * omitted". A verb whose arity decides whether it blocks on a pipe hangs when
+ * an operator simply forgot the filename, and a script that meant to pass a
+ * path but computed an empty one would silently wait forever instead of
+ * failing. `-` is the shell's own convention for "this one is the pipe".
+ */
+async function readDocument(
+	source: string,
+	readStdin: () => Promise<string>,
+): Promise<string> {
+	if (source === "-") return await readStdin();
+	try {
+		return await readFile(source, "utf8");
+	} catch (error) {
+		// A missing or unreadable file is something the operator got wrong,
+		// not a daemon fault: it exits 4 with the path, not a stack trace.
+		throw new DaemonRpcError(
+			`cannot read ${source}: ${(error as NodeJS.ErrnoException).code ?? String(error)}`,
+		);
+	}
+}
+
+/**
+ * Fields `agent_create` accepts, exactly as `METHODS.agent_create` declares
+ * them.
+ *
+ * A whitelist over what the *document declared*, not over the parsed result:
+ * `parsePeerDefinition` fills in defaults and spreads native runtime keys, so
+ * a projection of the parse alone cannot tell an operator's `tools:` from a
+ * default the parser supplied. Anything authored and outside this list is
+ * refused rather than dropped — see `agentCreate`.
+ */
+const CREATE_KEYS = [
+	"name",
+	"description",
+	"model",
+	"rooms",
+	"wake",
+	"autonomy",
+	"spawns",
+	"body",
+] as const;
+
+/**
+ * `agent create <name> <file|->` — author a definition without starting it.
+ *
+ * The document is parsed here as well as by the daemon, for one reason: a
+ * local parse gives the operator the parser's own words with the file still in
+ * front of them, and the daemon's parse remains the gate that decides what
+ * lands on disk. Creation never spawns; `spawn` is the second, deliberate call.
+ *
+ * `agent_create`'s params are a strict subset of what a definition file may
+ * declare, so a document carrying `tools:`, `schedules:`, or any other valid
+ * field the method cannot send is refused rather than quietly created without
+ * it. Writing a peer that differs from the document the operator handed over,
+ * and reporting success for it, is the same silent lie the console's PATCH
+ * validation exists to prevent. Those fields are reachable through
+ * `agent edit`, which speaks `definition_update` and carries all of them.
+ */
+async function agentCreate(
+	client: DaemonClient,
+	args: string[],
+	io: CliIo,
+	json: boolean,
+	readStdin: () => Promise<string>,
+): Promise<void> {
+	if (args.length !== 4) throw new UsageError();
+	const name = requireArg(args, 2);
+	const content = await readDocument(requireArg(args, 3), readStdin);
+
+	let parsed: Record<string, unknown>;
+	try {
+		parsed = parsePeerDefinition(`${name}.md`, content) as unknown as Record<
+			string,
+			unknown
+		>;
+	} catch (error) {
+		throw new DaemonRpcError(
+			error instanceof Error ? error.message : String(error),
+		);
+	}
+
+	// Refused, never silently overridden: the argument names the file the
+	// daemon will write, so a document whose frontmatter disagrees would
+	// otherwise create a peer under a name the operator never typed — and
+	// whose own `name:` field then contradicts its filename on the next boot.
+	if (parsed.name !== name) {
+		throw new DaemonRpcError(
+			`document declares name ${JSON.stringify(parsed.name)}, but the command names ${JSON.stringify(name)}`,
+		);
+	}
+
+	// What the document actually declared, before the parser's defaults and
+	// native spread. `parsePeerDefinition` returns `tools` and friends whether
+	// or not anyone wrote them, so the parse alone cannot distinguish an
+	// operator's field from a default — and refusing on the parse would reject
+	// every document, while projecting it drops real authorship.
+	const { frontmatter } = parseFrontmatter(content, {
+		location: `${name}.md`,
+		level: "fatal",
+		normalize: true,
+	});
+	const unsupported = Object.keys(frontmatter).filter(
+		(key) => !CREATE_KEYS.includes(key as (typeof CREATE_KEYS)[number]),
+	);
+	if (unsupported.length > 0) {
+		throw new DaemonRpcError(
+			`agent create cannot send ${unsupported.sort().join(", ")}; ` +
+				`remove ${unsupported.length === 1 ? "it" : "them"} and set ${unsupported.length === 1 ? "it" : "them"} with \`agent edit\` once the peer exists`,
+		);
+	}
+
+	const params: Record<string, unknown> = {};
+	for (const key of CREATE_KEYS) {
+		const value = parsed[key];
+		if (value !== undefined) params[key] = value;
+	}
+
+	const result = await client.call<AgentCreateResult>("agent_create", params);
+	output(
+		io,
+		result,
+		json,
+		`${result.name}\t${result.created ? "created" : "unchanged"}`,
+	);
+}
+
+/** `agent show <name>` — the definition the daemon holds, and its path. */
+async function agentShow(
+	client: DaemonClient,
+	args: string[],
+	io: CliIo,
+	json: boolean,
+): Promise<void> {
+	if (args.length !== 3) throw new UsageError();
+	const name = requireArg(args, 2);
+	const result = await client.call<DefinitionGetResult>("definition_get", {
+		name,
+	});
+	// The path, then the definition as JSON. Not a re-rendered markdown
+	// document: `agent edit` consumes a changes object, so emitting something
+	// that looked like a definition file would suggest a round-trip this pair
+	// of verbs does not have. `--json` carries the whole protocol result.
+	output(
+		io,
+		result,
+		json,
+		`${result.filePath}\n${JSON.stringify(result.definition, null, 2)}`,
+	);
+}
+
+/**
+ * `agent edit <name> <file|->` — apply a changes document.
+ *
+ * A JSON object of changed fields rather than a whole re-rendered definition:
+ * `definition_update` takes exactly that, so this maps to the protocol without
+ * inventing a second merge rule that could disagree with the daemon's. The
+ * daemon's validator refuses unknown keys, and its message is passed through
+ * verbatim — a typo'd field must not be silently dropped.
+ */
+async function agentEdit(
+	client: DaemonClient,
+	args: string[],
+	io: CliIo,
+	json: boolean,
+	readStdin: () => Promise<string>,
+): Promise<void> {
+	if (args.length !== 4) throw new UsageError();
+	const name = requireArg(args, 2);
+	const raw = await readDocument(requireArg(args, 3), readStdin);
+
+	let changes: unknown;
+	try {
+		changes = JSON.parse(raw);
+	} catch (error) {
+		throw new DaemonRpcError(
+			`changes must be a JSON object: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+	if (
+		typeof changes !== "object" ||
+		changes === null ||
+		Array.isArray(changes)
+	) {
+		throw new DaemonRpcError("changes must be a JSON object");
+	}
+
+	const result = await client.call<DefinitionUpdateResult>(
+		"definition_update",
+		{ name, changes },
+	);
+	// `rebuildRequired` is the operator-facing half of the answer: a policy
+	// edit is absorbed by the next delivery's rebuild, a rooms-only edit is
+	// already live, and saying which happened is the whole point of the field.
+	output(
+		io,
+		result,
+		json,
+		`${result.name}\t${result.rebuildRequired ? "rebuild-required" : "live"}`,
+	);
+}
+
+/** `agent <create|show|edit>` — definition authoring over the frozen methods. */
+async function agent(
+	client: DaemonClient,
+	args: string[],
+	io: CliIo,
+	json: boolean,
+	readStdin: () => Promise<string>,
+): Promise<void> {
+	switch (args[1]) {
+		case "create":
+			await agentCreate(client, args, io, json, readStdin);
+			return;
+		case "show":
+			await agentShow(client, args, io, json);
+			return;
+		case "edit":
+			await agentEdit(client, args, io, json, readStdin);
+			return;
+		default:
+			throw new UsageError();
+	}
+}
+
 async function consoleUrl(
 	client: DaemonClient,
 	stateDir: string,
@@ -521,7 +758,17 @@ async function daemon(
 
 export async function runCli(
 	argv: string[],
-	opts: { agentDir?: string; io?: CliIo } = {},
+	opts: {
+		agentDir?: string;
+		io?: CliIo;
+		/**
+		 * How `-` reads a document. A seam rather than a direct
+		 * `Bun.stdin.text()` call so a test can drive `agent create -` many
+		 * times in one process: a real stdin is consumed once, and every
+		 * later read would block on a stream nobody is writing to.
+		 */
+		readStdin?: () => Promise<string>;
+	} = {},
 ): Promise<number> {
 	// Flags are parsed only up to the first positional: a literal "--json"
 	// inside a message body is payload, not a flag. "--" ends flag parsing
@@ -556,6 +803,7 @@ export async function runCli(
 		stdout: (text: string) => process.stdout.write(text),
 		stderr: (text: string) => process.stderr.write(text),
 	};
+	const readStdin = opts.readStdin ?? (() => Bun.stdin.text());
 
 	try {
 		switch (args[0]) {
@@ -566,6 +814,9 @@ export async function runCli(
 			case "agents":
 				if (args.length !== 1) throw new UsageError();
 				await agents(client, io, json);
+				return 0;
+			case "agent":
+				await agent(client, args, io, json, readStdin);
 				return 0;
 			case "spawn":
 				await spawn(client, args, io, json);

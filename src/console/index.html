@@ -92,6 +92,39 @@
 				</div>
 			</form>
 		</dialog>
+		<!--
+			Definition editor (T-1607). A <dialog> for the same reasons the
+			kill confirmation is one: modality, Escape, and focus trapping are
+			the platform's behavior rather than something app.js reimplements.
+			The textarea holds a changes document — the JSON object the
+			daemon's definition_update takes — so the console and the control
+			socket speak one vocabulary, and the strict parser's refusal is
+			rendered inline beneath it rather than swallowed.
+		-->
+		<dialog id="definition-dialog" aria-labelledby="definition-heading">
+			<form method="dialog" id="definition-form">
+				<h2 id="definition-heading">Edit definition</h2>
+				<p id="definition-path"></p>
+				<label id="definition-changes-label" for="definition-changes">
+					Changes, as a JSON object
+				</label>
+				<textarea
+					id="definition-changes"
+					rows="14"
+					spellcheck="false"
+					autocomplete="off"
+					aria-label="Definition changes as JSON"
+					aria-describedby="definition-error"
+				></textarea>
+				<p id="definition-error" role="status"></p>
+				<div class="definition-actions">
+					<button type="submit" id="definition-save" value="save">
+						Save
+					</button>
+					<button type="button" id="definition-cancel">Cancel</button>
+				</div>
+			</form>
+		</dialog>
 		<main id="main">
 			<!-- biome-ignore lint/a11y/noInteractiveElementToNoninteractiveRole: explicit banner role is asserted by tests; header nested in main has no implicit banner semantics -->
 			<header id="current-channel" role="banner"></header>

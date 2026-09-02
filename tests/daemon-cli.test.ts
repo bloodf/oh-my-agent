@@ -22,6 +22,7 @@ import type { WorkerFactory } from "../src/daemon/main";
 import { bootDaemon } from "../src/daemon/main";
 import type {
 	AgentStatusResult,
+	DefinitionGetResult,
 	JsonRpcFailure,
 	JsonRpcSuccess,
 	KillResult,
@@ -397,6 +398,201 @@ describe("omp-agent CLI — every verb round-trips against a real daemon", () =>
 	});
 });
 
+// ── Definition authoring (T-1607) ────────────────────────────────────────────
+
+/** A definition document the parser accepts, as an operator would author it. */
+function definitionDoc(
+	name: string,
+	frontmatter: Record<string, unknown> = {},
+): string {
+	const yaml = Object.entries({
+		name,
+		description: `${name} peer.`,
+		spawns: ["scout"],
+		...frontmatter,
+	})
+		.map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+		.join("\n");
+	return `---\n${yaml}\n---\nYou are ${name}.\n`;
+}
+
+describe("omp-agent CLI — agent create/show/edit round-trip", () => {
+	test("create writes a definition, show reads it, edit rewrites it", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		await bootWith(agentDir);
+
+		// `create` from a file path: the operator authors a document and the
+		// daemon's own parser is the gate, exactly as `agent_create` requires.
+		const docPath = join(agentDir, "researcher.md");
+		await writeFile(docPath, definitionDoc("researcher"), "utf8");
+		const created = await runCapture(
+			["agent", "create", "researcher", docPath],
+			{
+				agentDir,
+			},
+		);
+		expect(created.code).toBe(0);
+		expect(created.io.stderr).toBe("");
+		expect(created.io.stdout).toContain("researcher");
+
+		// `show` reads it back through definition_get.
+		const shown = await runCapture(["agent", "show", "researcher"], {
+			agentDir,
+		});
+		expect(shown.code).toBe(0);
+		expect(shown.io.stderr).toBe("");
+		expect(shown.io.stdout).toContain("researcher peer.");
+
+		// `edit` applies a changes document through definition_update.
+		const changesPath = join(agentDir, "changes.json");
+		await writeFile(
+			changesPath,
+			JSON.stringify({ description: "Now researches harder." }),
+			"utf8",
+		);
+		const edited = await runCapture(
+			["agent", "edit", "researcher", changesPath],
+			{ agentDir },
+		);
+		expect(edited.code).toBe(0);
+		expect(edited.io.stderr).toBe("");
+
+		// The durable proof: the edit is on disk, not merely acknowledged.
+		const after = await runCapture(["--json", "agent", "show", "researcher"], {
+			agentDir,
+		});
+		const parsed = JSON.parse(after.io.stdout) as DefinitionGetResult;
+		expect(parsed.definition.description).toBe("Now researches harder.");
+	});
+
+	test("create and edit read the document from stdin when given `-`", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		await bootWith(agentDir);
+
+		const created = await runCapture(["agent", "create", "piped", "-"], {
+			agentDir,
+			stdin: definitionDoc("piped"),
+		});
+		expect(created.code).toBe(0);
+		expect(created.io.stderr).toBe("");
+
+		const edited = await runCapture(["agent", "edit", "piped", "-"], {
+			agentDir,
+			stdin: JSON.stringify({ description: "Edited over a pipe." }),
+		});
+		expect(edited.code).toBe(0);
+		expect(edited.io.stderr).toBe("");
+
+		const shown = await runCapture(["--json", "agent", "show", "piped"], {
+			agentDir,
+		});
+		const parsed = JSON.parse(shown.io.stdout) as DefinitionGetResult;
+		expect(parsed.definition.description).toBe("Edited over a pipe.");
+	});
+
+	test("a definition the parser refuses exits 4 with the parser's own words", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		await bootWith(agentDir);
+
+		const docPath = join(agentDir, "broken.md");
+		// A room id without its sigil: the parser's message names the rule.
+		await writeFile(
+			docPath,
+			definitionDoc("broken", { rooms: ["reviews"] }),
+			"utf8",
+		);
+		const result = await runCapture(["agent", "create", "broken", docPath], {
+			agentDir,
+		});
+
+		expect(result.code).toBe(4);
+		expect(result.io.stdout).toBe("");
+		expect(result.io.stderr).toContain('rooms entries must start with "#"');
+
+		// Nothing was written: `show` still cannot find it.
+		const shown = await runCapture(["agent", "show", "broken"], { agentDir });
+		expect(shown.code).toBe(4);
+		expect(shown.io.stderr).toContain("Unknown peer: broken");
+	});
+
+	test("an unknown key in a changes document is refused, not silently dropped", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		await bootWith(agentDir);
+
+		const changesPath = join(agentDir, "typo.json");
+		await writeFile(changesPath, JSON.stringify({ nonsense: true }), "utf8");
+		const result = await runCapture(
+			["agent", "edit", "reviewer", changesPath],
+			{ agentDir },
+		);
+
+		expect(result.code).toBe(4);
+		expect(result.io.stdout).toBe("");
+		expect(result.io.stderr).toContain("nonsense");
+	});
+
+	test("a create document carrying fields agent_create cannot send is refused", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		await bootWith(agentDir);
+
+		// `tools`, `thinkingLevel`, `workspace`, and `schedules` all parse —
+		// they are perfectly valid in a definition file — but `agent_create`'s
+		// params carry none of them. Projecting the create keys and sending
+		// the rest nowhere would write a peer that differs from the document
+		// the operator handed over, and report success for it.
+		const docPath = join(agentDir, "rich.md");
+		await writeFile(
+			docPath,
+			definitionDoc("rich", {
+				tools: ["read"],
+				thinkingLevel: "high",
+			}),
+			"utf8",
+		);
+		const result = await runCapture(["agent", "create", "rich", docPath], {
+			agentDir,
+		});
+
+		expect(result.code).toBe(4);
+		expect(result.io.stdout).toBe("");
+		// The refusal names what it could not carry, so the operator can
+		// remove those fields and re-run, or author them with `agent edit`.
+		expect(result.io.stderr).toContain("tools");
+		expect(result.io.stderr).toContain("thinkingLevel");
+
+		// Refused means nothing was written.
+		const shown = await runCapture(["agent", "show", "rich"], { agentDir });
+		expect(shown.code).toBe(4);
+		expect(shown.io.stderr).toContain("Unknown peer: rich");
+	});
+
+	test("bad agent args exit 2 (usage)", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		await bootWith(agentDir);
+
+		for (const argv of [
+			["agent"],
+			["agent", "wobble"],
+			["agent", "create"],
+			["agent", "create", "reviewer"],
+			["agent", "show"],
+			["agent", "show", "reviewer", "extra"],
+			["agent", "edit"],
+			["agent", "edit", "reviewer"],
+		] as const) {
+			const result = await runCapture([...argv], { agentDir });
+			expect(result.code).toBe(2);
+			expect(result.io.stderr).toContain("Usage:");
+		}
+	});
+});
+
 // ── Daemon down ──────────────────────────────────────────────────────────────
 
 describe("omp-agent CLI — daemon down", () => {
@@ -461,6 +657,30 @@ describe("omp-agent CLI — --json matches the protocol result", () => {
 			argv: () => ["inject", "reviewer", "wake up via json"],
 		},
 		{ label: "bump", argv: () => ["bump", "anthropic", "50"] },
+		// T-1607's verbs join the same contract rather than getting their own
+		// bespoke JSON assertions: the rule is every verb, and a new verb that
+		// opted out is exactly the gap this parametrization exists to close.
+		{
+			label: "agent create",
+			argv: async ({ agentDir }: BootResult) => {
+				const path = join(agentDir, "created-via-json.md");
+				await writeFile(path, definitionDoc("jsonmade"), "utf8");
+				return ["agent", "create", "jsonmade", path];
+			},
+		},
+		{ label: "agent show", argv: () => ["agent", "show", "reviewer"] },
+		{
+			label: "agent edit",
+			argv: async ({ agentDir }: BootResult) => {
+				const path = join(agentDir, "changes-via-json.json");
+				await writeFile(
+					path,
+					JSON.stringify({ description: "Edited via json." }),
+					"utf8",
+				);
+				return ["agent", "edit", "reviewer", path];
+			},
+		},
 	])("$label --json parses as JSON", async ({ argv }) => {
 		const agentDir = await tempAgentDir();
 		await writePeer(agentDir, "parent", { model: "openai/gpt-4.1" });
@@ -985,7 +1205,7 @@ interface RunResult {
 
 async function runCapture(
 	argv: string[],
-	opts: { agentDir: string },
+	opts: { agentDir: string; stdin?: string },
 ): Promise<RunResult> {
 	let stdout = "";
 	let stderr = "";
@@ -1008,6 +1228,13 @@ async function runCapture(
 	const code = await runCli(argv, {
 		agentDir: opts.agentDir,
 		io: { stdout: writeOut, stderr: writeErr },
+		// Injected rather than written onto `process.stdin`: the suite runs
+		// many CLI invocations in one process, and a real stdin would be
+		// consumed once and leave every later `-` read hanging on a closed
+		// stream.
+		...(opts.stdin === undefined
+			? {}
+			: { readStdin: async () => opts.stdin as string }),
 	});
 	return { code, io };
 }

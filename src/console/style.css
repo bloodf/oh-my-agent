@@ -634,6 +634,110 @@ button {
 	color: var(--danger);
 }
 
+/* ── Definition editor (T-1607) ────────────────────────────────────────── */
+
+.definition-edit {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-1);
+	background: none;
+	color: var(--text-muted);
+	padding: 0 var(--space-1);
+	cursor: pointer;
+	font-size: var(--font-size-0);
+}
+
+.definition-edit:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+#definition-dialog {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-2);
+	background: var(--surface-1);
+	color: var(--text-primary);
+	padding: var(--space-3);
+	width: 44rem;
+	max-width: 90vw;
+}
+
+#definition-dialog::backdrop {
+	background: var(--surface-0);
+	opacity: 0.7;
+}
+
+#definition-path {
+	color: var(--text-muted);
+	font-size: var(--font-size-0);
+	margin: var(--space-0) 0 var(--space-1);
+	/* A path is one token; wrapping it mid-segment makes it unreadable. */
+	overflow-wrap: anywhere;
+}
+
+#definition-changes-label {
+	display: block;
+	color: var(--text-muted);
+	font-size: var(--font-size-0);
+	margin-bottom: var(--space-0);
+}
+
+#definition-changes {
+	width: 100%;
+	box-sizing: border-box;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-1);
+	background: var(--surface-0);
+	color: var(--text-primary);
+	padding: var(--space-1);
+	font: inherit;
+	font-size: var(--font-size-0);
+	line-height: var(--line-normal);
+	/* The textarea's own `pre-wrap` default is kept deliberately: a long
+	   `body` line stays visible by wrapping instead of scrolling out of the
+	   dialog sideways. (A `white-space` declaration here would also trip the
+	   style scan's raw-color pattern on the literal "white".) */
+	overflow: auto;
+	resize: vertical;
+}
+
+#definition-changes:focus {
+	outline: 1px solid var(--accent);
+	border-color: var(--accent);
+}
+
+/* The strict parser's refusal, in the operator's line of sight. */
+#definition-error {
+	color: var(--danger);
+	font-size: var(--font-size-0);
+	margin: var(--space-1) 0 0;
+	overflow-wrap: anywhere;
+}
+
+#definition-error:empty {
+	display: none;
+}
+
+.definition-actions {
+	display: flex;
+	gap: var(--space-1);
+	margin-top: var(--space-3);
+}
+
+#definition-save,
+#definition-cancel {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-1);
+	background: none;
+	color: var(--text-muted);
+	padding: var(--space-0) var(--space-2);
+	cursor: pointer;
+}
+
+#definition-save {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
 /* ── Reduced motion ────────────────────────────────────────────────────── */
 
 /* Hover fades and any future animation are decoration, not meaning. */

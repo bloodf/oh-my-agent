@@ -55,6 +55,7 @@ import {
 	type PeerDefinition,
 } from "../shared/agent-definition";
 import type { AgentStatus, RoomInfo } from "../shared/protocol";
+import { METHODS } from "../shared/protocol-schemas";
 import type { Operations } from "./operations";
 import { HUMAN_AUTHOR, InvalidParamsError } from "./operations";
 import type { PeerDefinitionFields, PeerStore } from "./peer-store";
@@ -73,6 +74,41 @@ const DEFAULT_POLL_INTERVAL_MS = 250;
  * traffic; without a bound, every tick would re-read a room's whole history.
  */
 const REACTION_WINDOW = 200;
+
+/**
+ * Definition fields the definition read answers, mirroring the control
+ * socket's own wire whitelist.
+ *
+ * A parsed definition carries native runtime keys — `systemPrompt`, `source` —
+ * that `PeerDefinition` omits from its declared shape and that
+ * `METHODS.definition_get` rejects. `sha256` and `filePath` are dropped for
+ * the same reason the socket drops them: the digest is derived, and the path
+ * rides beside the definition rather than inside it.
+ */
+const WIRE_DEFINITION_FIELDS = [
+	"name",
+	"description",
+	"model",
+	"tools",
+	"spawns",
+	"thinkingLevel",
+	"output",
+	"blocking",
+	"autoloadSkills",
+	"readSummarize",
+	"prewalk",
+	"advisor",
+	"body",
+	"workspace",
+	"rooms",
+	"wake",
+	"autonomy",
+	"sandbox",
+	"mcps",
+	"skills",
+	"schedules",
+	"automations",
+] as const;
 
 /**
  * A frame pushed to a connected console (ADR-015).
@@ -994,6 +1030,40 @@ export async function startConsoleApi(
 			});
 		}
 
+		// A definition read, beside the PATCH that edits one. Without it the
+		// console could write a definition but never load the one it was
+		// about to overwrite, so an edit had to be composed blind.
+		const definitionRoute = /^\/api\/agents\/([^/]+)\/definition$/.exec(path);
+		if (definitionRoute?.[1] !== undefined) {
+			const peerName = decodeURIComponent(definitionRoute[1]);
+			if (request.method !== "GET") {
+				return fail(405, "method_not_allowed", `${request.method} not allowed`);
+			}
+			const definition = await peerStore.get(peerName);
+			if (!definition) {
+				return fail(404, "not_found", `Unknown agent: ${peerName}`);
+			}
+			// A whitelist, not `fieldsOf`: a parsed definition also carries the
+			// native runtime keys `systemPrompt` and `source`, which are not
+			// part of the wire shape and which `METHODS.definition_get`
+			// rejects. Answering them here would publish a definition the
+			// daemon's own validator refuses, and hand the editor fields no
+			// PATCH can ever send back.
+			const wire: Record<string, unknown> = {};
+			const source = definition as unknown as Record<string, unknown>;
+			for (const key of WIRE_DEFINITION_FIELDS) {
+				const value = source[key];
+				if (value !== undefined) wire[key] = value;
+			}
+			// `filePath`, keyed as `definition_get` keys it, so the console and
+			// the control socket describe a definition with one vocabulary.
+			return json(200, {
+				name: definition.name,
+				filePath: definition.filePath ?? "",
+				definition: wire,
+			});
+		}
+
 		const agentRoute = /^\/api\/agents\/([^/]+)$/.exec(path);
 		if (agentRoute?.[1] !== undefined) {
 			const peerName = decodeURIComponent(agentRoute[1]);
@@ -1010,8 +1080,37 @@ export async function startConsoleApi(
 				return fail(400, "invalid_request", "Body is not valid JSON");
 			}
 			// The name identifies the file; renaming through an edit would
-			// orphan the old definition and the running peer with it.
-			const { name: _ignored, ...patch } = payload;
+			// orphan the old definition and the running peer with it. A
+			// *matching* name is tolerated and dropped — a client that echoes
+			// back what it read is not asking for anything — but a different
+			// one is refused rather than ignored, because silently keeping the
+			// old name answers 200 to a rename that never happened.
+			const { name: submitted, ...patch } = payload;
+			if (submitted !== undefined && submitted !== definition.name) {
+				return fail(
+					400,
+					"invalid_request",
+					`An agent cannot be renamed through an edit: ${definition.name} is immutable`,
+				);
+			}
+
+			// Validated against the very contract the control socket enforces,
+			// before anything is merged. `renderPeerDefinition` emits a fixed
+			// key list, so a field the schema does not know is dropped on the
+			// way to disk and the write succeeds — answering 200 for an edit
+			// that never happened. A typo'd key has to be refused here, in the
+			// operator's own words, exactly as `definition_update` refuses it.
+			const validated = METHODS.definition_update.validateParams({
+				name: definition.name,
+				changes: patch,
+			});
+			if (!validated.ok) {
+				return fail(
+					400,
+					"invalid_definition",
+					`${validated.field}: ${validated.message}`,
+				);
+			}
 
 			let result: { definition: PeerDefinition; rebuildRequired: boolean };
 			try {

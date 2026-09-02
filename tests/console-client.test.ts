@@ -1174,6 +1174,152 @@ describe("creation forms", () => {
 	);
 });
 
+// ── Definition editing (T-1607) ──────────────────────────────────────────────
+
+describe("definition editor", () => {
+	browserTest(
+		"an agent's definition opens, edits, and saves from the console",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.registerPeer("reviewer", ["#reviews"]);
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector('.definition-edit[data-name="reviewer"]');
+
+			// Open the editor from the agent's own row.
+			await clickInPage(page, '.definition-edit[data-name="reviewer"]');
+
+			// The editor is loaded from the server, not invented in the page:
+			// the fields the daemon holds are what appears.
+			const loaded = await waitFor(
+				"definition loaded into the editor",
+				() =>
+					page
+						.$eval(
+							"#definition-changes",
+							(node) => (node as unknown as { value: string }).value,
+						)
+						.catch(() => ""),
+				(text) => text.includes("reviewer peer for console client tests."),
+			);
+			expect(loaded).toContain("description");
+
+			// Edit one field and save.
+			await page.$eval("#definition-changes", (node) => {
+				(node as unknown as { value: string }).value = JSON.stringify(
+					{ description: "Edited from the console." },
+					null,
+					2,
+				);
+			});
+			await clickInPage(page, "#definition-save");
+
+			// The durable proof: a cold peer store reads the edit back.
+			await waitFor(
+				"definition rewritten on disk",
+				async () =>
+					(await h.reload()).definitions.find((d) => d.name === "reviewer")
+						?.description ?? "",
+				(description) => description === "Edited from the console.",
+			);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"an unknown key is refused inline and nothing is written",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.registerPeer("reviewer", ["#reviews"]);
+			const before =
+				(await h.reload()).definitions.find((d) => d.name === "reviewer")
+					?.description ?? "";
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector('.definition-edit[data-name="reviewer"]');
+			await clickInPage(page, '.definition-edit[data-name="reviewer"]');
+			await page.waitForSelector("#definition-changes");
+
+			// A top-level key the strict parser does not know. This is the
+			// case the render path silently drops, so a console that reported
+			// success here would tell the operator an edit landed that never
+			// existed on disk.
+			await page.$eval("#definition-changes", (node) => {
+				(node as unknown as { value: string }).value = '{ "nonsense": true }';
+			});
+			await clickInPage(page, "#definition-save");
+
+			const shown = await waitFor(
+				"strict parser error rendered inline",
+				() =>
+					page
+						.$eval("#definition-error", (node) => node.textContent ?? "")
+						.catch(() => ""),
+				(text) => text.includes("nonsense"),
+			);
+			expect(shown).toContain("nonsense");
+
+			// Refused, not partially applied: the definition on disk is intact.
+			expect(
+				(await h.reload()).definitions.find((d) => d.name === "reviewer")
+					?.description,
+			).toBe(before);
+			expect(
+				errors.filter((entry) => !entry.startsWith("Failed to load resource")),
+			).toEqual([]);
+		},
+	);
+
+	browserTest("the definition editor is keyboard-operable", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		await h.registerPeer("reviewer", ["#reviews"]);
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector('.definition-edit[data-name="reviewer"]');
+
+		// Opened by keyboard, and focus follows into the editor rather than
+		// being left behind on a control the panel now covers.
+		await focusInPage(page, '.definition-edit[data-name="reviewer"]');
+		await page.keyboard.press("Enter");
+		const inside = await waitFor(
+			"focus inside the editor",
+			() => focusProbe(page),
+			(probe) => (probe?.id ?? "") === "definition-changes",
+		);
+		expect(inside?.id).toBe("definition-changes");
+
+		// The editor is a labelled dialog, so a screen-reader user is told
+		// which agent they are editing rather than "dialog".
+		const dialog = await page.$eval("#definition-dialog", (node) => ({
+			label: node.getAttribute("aria-label") ?? "",
+			labelledBy: node.getAttribute("aria-labelledby") ?? "",
+		}));
+		expect(dialog.label.length + dialog.labelledBy.length).toBeGreaterThan(0);
+		expect(
+			await page.$eval(
+				"#definition-changes",
+				(node) => node.getAttribute("aria-label") ?? "",
+			),
+		).not.toBe("");
+
+		// Escape closes it and hands the keyboard back to the opener (T-1615).
+		await page.keyboard.press("Escape");
+		const returned = await waitFor(
+			"focus back on the opener",
+			() => focusProbe(page),
+			(probe) => (probe?.className ?? "").includes("definition-edit"),
+		);
+		expect(returned?.className).toContain("definition-edit");
+		expect(errors).toEqual([]);
+	});
+});
+
 // ── Membership controls ──────────────────────────────────────────────────────
 
 describe("membership controls", () => {
