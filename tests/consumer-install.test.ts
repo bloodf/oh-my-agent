@@ -283,35 +283,121 @@ async function smokeConsumer(
 	}
 }
 
-test("packed package installs with fresh npm and bun peers and boots through each installed shim", async () => {
+async function smokeOmpInstall(root: string, tarball: string): Promise<void> {
+	const home = join(root, "omp-home");
+	const agentDir = join(home, ".omp", "agent");
+	const cacheDir = join(root, "omp-cache");
+	await Promise.all([
+		mkdir(agentDir, { recursive: true }),
+		mkdir(cacheDir, { recursive: true }),
+	]);
+
+	const path = process.env.PATH;
+	if (!path)
+		throw new Error("PATH is required to locate the installed OMP executable");
+	const omp = Bun.which("omp");
+	if (!omp)
+		throw new Error("current installed OMP executable not found on PATH");
+	const env: Record<string, string> = {
+		PATH: path,
+		HOME: home,
+		XDG_CONFIG_HOME: join(home, ".config"),
+		XDG_DATA_HOME: join(home, ".local", "share"),
+		XDG_STATE_HOME: join(home, ".local", "state"),
+		XDG_CACHE_HOME: join(home, ".cache"),
+		PI_CODING_AGENT_DIR: agentDir,
+		OMP_AUTH_BROKER_URL: "",
+		OMP_AUTH_BROKER_TOKEN: "",
+		OMA_CONSOLE: "1",
+		OMA_REMOTE: "0",
+		NO_COLOR: "1",
+		npm_config_cache: cacheDir,
+		npm_config_registry: "https://registry.npmjs.org/",
+		BUN_INSTALL_CACHE_DIR: cacheDir,
+	};
+	const installSpec = `@bloodf/oh-my-agent@file:${tarball}`;
+	const install = await run([omp, "install", installSpec], home, env);
+	expectSuccess(install, `omp install ${installSpec}`);
+
+	const pluginsDir = join(home, ".omp", "plugins");
+	const packageRoot = join(
+		pluginsDir,
+		"node_modules",
+		"@bloodf",
+		"oh-my-agent",
+	);
+	const shim = join(pluginsDir, "node_modules", ".bin", "omp-agent");
+	expect(
+		existsSync(join(packageRoot, "package.json")),
+		"OMP-installed package missing",
+	).toBe(true);
+	expect(existsSync(shim), "OMP-installed shim missing").toBe(true);
+
+	const stateDir = join(agentDir, "oh-my-agent");
+	const pidPath = join(stateDir, "daemon.pid");
+	const socketPath = join(stateDir, "daemon.sock");
+	let launcher: Bun.Subprocess | undefined;
+	let daemonPid: number | undefined;
+	try {
+		const down = await run([shim, "status"], home, env, 30_000);
+		expect(down.code, `OMP-installed shim down status: ${down.stderr}`).toBe(3);
+
+		launcher = await startDaemonViaShim(shim, home, env, pidPath, socketPath);
+		daemonPid = Number((await readFile(pidPath, "utf8")).trim());
+
+		const status = await run([shim, "status"], home, env, 30_000);
+		expectSuccess(status, "OMP-installed shim daemon status");
+		expect(status.stdout).toContain("protocol:");
+
+		const consoleResult = await run([shim, "console"], home, env, 30_000);
+		expectSuccess(consoleResult, "OMP-installed shim console");
+		const consoleUrl = new URL(consoleResult.stdout.trim());
+		expect(consoleUrl.protocol).toBe("http:");
+		expect(["127.0.0.1", "localhost"]).toContain(consoleUrl.hostname);
+		expect(Number(consoleUrl.port)).toBeGreaterThan(0);
+		const shell = await fetch(consoleUrl);
+		expect(shell.ok, `console shell returned ${shell.status}`).toBe(true);
+	} finally {
+		try {
+			await stopDaemon(shim, home, env, pidPath, daemonPid);
+			expect(existsSync(pidPath), "OMP daemon pidfile leaked").toBe(false);
+			expect(existsSync(socketPath), "OMP daemon socket leaked").toBe(false);
+		} finally {
+			launcher?.kill();
+			if (launcher) await launcher.exited;
+		}
+	}
+}
+
+test("packed package installs with fresh npm, bun, and OMP consumers and boots through each installed shim", async () => {
 	const root = await mkdtemp(join(tmpdir(), "oma-consumer-install-"));
 	try {
-		const packDir = join(root, "pack");
-		await mkdir(packDir);
-		const pack = await run(
-			[
-				"npm",
-				"pack",
-				"--json",
-				"--ignore-scripts",
-				"--pack-destination",
-				packDir,
-			],
-			PACKAGE_ROOT,
-			{
-				PATH: process.env.PATH ?? "",
-				HOME: join(root, "pack-home"),
-				NO_COLOR: "1",
-			},
-		);
-		expectSuccess(pack, "npm pack");
-		const [{ filename }] = JSON.parse(pack.stdout) as [{ filename: string }];
-		const tarball = join(packDir, filename);
-		expect(existsSync(tarball), "npm pack tarball missing").toBe(true);
+		let tarball: string;
+		const suppliedTarball = process.env.OMA_PACKED_TARBALL;
+		if (suppliedTarball) {
+			tarball = resolve(suppliedTarball);
+		} else {
+			const packDir = join(root, "pack");
+			await mkdir(packDir);
+			const pack = await run(
+				["npm", "pack", "--json", "--silent", "--pack-destination", packDir],
+				PACKAGE_ROOT,
+				{
+					PATH: process.env.PATH ?? "",
+					HOME: join(root, "pack-home"),
+					NO_COLOR: "1",
+				},
+			);
+			expectSuccess(pack, "npm pack");
+			const [{ filename }] = JSON.parse(pack.stdout) as [{ filename: string }];
+			tarball = join(packDir, filename);
+		}
+		expect(existsSync(tarball), `${tarball} missing`).toBe(true);
 
 		for (const installer of ["npm", "bun"] as const) {
 			await smokeConsumer(root, tarball, installer);
 		}
+		await smokeOmpInstall(root, tarball);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

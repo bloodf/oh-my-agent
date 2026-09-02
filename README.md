@@ -11,7 +11,23 @@ Versioning and release policy lives in [`CHANGELOG.md`](CHANGELOG.md).
 - Bun ≥ 1.3.14
 - [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` ≥ 18.0.7) as a peer
 
+## Install and quickstart
+
+**Availability:** `@bloodf/oh-my-agent` is not published yet. After its first npm release, these five commands install the released package into OMP, load its extension, start the daemon, verify its status, and print the browser-console URL:
+
+```sh
+omp install @bloodf/oh-my-agent
+omp
+~/.omp/plugins/node_modules/.bin/omp-agent daemon
+~/.omp/plugins/node_modules/.bin/omp-agent status
+~/.omp/plugins/node_modules/.bin/omp-agent console
+```
+
+Exit the OMP TUI after confirming the `oh-my-agent` extension loaded, then run the remaining commands. Open the URL printed by the final command.
+
 ## Development
+
+For development from a source checkout:
 
 ```sh
 bun install
