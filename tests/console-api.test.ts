@@ -571,10 +571,10 @@ describe("messages", () => {
 	});
 });
 
-// ── Author forgery ───────────────────────────────────────────────────────────
+// ── Attribution coercion (ADR-014) ───────────────────────────────────────────
 
-describe("agent-authored writes", () => {
-	test("a write claiming a registered peer as author is refused", async () => {
+describe("console attribution", () => {
+	test("a write claiming a registered peer as author is stored as the human", async () => {
 		const h = await harness();
 		const stub = await h.registerPeer("reviewer", ["#reviews"]);
 
@@ -583,17 +583,23 @@ describe("agent-authored writes", () => {
 			body: JSON.stringify({ author: "reviewer", body: "I approve myself." }),
 		});
 
-		expect(res.status).toBe(403);
-		const body = (await res.json()) as { error: { code: string } };
-		expect(body.error.code).toBe("forbidden_author");
+		// ADR-014: the field stays accepted for compatibility and is ignored,
+		// so an old client keeps working and forgery is simply not honored.
+		expect(res.status).toBe(201);
+		expect(await res.json()).toMatchObject({
+			message: { author: "@you", body: "I approve myself." },
+		});
 
-		// Refused means refused: nothing landed, and nobody was woken.
 		const messages = await h.rooms.listMessages("#reviews", {});
-		expect(messages).toHaveLength(0);
-		expect(stub.prompts).toHaveLength(0);
+		expect(messages).toMatchObject([
+			{ author: "@you", body: "I approve myself." },
+		]);
+		// The post still goes through the supervisor, so the peer is woken as
+		// the human's message — not silently dropped.
+		expect(stub.prompts).toHaveLength(1);
 	});
 
-	test("a write claiming an @-namespaced peer as author is refused", async () => {
+	test("a write claiming an @-namespaced peer as author is stored as the human", async () => {
 		const h = await harness();
 		await h.registerPeer("reviewer", ["#reviews"]);
 
@@ -602,7 +608,30 @@ describe("agent-authored writes", () => {
 			body: JSON.stringify({ author: "@reviewer", body: "Also me." }),
 		});
 
-		expect(res.status).toBe(403);
+		expect(res.status).toBe(201);
+		expect(await h.rooms.listMessages("#reviews", {})).toMatchObject([
+			{ author: "@you", body: "Also me." },
+		]);
+	});
+
+	test("coercion is universal: an unregistered identity is stored as the human", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+
+		// No peer by this name exists, so an allow-list check would let it
+		// through. Attribution is derived server-side, not filtered.
+		const res = await h.call("/api/channels/%23reviews/messages", {
+			method: "POST",
+			body: JSON.stringify({ author: "@ceo", body: "Ship it." }),
+		});
+
+		expect(res.status).toBe(201);
+		expect(await res.json()).toMatchObject({
+			message: { author: "@you", body: "Ship it." },
+		});
+		expect(await h.rooms.listMessages("#reviews", {})).toMatchObject([
+			{ author: "@you", body: "Ship it." },
+		]);
 	});
 
 	test("the human author is accepted", async () => {
@@ -615,6 +644,9 @@ describe("agent-authored writes", () => {
 		});
 
 		expect(res.status).toBe(201);
+		expect(await h.rooms.listMessages("#reviews", {})).toMatchObject([
+			{ author: "@you", body: "Human here." },
+		]);
 	});
 });
 
@@ -780,7 +812,7 @@ describe("reactions", () => {
 		]);
 	});
 
-	test("a toggle naming a registered peer as actor is refused", async () => {
+	test("a toggle naming a registered peer as actor reacts as the human", async () => {
 		const h = await harness();
 		await h.registerPeer("reviewer", ["#reviews"]);
 		const posted = await h.rooms.post({
@@ -794,15 +826,35 @@ describe("reactions", () => {
 			body: JSON.stringify({ actor: "reviewer", emoji: "👀" }),
 		});
 
-		// Reactions carry agent status (ADR-009); a forgeable actor lets the
-		// console claim an agent picked work up.
-		expect(res.status).toBe(403);
-		expect((await res.json()) as { error: { code: string } }).toMatchObject({
-			error: { code: "forbidden_author" },
+		// Reactions carry agent status (ADR-009); a forgeable actor would let
+		// the console claim an agent picked work up, so the actor is derived
+		// server-side rather than taken from the body (ADR-014).
+		expect(res.status).toBe(200);
+		expect(await res.json()).toMatchObject({ actor: "@you", reacted: true });
+		expect((await h.rooms.listMessages("#reviews", {}))[0]?.reactions).toEqual([
+			{ actor: "@you", emoji: "👀" },
+		]);
+	});
+
+	test("reaction coercion is universal: an unregistered actor becomes the human", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const posted = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Nobody by that name.",
 		});
-		expect((await h.rooms.listMessages("#reviews", {}))[0]?.reactions).toEqual(
-			[],
-		);
+
+		const res = await h.call(`/api/messages/${posted.id}/reactions/toggle`, {
+			method: "POST",
+			body: JSON.stringify({ actor: "@ceo", emoji: "👀" }),
+		});
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toMatchObject({ actor: "@you" });
+		expect((await h.rooms.listMessages("#reviews", {}))[0]?.reactions).toEqual([
+			{ actor: "@you", emoji: "👀" },
+		]);
 	});
 
 	test("a toggle on an unknown message is a 404", async () => {

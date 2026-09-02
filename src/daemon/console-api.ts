@@ -23,12 +23,12 @@
  * unauthenticated cannot become a fingerprinting oracle for a running daemon —
  * and that check precedes the WebSocket handshake too. Static paths are an
  * allow-list resolved and contained under `src/console/`, so no request target
- * reaches a file beside it. A write naming a registered peer as its author — or
- * as a reaction's actor, since reactions carry agent status — is refused 403 and
- * lands nothing: the console acts as the human, and a forgeable identity makes a
- * transcript worthless. A definition the parser refuses is answered 400 with the
- * parser's own message and no file is written. Errors are
- * `{error: {code, message}}` throughout.
+ * reaches a file beside it. A write's author — or a reaction's actor, since
+ * reactions carry agent status — is derived server-side as the human and any
+ * client-supplied value is ignored and logged (ADR-014): the console acts as
+ * the human, and a forgeable identity makes a transcript worthless. A
+ * definition the parser refuses is answered 400 with the parser's own message
+ * and no file is written. Errors are `{error: {code, message}}` throughout.
  *
  * Performance: reads are one store query each. A definition write is one
  * render, one parse, and one atomic rename. The live feed polls only while at
@@ -78,7 +78,7 @@ export interface StartConsoleApiOptions {
 	rooms: RoomStore;
 	/** Every post goes through this; writing to the store leaves peers deaf. */
 	supervisor: Supervisor;
-	/** Registered peers by name, so an agent-authored write can be refused. */
+	/** Registered peers by name, for status reads and membership edits. */
 	peers: Map<string, PeerRecord>;
 	/** Rooms the daemon knows about; the store does not enumerate them. */
 	knownRooms: Map<string, RoomInfo>;
@@ -318,15 +318,32 @@ export async function startConsoleApi(
 	// ── Writes ────────────────────────────────────────────────────────────────
 
 	/**
-	 * Whether this author names an agent. Both the bare peer name and the
-	 * `@`-namespaced form are refused; `@you` is the human and is not a peer.
+	 * ADR-014: the console speaks as the human, full stop.
+	 *
+	 * Attribution is derived server-side rather than filtered against the peer
+	 * index, because an allow-list only refuses names it happens to recognise —
+	 * a stopped agent, a peer this daemon never registered, or a plain `@ceo`
+	 * would all pass. Deriving it makes the guarantee unconditional.
+	 *
+	 * The wire keeps accepting `author`/`actor` for compatibility and ignores
+	 * them rather than answering 400: refusing would break every client still
+	 * sending the human label it was told to send, and there is nothing for a
+	 * caller to fix, since the only value it was ever allowed to send is the
+	 * one used anyway. A supplied value that is not already the human is
+	 * logged, so an ignored forgery leaves a trace — quoted, because the value
+	 * is caller-controlled and an embedded newline would otherwise forge a
+	 * second log line.
 	 */
-	const namesAgent = (author: string): boolean => {
-		const bare = author.replace(/^@+/, "").toLowerCase();
-		for (const name of peers.keys()) {
-			if (name.toLowerCase() === bare) return true;
+	const humanAuthor = (supplied: unknown, what: string): string => {
+		if (typeof supplied === "string" && supplied.trim().length > 0) {
+			const claimed = supplied.trim();
+			if (claimed !== HUMAN_AUTHOR) {
+				process.stderr.write(
+					`console: ignoring client-supplied ${what} ${JSON.stringify(claimed)}; recording ${HUMAN_AUTHOR}\n`,
+				);
+			}
 		}
-		return false;
+		return HUMAN_AUTHOR;
 	};
 
 	/**
@@ -675,19 +692,9 @@ export async function startConsoleApi(
 			if (emoji.length === 0) {
 				return fail(400, "invalid_request", "An emoji is required");
 			}
-			const actor =
-				typeof payload.actor === "string" && payload.actor.trim().length > 0
-					? payload.actor.trim()
-					: HUMAN_AUTHOR;
-			if (namesAgent(actor)) {
-				// Reactions carry agent status (ADR-009), so a forgeable actor
-				// lets the console claim an agent picked work up.
-				return fail(
-					403,
-					"forbidden_author",
-					`The console reacts as the human; ${actor} is an agent`,
-				);
-			}
+			// Reactions carry agent status (ADR-009), so a forgeable actor would
+			// let the console claim an agent picked work up.
+			const actor = humanAuthor(payload.actor, "reaction actor");
 
 			const messageId = Number(reactionRoute[1]);
 			const message = await findMessage(messageId);
@@ -785,17 +792,7 @@ export async function startConsoleApi(
 				if (body.length === 0) {
 					return fail(400, "invalid_request", "Message body is required");
 				}
-				const author =
-					typeof fields.author === "string" && fields.author.trim().length > 0
-						? fields.author.trim()
-						: HUMAN_AUTHOR;
-				if (namesAgent(author)) {
-					return fail(
-						403,
-						"forbidden_author",
-						`The console posts as the human; ${author} is an agent`,
-					);
-				}
+				const author = humanAuthor(fields.author, "post author");
 				return json(201, { message: await post(roomId, author, body) });
 			}
 

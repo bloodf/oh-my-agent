@@ -17,7 +17,10 @@
  * Failure modes: protocol problems are data, never exceptions. Missing or
  * unknown bearers answer `unauthorized`; authenticated callers outside their
  * method scope answer `forbidden`; malformed calls retain their declared
- * protocol errors. Handler throws answer an internal error.
+ * protocol errors. Handler throws answer an internal error. A worker's chat
+ * attribution is overwritten with its own identity rather than refused
+ * (ADR-014); the operator token keeps full override as the human's privileged
+ * credential.
  *
  * Performance: one dispatch per request. `chat_wait` parks on a polling loop;
  * reaction state checks scan public message listings across known rooms.
@@ -878,6 +881,41 @@ export async function startControlSocket(
 		logs_tail: true,
 	};
 
+	/**
+	 * The attribution field each chat method carries, and the reason ADR-014
+	 * has anything to bind: these are the only worker-callable methods whose
+	 * payload names who spoke.
+	 */
+	const ATTRIBUTION_FIELD: Partial<Record<MethodName, "author" | "actor">> = {
+		chat_send: "author",
+		chat_react: "actor",
+		chat_unreact: "actor",
+	};
+
+	/**
+	 * ADR-014: a worker speaks as itself, whatever its payload claims.
+	 *
+	 * Overwritten rather than refused. A worker is an LLM that will mislabel
+	 * itself sooner or later, and answering `forbidden` turns that into a retry
+	 * loop it cannot reason its way out of; rewriting is lossless — the room
+	 * still gets the message, under the only name the connection can prove.
+	 *
+	 * The operator token is exempt, and that exemption is the privilege: it is
+	 * the human's own credential, it is what `inject` and `rooms_post` already
+	 * use to speak for a peer, and there is no identity above it to bind it to.
+	 */
+	const bindAttribution = (
+		identity: ControlIdentity,
+		method: MethodName,
+		params: unknown,
+	): unknown => {
+		if (identity.kind === "operator") return params;
+		const field = ATTRIBUTION_FIELD[method];
+		if (field === undefined) return params;
+		if (typeof params !== "object" || params === null) return params;
+		return { ...params, [field]: identity.peerName };
+	};
+
 	const authorize = (
 		id: JsonRpcId,
 		identity: ControlIdentity,
@@ -967,6 +1005,11 @@ export async function startControlSocket(
 		const denied = authorize(id, identity, name, value);
 		if (denied) return Response.json(denied);
 
+		// Bound after authorization, so a refusal is still decided on what the
+		// caller actually sent, and before the handler, so nothing downstream
+		// ever sees the claimed attribution.
+		const bound = bindAttribution(identity, name, value);
+
 		// One cast, at the validated boundary: `METHODS[name]` has just proven the
 		// payload matches this method's params, but the registry's return type is
 		// method-agnostic, so the compiler cannot pair them up on its own.
@@ -976,7 +1019,7 @@ export async function startControlSocket(
 			return Response.json({
 				jsonrpc: "2.0",
 				id,
-				result: await handler(value),
+				result: await handler(bound),
 			});
 		} catch (error) {
 			if (error instanceof InvalidParamsError) {
