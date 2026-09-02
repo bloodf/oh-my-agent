@@ -379,7 +379,6 @@ async function consoleUrl(
 	client: DaemonClient,
 	stateDir: string,
 	io: CliIo,
-	json: boolean,
 ): Promise<void> {
 	let url: string;
 	try {
@@ -397,7 +396,7 @@ async function consoleUrl(
 			"oh-my-agent console is disabled for this daemon.",
 		);
 	}
-	output(io, { url }, json, url);
+	write(io, true, url, false);
 }
 
 export async function runCli(
@@ -471,7 +470,7 @@ export async function runCli(
 				return 0;
 			case "console":
 				if (args.length !== 1) throw new UsageError();
-				await consoleUrl(client, stateDir, io, json);
+				await consoleUrl(client, stateDir, io);
 				return 0;
 			default:
 				throw new UsageError();

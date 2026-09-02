@@ -27,7 +27,6 @@ import type {
 	KillResult,
 	MethodName,
 	SchedulesListResult,
-	StatusResult,
 } from "../src/shared/protocol";
 import { METHODS } from "../src/shared/protocol-schemas";
 import { controlCall, operatorToken } from "./fixtures/control-client";
@@ -337,38 +336,81 @@ describe("omp-agent CLI — daemon down", () => {
 // ── --json shape ─────────────────────────────────────────────────────────────
 
 describe("omp-agent CLI — --json matches the protocol result", () => {
-	test("status --json is the protocol result verbatim", async () => {
+	const scheduleArgs = async (
+		{ handle }: BootResult,
+		enabled: "on" | "off",
+	): Promise<string[]> => {
+		const listed = await call<SchedulesListResult>(
+			handle.socketPath,
+			"schedules_list",
+		);
+		const id = listed.schedules[0]?.id;
+		if (id === undefined) throw new Error("expected a schedule fixture");
+		return ["schedule", id, enabled];
+	};
+
+	test.each([
+		{ label: "status", argv: () => ["status"] },
+		{ label: "agents", argv: () => ["agents"] },
+		{
+			label: "spawn",
+			argv: () => ["spawn", "reviewer", "--parent", "parent"],
+		},
+		{ label: "kill", argv: () => ["kill", "reviewer"] },
+		{ label: "rooms", argv: () => ["rooms"] },
+		{
+			label: "rooms post",
+			argv: () => ["rooms", "post", "#reviews", "hello via json"],
+		},
+		{
+			label: "rooms read",
+			argv: () => ["rooms", "read", "#reviews"],
+		},
+		{ label: "schedule", argv: () => ["schedule"] },
+		{
+			label: "schedule on",
+			argv: (boot: BootResult) => scheduleArgs(boot, "on"),
+		},
+		{
+			label: "schedule off",
+			argv: (boot: BootResult) => scheduleArgs(boot, "off"),
+		},
+		{ label: "logs", argv: () => ["logs", "reviewer"] },
+		{
+			label: "inject",
+			argv: () => ["inject", "reviewer", "wake up via json"],
+		},
+		{ label: "bump", argv: () => ["bump", "anthropic", "50"] },
+	])("$label --json parses as JSON", async ({ argv }) => {
 		const agentDir = await tempAgentDir();
-		await writePeer(agentDir, "reviewer");
-		const { handle } = await bootWith(agentDir);
+		await writePeer(agentDir, "parent", { model: "openai/gpt-4.1" });
+		await writePeer(agentDir, "reviewer", {
+			model: "anthropic/claude-sonnet-4-5",
+			autonomy: { budgetUsd: 10 },
+			schedules: [{ cron: "0 9 * * *", prompt: "morning", room: "#reviews" }],
+		});
+		const boot = await bootWith(agentDir);
 
-		const cli = await runCapture(["--json", "status"], { agentDir });
-		expect(cli.code).toBe(0);
-		const parsed = JSON.parse(cli.io.stdout) as StatusResult;
-		expect(parsed.protocolVersion).toBeGreaterThan(0);
-		expect(parsed.uptimeMs).toBeGreaterThanOrEqual(0);
-		expect(Array.isArray(parsed.agents)).toBe(true);
+		const result = await runCapture(["--json", ...(await argv(boot))], {
+			agentDir,
+		});
 
-		const raw = await call<StatusResult>(handle.socketPath, "status");
-		expect(parsed.protocolVersion).toBe(raw.protocolVersion);
-		expect(parsed.agents.length).toBe(raw.agents.length);
+		expect(result.code).toBe(0);
+		expect(result.io.stderr).toBe("");
+		expect(() => JSON.parse(result.io.stdout)).not.toThrow();
 	});
 
-	test("agents --json is the protocol result verbatim", async () => {
+	test("console --json is the sole exception and prints the raw URL", async () => {
 		const agentDir = await tempAgentDir();
-		await writePeer(agentDir, "reviewer");
-		const { handle } = await bootWith(agentDir);
+		await bootWith(agentDir);
+		const urlPath = join(agentDir, "oh-my-agent", "console-url");
+		const url = (await Bun.file(urlPath).text()).trim();
 
-		const cli = await runCapture(["--json", "agents"], { agentDir });
-		expect(cli.code).toBe(0);
-		const parsed = JSON.parse(cli.io.stdout) as AgentStatusResult;
-		const raw = await call<AgentStatusResult>(
-			handle.socketPath,
-			"agent_status",
-		);
-		expect(parsed.agents.map((a) => a.name).sort()).toEqual(
-			raw.agents.map((a) => a.name).sort(),
-		);
+		const result = await runCapture(["--json", "console"], { agentDir });
+
+		expect(result.code).toBe(0);
+		expect(result.io.stdout.trim()).toBe(url);
+		expect(() => JSON.parse(result.io.stdout)).toThrow();
 	});
 });
 
@@ -538,13 +580,6 @@ describe("omp-agent CLI — console verb", () => {
 			(await Bun.file(urlPath).text()).trim(),
 		);
 		expect(result.io.stderr).toBe("");
-
-		// --json emits {"url": "<the url>"} because there is no protocol
-		// method for it; the deviation is called out in the task report.
-		const j = await runCapture(["--json", "console"], { agentDir });
-		expect(j.code).toBe(0);
-		const parsed = JSON.parse(j.io.stdout) as { url: string };
-		expect(parsed.url).toBe((await Bun.file(urlPath).text()).trim());
 	});
 
 	test("close removes the persisted URL", async () => {
