@@ -519,6 +519,36 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		Bun.ServerWebSocket<WebSocket>
 	>();
 	const pendingFrames = new Map<WebSocket, string[]>();
+	/**
+	 * Feed and fault control for the proxy, so a test can be deaf on purpose.
+	 *
+	 * `dropMessages` severs exactly one path — the live `message` frame — while
+	 * leaving the store, the API, and the socket lifecycle real. Anything the
+	 * page then paints about activity it did not see is a fetch's doing, which
+	 * is what makes reconciliation provable rather than merely observed
+	 * alongside a live update. `faultyRooms` fails one room's reconcile read
+	 * and no other's, and `reconcileReads` counts those reads so a test can
+	 * prove a later socket open retried rather than merely stopped complaining.
+	 *
+	 * `holdConnect` withholds the handshake itself. Closing a socket starts a
+	 * backoff the test does not control, so a reconnect can open — and
+	 * reconcile — before the writes it is supposed to discover have landed.
+	 * Holding the next upgrade makes close → write → reconnect an order rather
+	 * than a hope.
+	 */
+	const feed = {
+		dropMessages: false,
+		/** Message frames withheld from the page. */
+		dropped: [] as string[],
+		/** Rooms whose reconcile read answers 502. */
+		faultyRooms: new Set<string>(),
+		/** Reconcile reads served per room, faulty or not. */
+		reconcileReads: new Map<string, number>(),
+		/** While set, /api/events handshakes wait on this. */
+		holdConnect: null as Promise<void> | null,
+		/** Handshakes attempted, held or not. */
+		connects: 0,
+	};
 	const web = Bun.serve<WebSocket>({
 		hostname: "127.0.0.1",
 		port: 0,
@@ -529,18 +559,27 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 			// as a real socket pair: a plain 400 handshake logs a console error
 			// in the page and no event ever flows.
 			if (url.pathname === "/api/events") {
+				feed.connects += 1;
+				// Awaited before the upstream socket is even created, so a held
+				// reconnect does no work at all until the test releases it.
+				if (feed.holdConnect !== null) await feed.holdConnect;
 				const upstreamUrl = new URL(api.url + url.pathname + url.search);
 				upstreamUrl.protocol =
 					upstreamUrl.protocol === "https:" ? "wss:" : "ws:";
 				const upstream = new WebSocket(upstreamUrl.href);
 				pendingFrames.set(upstream, []);
 				upstream.addEventListener("message", (event) => {
-					const socket = downstreamByUpstream.get(upstream);
-					if (socket === undefined) {
-						pendingFrames.get(upstream)?.push(String(event.data));
+					const data = String(event.data);
+					if (feed.dropMessages && data.includes('"type":"message"')) {
+						feed.dropped.push(data);
 						return;
 					}
-					socket.send(String(event.data));
+					const socket = downstreamByUpstream.get(upstream);
+					if (socket === undefined) {
+						pendingFrames.get(upstream)?.push(data);
+						return;
+					}
+					socket.send(data);
 				});
 				upstream.addEventListener("close", () => {
 					downstreamByUpstream.get(upstream)?.close();
@@ -554,6 +593,32 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 			}
 
 			if (url.pathname.startsWith("/api/")) {
+				const messagesRoute = /^\/api\/channels\/([^/]+)\/messages$/.exec(
+					url.pathname,
+				);
+				// Scoped to the reconcile query alone (`limit` is unique to it),
+				// so a room can be unreadable to reconciliation while its
+				// transcript still loads — otherwise the fault would also break
+				// selecting the room and the test would prove the wrong thing.
+				if (
+					request.method === "GET" &&
+					messagesRoute?.[1] !== undefined &&
+					url.searchParams.has("limit")
+				) {
+					const roomId = decodeURIComponent(messagesRoute[1]);
+					feed.reconcileReads.set(
+						roomId,
+						(feed.reconcileReads.get(roomId) ?? 0) + 1,
+					);
+					if (feed.faultyRooms.has(roomId)) {
+						return new Response(
+							JSON.stringify({
+								error: { code: "unavailable", message: "room unreadable" },
+							}),
+							{ status: 502, headers: { "content-type": "application/json" } },
+						);
+					}
+				}
 				const headers = new Headers(request.headers);
 				const presented = request.headers.get("X-Operator-Token");
 				if (presented !== null) {
@@ -630,6 +695,8 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		reload,
 		promptsContaining,
 		consoleUrl,
+		/** Proxy-level feed and fault control; see its declaration above. */
+		feed,
 		/** The console API itself, for writes made behind the browser's back. */
 		apiUrl: api.url,
 	};
@@ -2107,7 +2174,7 @@ describe("message presentation", () => {
  * client shows when the daemon is not.
  */
 async function degradedServer(
-	apiBehavior: (url: URL) => Response | undefined | "hang",
+	apiBehavior: (url: URL) => Response | Promise<Response> | undefined | "hang",
 ) {
 	const staticRoot = join(import.meta.dir, "../src/console");
 	const web = Bun.serve({
@@ -2223,6 +2290,95 @@ describe("states", () => {
 				(s) => s !== null && s.state === "load-failure",
 			);
 			expect(shown?.action.toLowerCase()).toContain("retry");
+		},
+	);
+
+	browserTest(
+		"a late transcript response cannot repaint a newly selected room",
+		async () => {
+			const delayedOps = Promise.withResolvers<Response>();
+			let channelReads = 0;
+			let opsRequested = false;
+			const reviewsMessage = {
+				id: 1,
+				room: "#reviews",
+				author: "reviewer",
+				body: "Reviews transcript.",
+				createdAt: 1,
+				mentions: [],
+				parentId: null,
+				threadRootId: null,
+				replyCount: 0,
+				reactions: [],
+			};
+			const opsMessage = {
+				...reviewsMessage,
+				id: 2,
+				room: "#ops",
+				body: "Late ops transcript.",
+			};
+			const server = await degradedServer((url) => {
+				if (url.pathname === "/api/channels") {
+					channelReads += 1;
+					return new Response(
+						JSON.stringify({
+							channels: [
+								{ id: "#reviews", kind: "channel" },
+								{ id: "#ops", kind: "channel" },
+							],
+						}),
+						{ headers: { "content-type": "application/json" } },
+					);
+				}
+				if (url.pathname === "/api/agents") {
+					return new Response(JSON.stringify({ agents: [] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				if (url.pathname === "/api/channels/%23ops/messages") {
+					opsRequested = true;
+					return delayedOps.promise;
+				}
+				if (url.pathname === "/api/channels/%23reviews/messages") {
+					return new Response(JSON.stringify({ messages: [reviewsMessage] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				return undefined;
+			});
+			const { page } = await openPage();
+			await page.goto(server.url, { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"initial reviews transcript",
+				() => transcriptText(page),
+				(text) => text.includes("Reviews transcript."),
+			);
+
+			await clickInPage(page, '#channels .channel[data-id="#ops"]');
+			await waitFor(
+				"delayed ops request",
+				() => Promise.resolve(opsRequested),
+				(requested) => requested,
+			);
+			await clickInPage(page, '#channels .channel[data-id="#reviews"]');
+			await waitFor(
+				"reviews selected again",
+				() => page.$eval("#current-channel", (node) => node.textContent ?? ""),
+				(label) => label === "#reviews",
+			);
+
+			delayedOps.resolve(
+				new Response(JSON.stringify({ messages: [opsMessage] }), {
+					headers: { "content-type": "application/json" },
+				}),
+			);
+			await waitFor(
+				"late selection request settled",
+				() => Promise.resolve(channelReads),
+				(reads) => reads >= 3,
+			);
+			expect(await transcriptText(page)).toContain("Reviews transcript.");
+			expect(await transcriptText(page)).not.toContain("Late ops transcript.");
 		},
 	);
 
@@ -2359,6 +2515,14 @@ describe("composer", () => {
 
 // ── Unread affordance ────────────────────────────────────────────────────────
 
+/** Labels of the channels currently wearing the unread affordance. */
+const unreadLabels = (page: Page): Promise<string[]> =>
+	page.$$eval("#channels .channel", (nodes) =>
+		nodes
+			.filter((node) => node.className.includes("unread"))
+			.map((node) => (node.textContent ?? "").trim()),
+	);
+
 describe("unread", () => {
 	browserTest(
 		"activity in a background channel marks it unread until visited",
@@ -2371,10 +2535,8 @@ describe("unread", () => {
 			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
 			await page.waitForSelector("#channels .channel");
 
-			// The unread mark arrives only as a live frame; a post that lands
-			// before the events socket is OPEN is missed forever (the open-time
-			// refetch heals the transcript, not unreadRooms). Wait for the
-			// socket before posting, the same hook the sever test uses.
+			// This exercises the live-frame path rather than reconnect healing. Wait
+			// for OPEN so every post below has an events socket to reach.
 			await waitFor(
 				"events socket open",
 				() =>
@@ -2434,6 +2596,290 @@ describe("unread", () => {
 				(count) => count === 0,
 			);
 			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"reconnect reconciles unread from the store, never from a live frame",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+			const sameTimestamp = Date.now();
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Open-room baseline.",
+				createdAt: sameTimestamp,
+			});
+			await h.rooms.post({
+				room: "#ops",
+				author: "reviewer",
+				body: "Background baseline.",
+				createdAt: sameTimestamp,
+			});
+			// Equal wall-clock timestamps force unread reconciliation to use
+			// monotonic message ids rather than lossy millisecond comparisons.
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"open-room baseline",
+				() => transcriptText(page),
+				(text) => text.includes("Open-room baseline."),
+			);
+			// Visit and leave, so both rooms carry a seen cursor and the badge
+			// asserted after the outage is that outage's doing, not a leftover.
+			await clickInPage(page, '#channels .channel[data-id="#ops"]');
+			await waitFor(
+				"background baseline",
+				() => transcriptText(page),
+				(text) => text.includes("Background baseline."),
+			);
+			await clickInPage(page, '#channels .channel[data-id="#reviews"]');
+			await waitFor(
+				"open room restored",
+				() => transcriptText(page),
+				(text) => text.includes("Open-room baseline."),
+			);
+			await waitFor(
+				"nothing unread yet",
+				() => unreadLabels(page),
+				(labels) => labels.length === 0,
+			);
+			await waitFor(
+				"events socket open",
+				() =>
+					page.evaluate(() =>
+						(
+							(globalThis as { __consoleSockets?: WebSocket[] })
+								.__consoleSockets ?? []
+						).some((socket) => socket.readyState === WebSocket.OPEN),
+					),
+				(open) => open === true,
+			);
+
+			// Isolation, in two parts.
+			//
+			// First, no live frame may reach the page at all: the daemon polls
+			// the store and pushes a `message` frame for anything it finds, and
+			// whether that lands before or after the reconnect is a race. From
+			// here the proxy withholds every message frame, so whatever the
+			// badge below says was learned by a fetch — and socket-open
+			// reconciliation is the only code that fetches a background room,
+			// so deleting that call leaves nothing that could paint it.
+			h.feed.dropMessages = true;
+			// Second, the writes must precede the reconnect that is supposed to
+			// discover them. Closing starts a backoff this test does not
+			// control, so the next handshake is held rather than raced.
+			const released = Promise.withResolvers<void>();
+			// Both halves of disarming, in one place: clearing `holdConnect`
+			// stops holding future handshakes, resolving releases the one
+			// already waiting. Idempotent, so cleanup and the happy path can
+			// both call it.
+			const releaseGate = () => {
+				h.feed.holdConnect = null;
+				released.resolve();
+			};
+			// Registered before the gate is armed. A held /api/events fetch is
+			// a request the proxy never answers, and `web.stop(true)` in
+			// afterEach waits for it — so a throw below must not be able to
+			// leave it pending.
+			cleanups.push(async function releaseConnectGate() {
+				releaseGate();
+			});
+			h.feed.holdConnect = released.promise;
+			const connectsBefore = h.feed.connects;
+
+			try {
+				await page.evaluate(() => {
+					for (const socket of (
+						globalThis as {
+							__consoleSockets?: WebSocket[];
+						}
+					).__consoleSockets ?? []) {
+						socket.close();
+					}
+				});
+				await waitFor(
+					"events socket closed",
+					() =>
+						page.evaluate(() =>
+							(
+								(globalThis as { __consoleSockets?: WebSocket[] })
+									.__consoleSockets ?? []
+							).every((socket) => socket.readyState !== WebSocket.OPEN),
+						),
+					(closed) => closed === true,
+				);
+
+				// Written straight to the store while the page is deaf: both
+				// rooms take one, so the open room is tested under the same
+				// conditions as the background one rather than by omission.
+				await h.rooms.post({
+					room: "#ops",
+					author: "reviewer",
+					body: "Background post during outage.",
+					createdAt: sameTimestamp,
+				});
+				await h.rooms.post({
+					room: "#reviews",
+					author: "reviewer",
+					body: "Open-room post during outage.",
+					createdAt: sameTimestamp,
+				});
+
+				// Both writes have landed before the gate opens, so the
+				// reconnect's reconciliation reads a store that already holds
+				// them: a pass is the client's doing, not the scheduler's.
+				await waitFor(
+					"a reconnect waiting on the gate",
+					() => Promise.resolve(h.feed.connects),
+					(count) => count > connectsBefore,
+					10_000,
+				);
+			} finally {
+				releaseGate();
+			}
+
+			await waitFor(
+				"events socket reopened",
+				() =>
+					page.evaluate(() => {
+						const sockets = Reflect.get(globalThis, "__consoleSockets");
+						return (
+							Array.isArray(sockets) &&
+							sockets.some(
+								(socket) =>
+									socket instanceof WebSocket &&
+									socket.readyState === WebSocket.OPEN,
+							)
+						);
+					}),
+				(open) => open === true,
+				10_000,
+			);
+
+			const unread = await waitFor(
+				"reconciled unread affordance",
+				() => unreadLabels(page),
+				(list) => list.some((label) => label.includes("#ops")),
+				10_000,
+			);
+			expect(unread.join(" ")).toContain("#ops");
+			// The open room took a post in the same outage and is still read:
+			// reconciliation skips wherever the operator is looking.
+			expect(unread.join(" ")).not.toContain("#reviews");
+			// And the open room's transcript is rebuilt over HTTP, which is
+			// the other half of what socket-open owes a deaf console.
+			await waitFor(
+				"reconnected open transcript",
+				() => transcriptText(page),
+				(text) => text.includes("Open-room post during outage."),
+				10_000,
+			);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"an unreadable room costs no other room its mark and is retried",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+			await h.ensureRoom("#alerts");
+			// Deaf from the first paint, so every badge below is a reconciling
+			// fetch's doing and never a live frame's.
+			h.feed.dropMessages = true;
+			// `#ops` cannot be reconciled; every other room is healthy. One
+			// room's failure must cost no other room its mark.
+			h.feed.faultyRooms.add("#ops");
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Open-room baseline.",
+			});
+			// Real unseen activity in the failing room: this is what the retry
+			// must eventually find, so the healed pass is proved by a badge
+			// rather than only by a notice going quiet.
+			await h.rooms.post({
+				room: "#ops",
+				author: "reviewer",
+				body: "Missed while unreadable.",
+			});
+			await h.rooms.post({
+				room: "#alerts",
+				author: "reviewer",
+				body: "Alert while away.",
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"open-room baseline",
+				() => transcriptText(page),
+				(text) => text.includes("Open-room baseline."),
+			);
+
+			// A join that rejected on the first failure would never repaint,
+			// and `#alerts` would stay unmarked; this is the assertion that
+			// catches it.
+			const unread = await waitFor(
+				"the readable room reconciled",
+				() => unreadLabels(page),
+				(labels) => labels.some((label) => label.includes("#alerts")),
+			);
+			expect(unread.join(" ")).toContain("#alerts");
+			// Unknown is not read, and unknown is not unread either: a room
+			// whose read failed is left exactly as it stands.
+			expect(unread.join(" ")).not.toContain("#ops");
+
+			// And the failure is said out loud, so a stale mark is not silent.
+			const notice = await waitFor(
+				"the stale-room notice",
+				() => page.$eval("#notice", (node) => node.textContent ?? ""),
+				(text) => text.includes("#ops"),
+			);
+			expect(notice).toContain("#ops");
+
+			// Heal the room, then force a second socket open. The retry is the
+			// contract: a failure that stopped reconciling that room would
+			// leave `#ops` unmarked forever, because nothing else fetches it.
+			const before = h.feed.reconcileReads.get("#ops") ?? 0;
+			h.feed.faultyRooms.delete("#ops");
+			await page.evaluate(() => {
+				for (const socket of (globalThis as { __consoleSockets?: WebSocket[] })
+					.__consoleSockets ?? []) {
+					socket.close();
+				}
+			});
+
+			const healed = await waitFor(
+				"the retried room marked unread",
+				() => unreadLabels(page),
+				(labels) => labels.some((label) => label.includes("#ops")),
+				10_000,
+			);
+			expect(healed.join(" ")).toContain("#ops");
+			// The mark came from a fresh read of that specific room, not from
+			// a repaint of state the first pass had already guessed.
+			expect(h.feed.reconcileReads.get("#ops") ?? 0).toBeGreaterThan(before);
+			// Nothing stale is left to report, so the console retracts its own
+			// words — and only its own.
+			await waitFor(
+				"the notice retracted",
+				() => page.$eval("#notice", (node) => node.textContent ?? ""),
+				(text) => text === "",
+				10_000,
+			);
+			// The injected 502 is a real failed request, so Chrome logs it
+			// whether or not the page handled it. Excluded by prefix, exactly
+			// as the refused-write tests above do — everything else must be
+			// empty, so a rejection nobody owned still fails here.
+			expect(
+				errors.filter((entry) => !entry.startsWith("Failed to load resource")),
+			).toEqual([]);
 		},
 	);
 });

@@ -12,9 +12,9 @@
  * cannot set headers.
  *
  * Failure modes: a dropped socket reconnects with backoff and refetches the
- * transcript, so a long agent turn cannot leave the view stale. Writes are
- * followed by a refetch rather than optimistic mutation: the server is the
- * transcript's source of truth and the poll feed races any local edit.
+ * open transcript plus background-room activity, healing missed frames.
+ * Writes are followed by a refetch rather than optimistic mutation: the
+ * server is the transcript's source of truth and the poll feed races edits.
  */
 
 /// <reference lib="dom" />
@@ -212,6 +212,13 @@
 		return payload;
 	};
 
+	/** Own an event callback's Promise so failures never become unhandled.
+	 * @param {Promise<unknown>} promise
+	 */
+	const run = (promise) => {
+		void promise.catch((error) => console.error(error));
+	};
+
 	// ── Rendering ────────────────────────────────────────────────────────────
 
 	/**
@@ -359,7 +366,7 @@
 		button.type = "button";
 		paintChip(button, emoji, actors);
 		button.addEventListener("click", () => {
-			void toggleReaction(messageId, emoji);
+			run(toggleReaction(messageId, emoji));
 		});
 		return button;
 	};
@@ -415,7 +422,7 @@
 			opener.className = "thread-open";
 			opener.textContent = `${message.replyCount} ${message.replyCount === 1 ? "reply" : "replies"}`;
 			opener.addEventListener("click", () => {
-				void openThread(message.id);
+				run(openThread(message.id));
 			});
 			row.append(opener);
 		}
@@ -621,6 +628,9 @@
 	 */
 	const unreadRooms = new Set();
 
+	/** Latest message id loaded while each room was open. @type {Map<string, number>} */
+	const lastSeen = new Map();
+
 	/** @type {RoomInfo[]} Last channel list, so unread can repaint alone. */
 	let lastChannels = [];
 
@@ -659,7 +669,7 @@
 			button.dataset.id = channel.id;
 			button.textContent = channel.name ?? channel.id;
 			button.addEventListener("click", () => {
-				void selectRoom(channel.id);
+				run(selectRoom(channel.id));
 			});
 			item.append(button);
 			channelsEl.append(item);
@@ -722,7 +732,7 @@
 				toggle.textContent = member ? "Leave" : "Join";
 				const room = currentRoom;
 				toggle.addEventListener("click", () => {
-					void setMembership(agent.name, room, !member);
+					run(setMembership(agent.name, room, !member));
 				});
 				item.append(toggle);
 			}
@@ -741,7 +751,7 @@
 			edit.setAttribute("aria-label", `Edit ${agent.name}'s definition`);
 			edit.textContent = "Edit";
 			edit.addEventListener("click", () => {
-				void openDefinition(agent.name);
+				run(openDefinition(agent.name));
 			});
 			item.append(edit);
 			agentsEl.append(item);
@@ -869,7 +879,7 @@
 		const logs = within(fragment, ".ops-logs");
 		logs.setAttribute("aria-label", `Show recent logs for ${agent.name}`);
 		logs.addEventListener("click", () => {
-			void showLogs(agent.name);
+			run(showLogs(agent.name));
 		});
 
 		// A <form>, so Enter in the field submits with no pointer and no
@@ -883,7 +893,7 @@
 			const message = injectInput.value.trim();
 			if (message.length === 0) return;
 			injectInput.value = "";
-			void injectInto(agent.name, message);
+			run(injectInto(agent.name, message));
 		});
 
 		return item;
@@ -917,7 +927,7 @@
 			const budgetUsd = Number(bumpInput.value);
 			if (!Number.isFinite(budgetUsd) || budgetUsd <= 0) return;
 			bumpInput.value = "";
-			void bumpAccount(account, budgetUsd);
+			run(bumpAccount(account, budgetUsd));
 		});
 
 		return item;
@@ -1085,7 +1095,7 @@
 		const keepChildren = killKeepEl.checked;
 		killDialog.returnValue = "";
 		closeKillDialog();
-		if (confirmed && target !== null) void killAgent(target, keepChildren);
+		if (confirmed && target !== null) run(killAgent(target, keepChildren));
 	});
 
 	// ── Definition editing (T-1607) ──────────────────────────────────────────
@@ -1231,9 +1241,11 @@
 		event.preventDefault();
 		const name = definitionTarget;
 		if (name === null) return;
-		void saveDefinition(name, definitionChangesEl.value).then((saved) => {
-			if (saved) closeDefinitionDialog();
-		});
+		run(
+			saveDefinition(name, definitionChangesEl.value).then((saved) => {
+				if (saved) closeDefinitionDialog();
+			}),
+		);
 	});
 
 	// Escape closes a <dialog> natively; this returns focus to the opener on
@@ -1293,32 +1305,37 @@
 
 	// ── State ────────────────────────────────────────────────────────────────
 
+	let refreshRequest = 0;
+
 	/** Refetch the open room and repaint transcript + thread pane. */
 	const refresh = async () => {
 		if (currentRoom === null) return;
+		const room = currentRoom;
+		const request = ++refreshRequest;
 		/** @type {any} */
 		let payload;
 		try {
-			payload = await api(
-				`/api/channels/${encodeURIComponent(currentRoom)}/messages`,
-			);
+			payload = await api(`/api/channels/${encodeURIComponent(room)}/messages`);
 		} catch (error) {
+			if (request !== refreshRequest || room !== currentRoom) return;
 			showState(
 				"load-failure",
 				"Transcript failed to load",
 				error instanceof Error ? error.message : String(error),
 				"Retry",
-				() => void refresh(),
+				() => run(refresh()),
 			);
 			return;
 		}
 		const messages = /** @type {RoomMessage[]} */ (payload.messages);
+		if (request !== refreshRequest || room !== currentRoom) return;
+		lastSeen.set(room, messages.at(-1)?.id ?? 0);
 		renderTranscript(messages);
 		renderThread(messages);
 		if (messages.length === 0) {
 			showState(
 				"empty",
-				`${currentRoom} is quiet`,
+				`${room} is quiet`,
 				"Nothing has been said here yet.",
 				"Write the first message",
 				() => composerInput.focus(),
@@ -1347,6 +1364,61 @@
 		const { channels } = await api("/api/channels");
 		lastChannels = /** @type {RoomInfo[]} */ (channels);
 		renderChannels(lastChannels);
+	};
+
+	/** The stale-unread words this console last wrote, so it retracts exactly
+	 * those and never a notice somebody else put there. @type {string} */
+	let staleNotice = "";
+
+	/**
+	 * Heal unread state from room transcripts after missed socket frames.
+	 *
+	 * A read that fails is caught per room rather than at the join. Settling
+	 * the join and reading nothing back would swallow the failure whole: the
+	 * rooms that did answer must still be marked, the socket-open handler
+	 * must not be handed a rejection, and a room left unknown must not pass
+	 * for read. So a failure marks nothing in either direction — the mark the
+	 * room already carries stands — names the room to the operator, and is
+	 * retried by the next socket open, which is the only thing that fetches
+	 * a background room at all.
+	 */
+	const reconcileUnread = async () => {
+		const channels = lastChannels;
+		/** @type {string[]} */
+		const stale = [];
+		await Promise.all(
+			channels
+				.filter((channel) => channel.id !== currentRoom)
+				.map(async (channel) => {
+					const seen = lastSeen.get(channel.id) ?? 0;
+					/** @type {any} */
+					let payload;
+					try {
+						payload = await api(
+							`/api/channels/${encodeURIComponent(channel.id)}/messages?afterId=${seen}&limit=1`,
+						);
+					} catch {
+						stale.push(channel.id);
+						return;
+					}
+					const activity = /** @type {RoomMessage[]} */ (payload.messages)[0];
+					if (
+						channel.id !== currentRoom &&
+						activity !== undefined &&
+						activity.id > (lastSeen.get(channel.id) ?? 0)
+					) {
+						unreadRooms.add(channel.id);
+					}
+				}),
+		);
+		renderChannels(lastChannels);
+		if (stale.length > 0) {
+			staleNotice = `Unread state is stale for ${stale.join(", ")}; retrying on the next reconnect.`;
+			noticeEl.textContent = staleNotice;
+		} else if (staleNotice !== "" && noticeEl.textContent === staleNotice) {
+			noticeEl.textContent = "";
+			staleNotice = "";
+		}
 	};
 
 	/** @param {string} room */
@@ -1549,7 +1621,7 @@
 		const body = composerInput.value.trim();
 		if (body.length === 0) return;
 		composerInput.value = "";
-		void postMessage(body, null);
+		run(postMessage(body, null));
 	});
 
 	threadComposerEl.addEventListener("submit", (event) => {
@@ -1557,7 +1629,7 @@
 		const body = threadComposerInput.value.trim();
 		if (body.length === 0 || openThreadRoot === null) return;
 		threadComposerInput.value = "";
-		void postMessage(body, openThreadRoot);
+		run(postMessage(body, openThreadRoot));
 	});
 
 	el("thread-close").addEventListener("click", () => {
@@ -1593,12 +1665,12 @@
 		const id = newChannelInput.value.trim();
 		if (id.length === 0) return;
 		newChannelInput.value = "";
-		void createChannel(id);
+		run(createChannel(id));
 	});
 
 	newAgentForm.addEventListener("submit", (event) => {
 		event.preventDefault();
-		void createAgent();
+		run(createAgent());
 	});
 
 	/**
@@ -1675,10 +1747,10 @@
 
 		socket.addEventListener("open", () => {
 			reconnectAttempts = 0;
-			// Refetch on open, not before it: a message landing between the
-			// close and the new socket's open is missed by a pre-connect
-			// refetch, and in a quiet room nothing would heal it.
-			void refresh();
+			// Refetch on open, not before it: activity landing between the close
+			// and the new socket's open is missed by a pre-connect refetch.
+			run(refresh());
+			run(reconcileUnread());
 		});
 
 		socket.addEventListener("message", (event) => {
@@ -1692,7 +1764,7 @@
 			// threw on a new type would break on every daemon upgrade.
 			if (frame.type === "message") {
 				if (frame.message.room === currentRoom) {
-					void refresh();
+					run(refresh());
 				} else {
 					// Activity somewhere the operator is not looking: mark it
 					// until the room is visited.
@@ -1720,9 +1792,9 @@
 				// All five render in the agents panel: run state, the rebuild
 				// a definition owes, membership for the open channel, and the
 				// account state a peer is parked by.
-				void refreshAgents();
+				run(refreshAgents());
 			} else if (frame.type === "channel") {
-				void refreshChannels();
+				run(refreshChannels());
 			}
 		});
 
@@ -1757,7 +1829,7 @@
 				"Daemon offline",
 				error instanceof Error ? error.message : String(error),
 				"Retry",
-				() => void boot(),
+				() => run(boot()),
 			);
 			return;
 		}
@@ -1779,5 +1851,5 @@
 		connect();
 	};
 
-	void boot();
+	run(boot());
 })();
