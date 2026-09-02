@@ -41,6 +41,8 @@ import type {
 	ChatUnreactResult,
 	ChatWaitParams,
 	ChatWaitResult,
+	DaemonStopParams,
+	DaemonStopResult,
 	DefinitionData,
 	DefinitionGetParams,
 	DefinitionGetResult,
@@ -90,6 +92,10 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isFiniteNumber(value: unknown): value is number {
 	return typeof value === "number" && Number.isFinite(value);
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -458,8 +464,7 @@ function requirePositiveSafeInteger(
 	record: Record<string, unknown>,
 	field: string,
 ): FieldCheck {
-	const value = record[field];
-	return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+	return isPositiveSafeInteger(record[field])
 		? null
 		: { field, message: `${field} must be a positive safe integer` };
 }
@@ -769,6 +774,15 @@ export const METHODS: Record<MethodName, MethodContract> = {
 						r.lines === undefined
 							? null
 							: requirePositiveSafeInteger(r, "lines"),
+					(r) =>
+						r.source === undefined ||
+						r.source === "worker" ||
+						r.source === "daemon"
+							? null
+							: {
+									field: "source",
+									message: 'source must be "worker" or "daemon" when present',
+								},
 				]),
 			),
 		validateResult: (v): Validation<LogsTailResult> => {
@@ -893,6 +907,20 @@ export const METHODS: Record<MethodName, MethodContract> = {
 				return fail("resumed", "resumed must be a string array");
 			}
 			return ok(v as unknown as BumpResult);
+		},
+	},
+	daemon_stop: {
+		validateParams: (v): Validation<DaemonStopParams> => validateNoParams(v),
+		validateResult: (v): Validation<DaemonStopResult> => {
+			if (!isRecord(v)) return fail("result", "expected an object");
+			// Strictly `true`: this result is an acknowledgement that shutdown
+			// is under way, so a daemon that declines answers an error frame
+			// rather than a success carrying a quiet "no" a caller might miss.
+			if (v.stopping !== true) return fail("stopping", "stopping must be true");
+			if (!isPositiveSafeInteger(v.pid)) {
+				return fail("pid", "pid must be a positive safe integer");
+			}
+			return ok(v as unknown as DaemonStopResult);
 		},
 	},
 };

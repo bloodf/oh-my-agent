@@ -49,6 +49,7 @@ export const METHOD_NAMES = [
 	"schedules_arm",
 	"kill",
 	"bump",
+	"daemon_stop",
 ] as const;
 
 export type MethodName = (typeof METHOD_NAMES)[number];
@@ -197,9 +198,18 @@ export interface DefinitionUpdateResult {
 	rebuildRequired: boolean;
 }
 
+/**
+ * Which stderr stream a tail reads.
+ *
+ * Additive and optional: an omitted `source` is `"worker"`, which is what
+ * every client predating daemon logs already sends and means.
+ */
+export type LogsSource = "worker" | "daemon";
+
 export interface LogsTailParams {
 	name: string;
 	lines?: number;
+	source?: LogsSource;
 }
 export interface LogsTailResult {
 	name: string;
@@ -262,6 +272,21 @@ export interface BumpResult {
 	account: string;
 	budgetUsd: number;
 	resumed: string[];
+}
+
+/**
+ * Stop this daemon. No params: the pidfile names the only process it may take
+ * down, so there is nothing left for a caller to select.
+ */
+export type DaemonStopParams = Record<string, never>;
+export interface DaemonStopResult {
+	/**
+	 * Always `true`. This is an acknowledgement, not a question — a daemon that
+	 * will not stop answers an error frame, so there is no `false` to carry.
+	 */
+	stopping: true;
+	/** The process the caller may now watch for exit. */
+	pid: number;
 }
 
 // ── JSON-RPC envelope ───────────────────────────────────────────────────────

@@ -48,6 +48,8 @@ import type {
 	ChatUnreactResult,
 	ChatWaitParams,
 	ChatWaitResult,
+	DaemonStopParams,
+	DaemonStopResult,
 	DefinitionData,
 	DefinitionGetParams,
 	DefinitionGetResult,
@@ -242,6 +244,26 @@ export interface DaemonContext {
 	armSchedule(id: string, enabled: boolean): ScheduleInfo | undefined;
 	/** Raise a metered account's ceiling and resume it. Returns the peers the bump resumed. */
 	bumpAccount(accountId: string, budgetUsd: number): Promise<string[]>;
+	/**
+	 * Begin this daemon's shutdown and answer what the caller may watch.
+	 *
+	 * Owned by `./main` because only the composition root knows the pidfile it
+	 * claimed and the close path it built. It validates that ownership, is
+	 * idempotent, and — critically — *schedules* the close rather than awaiting
+	 * it, so this handler can answer before the socket it answered on is gone.
+	 *
+	 * Optional for the same reason `store` is: a context assembled for one
+	 * narrow surface owns no daemon lifetime, and the handler answers
+	 * `invalidParams` rather than throwing when it is absent.
+	 */
+	requestDaemonStop?(): Promise<DaemonStopResult>;
+	/**
+	 * The daemon's own stderr log, most recent lines last. Absent on a context
+	 * that has no daemon log to read, where `logs_tail` refuses the `daemon`
+	 * source rather than answering an empty tail that reads as "nothing was
+	 * logged".
+	 */
+	daemonLog?(): Promise<string>;
 }
 
 export interface ControlSocket {
@@ -302,6 +324,7 @@ interface ParamsByMethod {
 	 */
 	kill: KillParams & { keep_children?: unknown };
 	bump: BumpParams;
+	daemon_stop: DaemonStopParams;
 }
 
 type Handlers = {
@@ -621,12 +644,31 @@ export async function startControlSocket(
 			return { agents: [named] };
 		},
 
+		/**
+		 * A stderr tail, from a worker by default or from the daemon itself.
+		 *
+		 * `source` selects the stream rather than overloading `name`, because a
+		 * peer may legitimately be called "daemon" and a name-sniffing shortcut
+		 * would hijack its logs the moment someone defined one.
+		 */
 		logs_tail: async (params): Promise<LogsTailResult> => {
-			const record = context.peers.get(params.name);
-			if (!record) {
-				throw new InvalidParamsError("name", `Unknown agent: ${params.name}`);
+			let text: string;
+			if (params.source === "daemon") {
+				if (!context.daemonLog) {
+					throw new InvalidParamsError(
+						"source",
+						"Daemon logs are not available on this daemon",
+					);
+				}
+				text = await context.daemonLog();
+			} else {
+				const record = context.peers.get(params.name);
+				if (!record) {
+					throw new InvalidParamsError("name", `Unknown agent: ${params.name}`);
+				}
+				text = record.worker.stderr?.() ?? "";
 			}
-			const lines = (record.worker.stderr?.() ?? "")
+			const lines = text
 				.replace(/\r\n/g, "\n")
 				.replace(/\n$/, "")
 				.split("\n")
@@ -867,6 +909,25 @@ export async function startControlSocket(
 				resumed,
 			};
 		},
+
+		/**
+		 * Stop the daemon, acknowledging first and closing after.
+		 *
+		 * `requestDaemonStop` schedules the close instead of awaiting it, so
+		 * this returns while the socket is still up and the reply reaches the
+		 * caller. Awaiting shutdown here would sever the connection the answer
+		 * travels on, and a self-stop that hangs its caller on a dead socket is
+		 * indistinguishable from a daemon that wedged.
+		 */
+		daemon_stop: async (): Promise<DaemonStopResult> => {
+			if (!context.requestDaemonStop) {
+				throw new InvalidParamsError(
+					"params",
+					"Daemon shutdown is not available on this daemon",
+				);
+			}
+			return await context.requestDaemonStop();
+		},
 	};
 
 	const workerMethods: Partial<Record<MethodName, true>> = {
@@ -938,17 +999,31 @@ export async function startControlSocket(
 				`Worker ${identity.peerName} may only spawn with itself as parent`,
 			);
 		}
-		if (
-			method === "logs_tail" &&
-			typeof params === "object" &&
-			params !== null &&
-			"name" in params &&
-			params.name !== identity.peerName
-		) {
-			return forbidden(
-				id,
-				`Worker ${identity.peerName} may only read its own logs`,
-			);
+		if (method === "logs_tail") {
+			const named =
+				typeof params === "object" && params !== null && "name" in params
+					? params.name
+					: undefined;
+			if (named !== identity.peerName) {
+				return forbidden(
+					id,
+					`Worker ${identity.peerName} may only read its own logs`,
+				);
+			}
+			// The daemon's own stderr carries every peer's activity and the
+			// console URL that grants operator access, so the source selector
+			// is operator-only even though the method is not.
+			if (
+				typeof params === "object" &&
+				params !== null &&
+				"source" in params &&
+				params.source === "daemon"
+			) {
+				return forbidden(
+					id,
+					`Worker ${identity.peerName} may not read the daemon log`,
+				);
+			}
 		}
 		return undefined;
 	};

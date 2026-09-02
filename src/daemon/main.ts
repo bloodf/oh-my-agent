@@ -31,6 +31,7 @@ import { randomBytes } from "node:crypto";
 import {
 	chmod,
 	mkdir,
+	open,
 	readdir,
 	readFile,
 	rm,
@@ -50,6 +51,7 @@ import type {
 import { fingerprintPeerDefinition } from "../shared/agent-definition";
 import type {
 	AgentSpawnResult,
+	DaemonStopResult,
 	RoomInfo,
 	ScheduleInfo,
 } from "../shared/protocol";
@@ -80,6 +82,15 @@ const STATE_DIR = "oh-my-agent";
 
 /** Set on the detached child so it runs the daemon instead of re-spawning. */
 const DETACHED_ENV = "OMA_DETACHED";
+
+/**
+ * Where the detached daemon's stderr is persisted, beside the pidfile.
+ *
+ * Appended across boots rather than truncated: the output that explains why a
+ * daemon died is written by the boot before the restart, and a restart loop
+ * that truncated would erase the evidence exactly when it is needed.
+ */
+const LOG_FILE = "daemon.log";
 
 export interface WorkerFactoryOptions {
 	peer: PeerDefinition;
@@ -164,8 +175,18 @@ export interface BootDaemonOptions {
 export interface DaemonHandle {
 	socketPath: string;
 	pidPath: string;
+	/** Where this daemon's stderr is persisted, across restarts. */
+	logPath: string;
 	/** Where the console is served, token included; absent when disabled. */
 	consoleUrl?: string;
+	/**
+	 * Close this daemon, or join the close already running.
+	 *
+	 * Memoized: `daemon_stop` acknowledges before shutting down, so the close it
+	 * schedules belongs to no caller. Calling this returns that same shutdown
+	 * rather than starting a second one or reporting done while it is still
+	 * under way.
+	 */
 	close(): Promise<void>;
 }
 
@@ -225,6 +246,25 @@ async function claimPidfile(pidPath: string): Promise<void> {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
 	await writeFile(pidPath, String(process.pid), "utf8");
+}
+
+/**
+ * Whether the pidfile still names this process.
+ *
+ * The guard on shutdown: a daemon whose pidfile was taken over — by a later
+ * boot that found this one unresponsive, or by an operator repairing state —
+ * no longer owns the socket, console URL, and pidfile that `close()` deletes,
+ * and removing them would tear down whichever daemon does.
+ */
+async function ownsPidfile(pidPath: string): Promise<boolean> {
+	try {
+		const recorded = (await readFile(pidPath, "utf8")).trim();
+		return recorded === String(process.pid);
+	} catch {
+		// No pidfile is no ownership: something already cleaned up, or never
+		// wrote one, and either way this process cannot claim it.
+		return false;
+	}
 }
 
 /** Where the operator token lives, and the only mode it may have. */
@@ -333,11 +373,30 @@ export async function bootDaemon(
 	const stateDir = join(agentDir, STATE_DIR);
 	const pidPath = join(stateDir, "daemon.pid");
 	const socketPath = join(stateDir, "daemon.sock");
+	const logPath = join(stateDir, LOG_FILE);
 
 	await mkdir(stateDir, { recursive: true });
 	await claimPidfile(pidPath);
 	// A crash can leave the socket file behind; `Bun.serve` will not bind over it.
 	await rm(socketPath, { force: true });
+
+	/**
+	 * Everything `close()` tears down, published once boot has built it.
+	 *
+	 * Declared here, above the `try`, for two reasons: the control socket starts
+	 * serving long before boot finishes — and the first thing it can be asked to
+	 * do is stop the daemon — and the failure path below has to be able to
+	 * release a stop that is waiting on it.
+	 *
+	 * A promise rather than a mutable slot with a no-op default: a stop that
+	 * arrived mid-boot would run that default, mark the daemon closed, and leave
+	 * it serving. Awaiting instead makes an early stop wait for the real
+	 * teardown and then run it, which is the only correct answer.
+	 */
+	const assembled = Promise.withResolvers<() => Promise<void>>();
+	// Nobody awaits this on the happy path, and an unhandled rejection would
+	// take the process down on a boot that is already failing loudly.
+	assembled.promise.catch(() => {});
 
 	// Anything started below must be closed if a later step throws, or a failed
 	// boot leaves an orphaned broker and a locked database behind.
@@ -1197,6 +1256,51 @@ export async function bootDaemon(
 			return definition;
 		};
 
+		/**
+		 * Close once, and let every caller await that same close.
+		 *
+		 * Memoized on the promise rather than on a `closed` flag: a second
+		 * caller — the postmortem cleanup, a racing `daemon_stop`, a test — must
+		 * not be told shutdown is done while the first call is still tearing
+		 * things down. It is also what makes the close `daemon_stop` schedules
+		 * joinable: that close belongs to no caller, so anyone who needs to wait
+		 * for it simply calls `close()` and gets the shutdown already running.
+		 */
+		let closing: Promise<void> | undefined;
+		const closeDaemon = (): Promise<void> => {
+			closing ??= (async () => await (await assembled.promise)())();
+			return closing;
+		};
+
+		/**
+		 * Acknowledge a stop, then close on a later macrotask.
+		 *
+		 * The deferral is the contract: closing tears down the control socket,
+		 * so awaiting it here would sever the connection this very answer has to
+		 * travel back on, and the operator who asked the daemon to stop would
+		 * see a dead socket instead of a confirmation.
+		 *
+		 * Idempotent by way of `closeDaemon`, which is already guarded — a
+		 * second request gets the same acknowledgement rather than a refusal for
+		 * arriving during a shutdown it also asked for.
+		 */
+		let stopScheduled = false;
+		const requestDaemonStop = async (): Promise<DaemonStopResult> => {
+			if (!(await ownsPidfile(pidPath))) {
+				throw new InvalidParamsError(
+					"params",
+					`Refusing to stop: pidfile ${pidPath} no longer names this process (pid ${process.pid})`,
+				);
+			}
+			if (!stopScheduled) {
+				stopScheduled = true;
+				setTimeout(() => {
+					void closeDaemon();
+				}, 0);
+			}
+			return { stopping: true, pid: process.pid };
+		};
+
 		const context: DaemonContext = {
 			rooms,
 			supervisor,
@@ -1213,6 +1317,18 @@ export async function bootDaemon(
 			killPeer,
 			armSchedule,
 			bumpAccount,
+			requestDaemonStop,
+			daemonLog: async () => {
+				// Read at call time, never cached: this process appends to that
+				// file through its own stderr, so anything held would be stale
+				// by the line that made someone ask for it.
+				try {
+					return await readFile(logPath, "utf8");
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+					throw error;
+				}
+			},
 		};
 
 		const socket = await startControlSocket({
@@ -1367,63 +1483,65 @@ export async function bootDaemon(
 		started.push(stopUsageLoop);
 		options.onUsagePoller?.({ pollOnce });
 
-		let closed = false;
+		assembled.resolve(async () => {
+			// The usage loop first: it fetches through the gateway and posts
+			// through the supervisor, so a poll in flight after either closes is a
+			// call against a torn-down dependency. Await the in-flight tick, not
+			// just the timer, before anything below tears those down.
+			await stopUsageLoop();
+
+			// Reverse order: the console and the socket first, so no new request
+			// arrives; then the workers, then the machinery they depend on, and
+			// only then the files that advertise this daemon's existence.
+			//
+			// The console goes before the room store on purpose: its live feed
+			// polls that store while a browser is connected, and closing the
+			// database under a running poller is a query against a closed
+			// handle.
+			await consoleApi?.close();
+			await socket.close();
+			await supervisor.settled();
+			for (const record of peers.values()) {
+				try {
+					await record.worker.stop();
+				} catch (error) {
+					log(`stopping ${record.worker.name}: ${String(error)}`);
+				}
+			}
+			scheduler.stop();
+
+			// A turn still in flight belongs to a process about to stop
+			// existing. Closing its row as interrupted is the last write; after
+			// it, `recording` is off so a late completion cannot reopen the
+			// question — or touch a closed database.
+			const interrupted = db.interruptOpenRuns(now());
+			if (interrupted > 0) {
+				log(`closed ${interrupted} interrupted run(s) at shutdown`);
+			}
+			for (const name of peers.keys()) markAgentRuntime(name, "stopped", null);
+			recording = false;
+			db.close();
+
+			await gateway.close();
+			await rooms.close();
+			await hosting.close();
+			await rm(pidPath, { force: true });
+			await rm(socketPath, { force: true });
+			await rm(join(stateDir, "console-url"), { force: true });
+		});
+
 		return {
 			socketPath,
 			pidPath,
+			logPath,
 			...(consoleUrl === undefined ? {} : { consoleUrl }),
-			close: async () => {
-				if (closed) return;
-				closed = true;
-
-				// The usage loop first: it fetches through the gateway and posts
-				// through the supervisor, so a poll in flight after either closes is a
-				// call against a torn-down dependency. Await the in-flight tick, not
-				// just the timer, before anything below tears those down.
-				await stopUsageLoop();
-
-				// Reverse order: the console and the socket first, so no new request
-				// arrives; then the workers, then the machinery they depend on, and
-				// only then the files that advertise this daemon's existence.
-				//
-				// The console goes before the room store on purpose: its live feed
-				// polls that store while a browser is connected, and closing the
-				// database under a running poller is a query against a closed
-				// handle.
-				await consoleApi?.close();
-				await socket.close();
-				await supervisor.settled();
-				for (const record of peers.values()) {
-					try {
-						await record.worker.stop();
-					} catch (error) {
-						log(`stopping ${record.worker.name}: ${String(error)}`);
-					}
-				}
-				scheduler.stop();
-
-				// A turn still in flight belongs to a process about to stop
-				// existing. Closing its row as interrupted is the last write; after
-				// it, `recording` is off so a late completion cannot reopen the
-				// question — or touch a closed database.
-				const interrupted = db.interruptOpenRuns(now());
-				if (interrupted > 0) {
-					log(`closed ${interrupted} interrupted run(s) at shutdown`);
-				}
-				for (const name of peers.keys())
-					markAgentRuntime(name, "stopped", null);
-				recording = false;
-				db.close();
-
-				await gateway.close();
-				await rooms.close();
-				await hosting.close();
-				await rm(pidPath, { force: true });
-				await rm(socketPath, { force: true });
-				await rm(join(stateDir, "console-url"), { force: true });
-			},
+			close: closeDaemon,
 		};
 	} catch (error) {
+		// A stop that arrived mid-boot is parked on `assembled`; this boot is
+		// unwinding `started` itself, so release it rather than leave that
+		// caller waiting on a teardown which is never going to be published.
+		assembled.reject(error);
 		while (started.length > 0) await started.pop()?.();
 		throw error;
 	}
@@ -1462,7 +1580,11 @@ async function runDaemon(): Promise<void> {
 if (import.meta.main) {
 	const argv = process.argv.slice(2);
 	const verb = argv[0] ?? "daemon";
-	if (verb !== "daemon") {
+	// Bare `daemon` boots one; `daemon stop` and `daemon restart` are CLI verbs
+	// about a daemon, not requests to become one. Routing on the verb alone
+	// would send them into the detached launcher, which is how `daemon stop`
+	// starts a second daemon instead of stopping the first.
+	if (verb !== "daemon" || argv.length > 1) {
 		// The CLI handles its own dispatch, usage, and exit codes.
 		const { runCli } = await import("./cli");
 		const code = await runCli(argv, {
@@ -1486,15 +1608,49 @@ if (import.meta.main) {
 		// fresh line from one a crashed daemon left behind, and clearing that
 		// file first would delete the URL of a daemon that is still running when
 		// this boot is refused as a double start.
-		const child = Bun.spawn({
-			cmd: [process.execPath, import.meta.path, ...argv],
-			env: { ...process.env, [DETACHED_ENV]: "1" },
-			stdio: ["ignore", "pipe", "ignore"],
-			detached: true,
-		});
-		child.unref();
+		//
+		// stderr goes to a file rather than being discarded. It is the only
+		// record of why a detached daemon misbehaved — nobody is watching the
+		// terminal it no longer has — and it is opened for append so the boot
+		// that explains a crash survives the restart that follows it.
+		//
+		// 0600, like the token file: the daemon logs its console URL at boot and
+		// that URL carries the operator token, so a log at the umask default
+		// would hand every local process the credential `console-token` is
+		// deliberately protecting.
+		//
+		// Both the create mode and the `chmod`, for the same reason
+		// `loadConsoleToken` does both. The create mode closes the window where
+		// a newly created log sits at 0644 while the daemon is already writing
+		// its console URL into it; the `chmod` covers a log an earlier boot left
+		// behind, which `open`'s mode argument never touches — and umask can
+		// mask bits off a create mode, so neither one subsumes the other.
 		const agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir();
-		process.stdout.write(`${join(agentDir, STATE_DIR, "daemon.sock")}\n`);
+		const stateDir = join(agentDir, STATE_DIR);
+		await mkdir(stateDir, { recursive: true });
+		const logPath = join(stateDir, LOG_FILE);
+		const logFile = await open(logPath, "a", TOKEN_MODE);
+		let child: Bun.Subprocess<"ignore", "pipe", number>;
+		try {
+			// Inside the `try`, not before it: everything after a successful
+			// `open` is the descriptor's responsibility, and a `chmod` that threw
+			// on the outside would skip the `finally` below and leak it.
+			await chmod(logPath, TOKEN_MODE);
+			child = Bun.spawn({
+				cmd: [process.execPath, import.meta.path, ...argv],
+				env: { ...process.env, [DETACHED_ENV]: "1" },
+				stdio: ["ignore", "pipe", logFile.fd],
+				detached: true,
+			});
+		} finally {
+			// The child holds its own inherited descriptor, so this one has done
+			// its job the moment the spawn returns. Closed in `finally` because a
+			// spawn that throws would otherwise leak it, and on the happy path a
+			// launcher that kept it open leaks one descriptor per restart.
+			await logFile.close();
+		}
+		child.unref();
+		process.stdout.write(`${join(stateDir, "daemon.sock")}\n`);
 
 		// Stop at the first newline rather than at EOF: the child closes stdout
 		// right after announcing, but a launcher that waited for EOF regardless

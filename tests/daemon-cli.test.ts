@@ -13,7 +13,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -25,9 +25,12 @@ import type {
 	JsonRpcFailure,
 	JsonRpcSuccess,
 	KillResult,
+	LogsTailResult,
 	MethodName,
 	SchedulesListResult,
+	StatusResult,
 } from "../src/shared/protocol";
+import { PROTOCOL_VERSION } from "../src/shared/protocol";
 import { METHODS } from "../src/shared/protocol-schemas";
 import { controlCall, operatorToken } from "./fixtures/control-client";
 import { hermeticChildEnv } from "./fixtures/hermetic-env";
@@ -175,6 +178,83 @@ async function call<T>(
 		);
 	}
 	return validated.value as T;
+}
+
+/**
+ * Whether a pid still names a live process. Three call sites need the same
+ * answer, and the EPERM branch is the non-obvious half: a process owned by
+ * another user exists, so refusing the signal is proof of life, not absence.
+ */
+function alive(pid: number): boolean {
+	try {
+		// Signal 0 checks for existence without delivering anything.
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+/**
+ * Launch a real detached daemon over `agentDir`, ready to answer on return.
+ *
+ * The in-process `bootWith` harness cannot stand in here: `daemon stop` waits
+ * for the pid named in the pidfile to stop existing, and an in-process daemon's
+ * pid is this test runner's own — it would wait out its deadline on a process
+ * that cannot exit until the suite does.
+ *
+ * Readiness needs no polling. `bootDaemon` claims the pidfile and serves the
+ * control socket before it calls `announce`, and the launcher blocks on exactly
+ * that announcement, so the launcher's own exit is the readiness event: by the
+ * time it returns, the pidfile is written and the socket is bound.
+ */
+async function spawnDaemon(
+	agentDir: string,
+): Promise<{ pid: number; socketPath: string }> {
+	const mainPath = join(import.meta.dir, "..", "src", "daemon", "main.ts");
+	const launcher = Bun.spawn({
+		cmd: [process.execPath, mainPath, "daemon"],
+		env: hermeticChildEnv({
+			PI_CODING_AGENT_DIR: agentDir,
+			OMP_AUTH_BROKER_URL: "",
+			OMP_AUTH_BROKER_TOKEN: "",
+		}),
+		cwd: agentDir,
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	const exitCode = await launcher.exited;
+	const stdout = await new Response(launcher.stdout).text();
+	const stderr = await new Response(launcher.stderr).text();
+	if (exitCode !== 0) {
+		throw new Error(
+			`launcher exited ${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`,
+		);
+	}
+
+	const stateDir = join(agentDir, "oh-my-agent");
+	const socketPath = join(stateDir, "daemon.sock");
+	const pid = Number(
+		(await Bun.file(join(stateDir, "daemon.pid")).text()).trim(),
+	);
+	if (!Number.isInteger(pid) || pid <= 0) {
+		throw new Error(
+			`detached daemon wrote no usable pidfile\nstderr: ${stderr}`,
+		);
+	}
+	cleanups.push(async () => {
+		if (!alive(pid)) return;
+		try {
+			process.kill(pid, "SIGTERM");
+		} catch {
+			// Exited between the check and the signal.
+		}
+	});
+
+	// The socket is bound before `announce`, so one call proves it answers
+	// rather than merely existing — and it throws here, at the harness, if the
+	// readiness contract above ever stops holding.
+	await call(socketPath, "status");
+	return { pid, socketPath };
 }
 
 // ── Verb coverage ────────────────────────────────────────────────────────────
@@ -628,6 +708,271 @@ describe("omp-agent CLI — console verb", () => {
 		expect(result.io.stderr).toContain(
 			"oh-my-agent daemon not running — start it with `omp-agent daemon`.",
 		);
+	});
+});
+
+// ── Lifecycle verbs ─────────────────────────────────────────────────────────
+
+describe("omp-agent CLI — daemon stop", () => {
+	test("stops a live daemon and returns once the pidfile and process are gone", async () => {
+		const agentDir = await tempAgentDir();
+		const { pid, socketPath } = await spawnDaemon(agentDir);
+		const pidPath = join(agentDir, "oh-my-agent", "daemon.pid");
+
+		const result = await runCapture(["daemon", "stop"], { agentDir });
+
+		expect(result.code).toBe(0);
+		expect(result.io.stderr).toBe("");
+		// Verified gone, not merely asked to go: the CLI's whole contract here
+		// is that it does not return until both are true.
+		expect(existsSync(pidPath)).toBe(false);
+		expect(alive(pid)).toBe(false);
+		expect(existsSync(socketPath)).toBe(false);
+	}, 60_000);
+
+	test("refuses a stale pidfile without claiming it stopped anything", async () => {
+		const agentDir = await tempAgentDir();
+		const stateDir = join(agentDir, "oh-my-agent");
+		await mkdir(stateDir, { recursive: true });
+
+		// A pid that cannot be alive: spawn a child, reap it, reuse its pid.
+		const corpse = Bun.spawn([process.execPath, "-e", "process.exit(0)"], {
+			stdio: ["ignore", "ignore", "ignore"],
+		});
+		await corpse.exited;
+		const pidPath = join(stateDir, "daemon.pid");
+		await writeFile(pidPath, String(corpse.pid), "utf8");
+
+		const result = await runCapture(["daemon", "stop"], { agentDir });
+
+		// No socket to reach, so this is the daemon-down condition — and the
+		// stale pidfile must survive, because deleting another profile's
+		// bookkeeping on a guess is exactly what pidfile ownership prevents.
+		expect(result.code).toBe(3);
+		expect(result.io.stdout).toBe("");
+		expect(result.io.stderr).toContain(
+			"oh-my-agent daemon not running — start it with `omp-agent daemon`.",
+		);
+		expect(existsSync(pidPath)).toBe(true);
+	});
+
+	test("daemon down → exit 3 with the daemon-down sentence", async () => {
+		const agentDir = await tempAgentDir();
+		const result = await runCapture(["daemon", "stop"], { agentDir });
+		expect(result.code).toBe(3);
+		expect(result.io.stdout).toBe("");
+		expect(result.io.stderr).toContain(
+			"oh-my-agent daemon not running — start it with `omp-agent daemon`.",
+		);
+	});
+
+	test("bad lifecycle args exit 2 with usage", async () => {
+		const agentDir = await tempAgentDir();
+		for (const argv of [
+			["daemon", "stop", "extra"],
+			["daemon", "restart", "extra"],
+			["daemon", "wobble"],
+		]) {
+			const result = await runCapture(argv, { agentDir });
+			expect(result.code).toBe(2);
+			expect(result.io.stderr).toContain("Usage:");
+		}
+	});
+
+	test("the real binary routes `daemon stop` to the CLI, never to a boot", async () => {
+		// `runCli` in-process cannot see this: the bug lives in main.ts's own
+		// entry dispatch, where routing on the verb alone sends `daemon stop`
+		// into the detached launcher and starts a second daemon instead of
+		// stopping the first. Only the real binary exercises that branch.
+		const agentDir = await tempAgentDir();
+		const { pid } = await spawnDaemon(agentDir);
+		const pidPath = join(agentDir, "oh-my-agent", "daemon.pid");
+		const mainPath = join(import.meta.dir, "..", "src", "daemon", "main.ts");
+
+		const proc = Bun.spawn({
+			cmd: [process.execPath, mainPath, "daemon", "stop"],
+			env: hermeticChildEnv({
+				PI_CODING_AGENT_DIR: agentDir,
+				OMP_AUTH_BROKER_URL: "",
+				OMP_AUTH_BROKER_TOKEN: "",
+			}),
+			cwd: agentDir,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const exitCode = await proc.exited;
+		const stdout = await new Response(proc.stdout).text();
+		const stderr = await new Response(proc.stderr).text();
+
+		expect(exitCode).toBe(0);
+		expect(stdout).toContain("stopped");
+		// A boot would have announced a socket path and left a daemon running.
+		expect(stdout).not.toContain("daemon.sock");
+		expect(stderr).toBe("");
+		expect(alive(pid)).toBe(false);
+		expect(existsSync(pidPath)).toBe(false);
+	}, 90_000);
+});
+
+describe("omp-agent CLI — daemon restart", () => {
+	test("replaces the running daemon with a new live one", async () => {
+		const agentDir = await tempAgentDir();
+		const { pid: first, socketPath } = await spawnDaemon(agentDir);
+		const pidPath = join(agentDir, "oh-my-agent", "daemon.pid");
+
+		const result = await runCapture(["daemon", "restart"], { agentDir });
+		expect(result.code).toBe(0);
+		expect(result.io.stderr).toBe("");
+
+		const second = Number((await Bun.file(pidPath).text()).trim());
+		cleanups.push(async () => {
+			if (!alive(second)) return;
+			try {
+				process.kill(second, "SIGTERM");
+			} catch {
+				// Exited between the check and the signal.
+			}
+		});
+
+		// A restart that reported success while reusing the old process, or
+		// left the old one alive beside the new one, is the failure this pins.
+		expect(second).not.toBe(first);
+		expect(alive(first)).toBe(false);
+		expect(alive(second)).toBe(true);
+
+		// And the replacement actually serves: a restart is only done when the
+		// socket answers again.
+		const status = await call<StatusResult>(socketPath, "status");
+		expect(status.protocolVersion).toBe(PROTOCOL_VERSION);
+	}, 90_000);
+
+	test("daemon down → exit 3, no daemon started", async () => {
+		const agentDir = await tempAgentDir();
+		const pidPath = join(agentDir, "oh-my-agent", "daemon.pid");
+
+		// Restart is stop-then-launch, and the stop half has nothing to reach.
+		// Starting one anyway would make `restart` a second spelling of
+		// `daemon`, which is not what it was asked to be.
+		const result = await runCapture(["daemon", "restart"], { agentDir });
+		expect(result.code).toBe(3);
+		expect(result.io.stdout).toBe("");
+		expect(result.io.stderr).toContain(
+			"oh-my-agent daemon not running — start it with `omp-agent daemon`.",
+		);
+		expect(existsSync(pidPath)).toBe(false);
+	});
+});
+
+describe("omp-agent CLI — logs source selection", () => {
+	test("`logs daemon` tails the daemon's own stderr log", async () => {
+		const agentDir = await tempAgentDir();
+		const { socketPath } = await spawnDaemon(agentDir);
+
+		// The daemon logs its console URL to stderr at boot, so a live daemon
+		// always has at least that line to show.
+		const result = await runCapture(["logs", "daemon"], { agentDir });
+		expect(result.code).toBe(0);
+		expect(result.io.stderr).toBe("");
+		expect(result.io.stdout).toContain("console:");
+
+		// And it is the daemon log, not a worker's: no peer named "daemon"
+		// exists, so a `logs_tail` that ignored the source would have failed.
+		const tailed = await call<LogsTailResult>(socketPath, "logs_tail", {
+			name: "daemon",
+			source: "daemon",
+		});
+		expect(tailed.name).toBe("daemon");
+		expect(tailed.lines.join("\n")).toContain("console:");
+	}, 60_000);
+
+	test("the daemon log accumulates stderr across restarts", async () => {
+		const agentDir = await tempAgentDir();
+		await spawnDaemon(agentDir);
+		const logPath = join(agentDir, "oh-my-agent", "daemon.log");
+
+		const firstBoot = await Bun.file(logPath).text();
+		expect(firstBoot).toContain("console:");
+
+		const restarted = await runCapture(["daemon", "restart"], { agentDir });
+		expect(restarted.code).toBe(0);
+		const pid = Number(
+			(
+				await Bun.file(join(agentDir, "oh-my-agent", "daemon.pid")).text()
+			).trim(),
+		);
+		cleanups.push(async () => {
+			if (!alive(pid)) return;
+			try {
+				process.kill(pid, "SIGTERM");
+			} catch {
+				// Exited between the check and the signal.
+			}
+		});
+
+		// Appended, never truncated: the first boot's output is what a restart
+		// loop would otherwise destroy exactly when it is needed.
+		const afterRestart = await Bun.file(logPath).text();
+		expect(afterRestart.startsWith(firstBoot)).toBe(true);
+		expect(afterRestart.length).toBeGreaterThan(firstBoot.length);
+	}, 90_000);
+
+	test("the daemon log is 0600, like the token it records", async () => {
+		const agentDir = await tempAgentDir();
+		await spawnDaemon(agentDir);
+		const stateDir = join(agentDir, "oh-my-agent");
+		const logPath = join(stateDir, "daemon.log");
+
+		// The daemon announces its console URL to stderr at boot, and that URL
+		// carries the operator token — so this file is a credential store, and
+		// must be no more readable than the token file beside it.
+		expect(await Bun.file(logPath).text()).toContain("?token=");
+		expect((await stat(logPath)).mode & 0o777).toBe(0o600);
+		expect((await stat(join(stateDir, "console-token"))).mode & 0o777).toBe(
+			0o600,
+		);
+	}, 60_000);
+
+	test("a world-readable log left by an earlier boot is tightened", async () => {
+		const agentDir = await tempAgentDir();
+		const stateDir = join(agentDir, "oh-my-agent");
+		await mkdir(stateDir, { recursive: true });
+		const logPath = join(stateDir, "daemon.log");
+
+		// Crash debris from a boot that predates the 0600 create mode. `open`'s
+		// mode argument never touches an existing file, so this is the case only
+		// the chmod covers — and the case where a token is already on disk.
+		await writeFile(logPath, "console: http://127.0.0.1:9999/?token=stale\n", {
+			encoding: "utf8",
+			mode: 0o644,
+		});
+		await chmod(logPath, 0o644);
+		expect((await stat(logPath)).mode & 0o777).toBe(0o644);
+
+		await spawnDaemon(agentDir);
+
+		expect((await stat(logPath)).mode & 0o777).toBe(0o600);
+		// Tightened, never truncated: the old boot's output is still evidence.
+		expect(await Bun.file(logPath).text()).toContain("?token=stale");
+	}, 60_000);
+
+	test("`logs <peer>` still defaults to worker stderr", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		const { handle } = await bootWith(agentDir);
+
+		const result = await runCapture(["logs", "reviewer"], { agentDir });
+		expect(result.code).toBe(0);
+		expect(result.io.stderr).toBe("");
+
+		// The default is worker stderr, and an unknown peer is still refused
+		// there — proving `source` defaulted rather than silently widening.
+		const tailed = await call<LogsTailResult>(handle.socketPath, "logs_tail", {
+			name: "reviewer",
+		});
+		expect(tailed.name).toBe("reviewer");
+
+		const ghost = await runCapture(["logs", "ghost"], { agentDir });
+		expect(ghost.code).toBe(4);
+		expect(ghost.io.stderr).toContain("Unknown agent: ghost");
 	});
 });
 

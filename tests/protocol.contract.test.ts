@@ -102,6 +102,7 @@ const VALID_PARAMS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 	schedules_arm: { scheduleId: "sched-1", enabled: true },
 	kill: { name: "researcher" },
 	bump: { account: "acct-1", budgetUsd: 5 },
+	daemon_stop: {},
 };
 
 const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
@@ -178,6 +179,7 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 	},
 	kill: { name: "researcher", state: "stopped" },
 	bump: { account: "acct-1", budgetUsd: 5, resumed: ["researcher"] },
+	daemon_stop: { stopping: true, pid: 4242 },
 };
 
 // ---------------------------------------------------------------------------
@@ -185,7 +187,7 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 // ---------------------------------------------------------------------------
 
 describe("declared method set", () => {
-	test("is exactly the twenty contracted methods", () => {
+	test("is exactly the twenty-one contracted methods", () => {
 		expect(([...METHOD_NAMES] as string[]).sort()).toEqual(
 			[
 				"agent_create",
@@ -197,6 +199,7 @@ describe("declared method set", () => {
 				"chat_send",
 				"chat_unreact",
 				"chat_wait",
+				"daemon_stop",
 				"definition_get",
 				"definition_update",
 				"kill",
@@ -289,6 +292,31 @@ describe("params validation", () => {
 		});
 		expect(emptyMessage.ok).toBe(false);
 		if (!emptyMessage.ok) expect(emptyMessage.field).toBe("message");
+	});
+
+	test("logs_tail source selects a stream and refuses anything else", () => {
+		// Omitted is the default and means worker stderr — every client
+		// predating daemon logs sends exactly this.
+		expect(METHODS.logs_tail.validateParams({ name: "researcher" }).ok).toBe(
+			true,
+		);
+		for (const source of ["worker", "daemon"] as const) {
+			expect(
+				METHODS.logs_tail.validateParams({ name: "researcher", source }).ok,
+			).toBe(true);
+		}
+
+		// A near-miss spelling must be refused rather than silently defaulting
+		// to worker stderr: an operator asking for daemon logs and getting a
+		// peer's would have no way to tell.
+		for (const source of ["Daemon", "daemons", "", "all", 7, null, true]) {
+			const result = METHODS.logs_tail.validateParams({
+				name: "researcher",
+				source,
+			});
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.field).toBe("source");
+		}
 	});
 
 	test("reaction params require messageId, actor, and emoji", () => {
@@ -451,6 +479,17 @@ describe("params validation", () => {
 			});
 			expect(result.ok).toBe(false);
 			if (!result.ok) expect(result.field).toBe(`changes.${field}`);
+		}
+	});
+
+	test("daemon_stop takes no params and names the offending key", () => {
+		expect(METHODS.daemon_stop.validateParams({}).ok).toBe(true);
+
+		const extra = METHODS.daemon_stop.validateParams({ force: true });
+		expect(extra.ok).toBe(false);
+		if (!extra.ok) {
+			expect(extra.field).toBe("params");
+			expect(extra.message).toContain("force");
 		}
 	});
 });
@@ -724,6 +763,35 @@ describe("result validation", () => {
 		expect(wrongRebuildRequired.ok).toBe(false);
 		if (!wrongRebuildRequired.ok)
 			expect(wrongRebuildRequired.field).toBe("rebuildRequired");
+	});
+
+	test("daemon_stop result requires stopping true and a live pid", () => {
+		expect(
+			METHODS.daemon_stop.validateResult({ stopping: true, pid: 4242 }).ok,
+		).toBe(true);
+
+		// `stopping: false` is not a shape this method may answer: the ack is
+		// the promise that shutdown is under way, so a daemon declining is an
+		// error frame, never a success saying "no".
+		const notStopping = METHODS.daemon_stop.validateResult({
+			stopping: false,
+			pid: 4242,
+		});
+		expect(notStopping.ok).toBe(false);
+		if (!notStopping.ok) expect(notStopping.field).toBe("stopping");
+
+		const missingPid = METHODS.daemon_stop.validateResult({ stopping: true });
+		expect(missingPid.ok).toBe(false);
+		if (!missingPid.ok) expect(missingPid.field).toBe("pid");
+
+		for (const pid of [0, -1, 1.5]) {
+			const result = METHODS.daemon_stop.validateResult({
+				stopping: true,
+				pid,
+			});
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.field).toBe("pid");
+		}
 	});
 });
 

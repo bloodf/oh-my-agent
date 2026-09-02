@@ -9,6 +9,7 @@
  * JSON-RPC errors preserve the daemon's message; malformed CLI args render the
  * complete usage and return exit code 2.
  */
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -20,6 +21,7 @@ import type {
 	AgentStatusResult,
 	BumpResult,
 	ChatReadResult,
+	DaemonStopResult,
 	InjectResult,
 	JsonRpcFailure,
 	JsonRpcSuccess,
@@ -37,6 +39,16 @@ import { METHODS } from "../shared/protocol-schemas";
 const STATE_DIR = "oh-my-agent";
 const CONSOLE_URL_FILE = "console-url";
 const CONSOLE_TOKEN_FILE = "console-token";
+const PID_FILE = "daemon.pid";
+
+/**
+ * The daemon binary, resolved from this module rather than from `process.argv`.
+ *
+ * `daemon restart` re-launches it, and argv[1] is whatever wrapper invoked the
+ * CLI — a shim, a bundled entry, a test harness — which is not necessarily the
+ * daemon at all.
+ */
+const MAIN_PATH = join(import.meta.dir, "main.ts");
 
 export const DAEMON_UNAVAILABLE =
 	"oh-my-agent daemon not running — start it with `omp-agent daemon`.";
@@ -80,10 +92,12 @@ Verbs:
   rooms post <room> <text...>
   schedule
   schedule <id> on|off
-  logs <name> [n]
+  logs <name|daemon> [n]
   inject <name> <text...>
   bump <account> <usd>
   console
+  daemon stop
+  daemon restart
 `;
 
 /** Equivalent to the extension client, kept local so daemon never imports UI. */
@@ -325,6 +339,13 @@ async function schedule(
 	);
 }
 
+/**
+ * `logs <name|daemon> [n]` — a stderr tail from one worker, or the daemon.
+ *
+ * `daemon` is a literal selector rather than a peer lookup: it maps to the
+ * protocol's `source`, so a peer that happens to be named "daemon" still has
+ * its own logs reachable by every other client.
+ */
 async function logs(
 	client: DaemonClient,
 	args: string[],
@@ -340,6 +361,7 @@ async function logs(
 	const result = await client.call<LogsTailResult>("logs_tail", {
 		name,
 		...(lines === undefined ? {} : { lines }),
+		...(name === "daemon" ? { source: "daemon" as const } : {}),
 	});
 	output(io, result, json, result.lines.join("\n"));
 }
@@ -397,6 +419,104 @@ async function consoleUrl(
 		);
 	}
 	write(io, true, url, false);
+}
+
+/** How long `daemon stop` waits for the daemon to actually disappear. */
+const STOP_DEADLINE_MS = 15_000;
+
+/** How often that wait re-checks. Short: the daemon usually exits promptly. */
+const STOP_POLL_MS = 50;
+
+/** Whether a pid still names a live process. */
+function alive(pid: number): boolean {
+	try {
+		// Signal 0 checks for existence without delivering anything.
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		// EPERM means it exists but belongs to someone else: still alive.
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+/**
+ * Stop the daemon and return only once it is verifiably gone.
+ *
+ * The RPC acknowledges before shutting down, so the ack alone means "shutdown
+ * started", not "daemon stopped" — and `daemon restart` is only safe to launch
+ * into a state where the pidfile is free. So this waits for both the process
+ * and the pidfile to disappear, which is exactly what the next boot's
+ * `claimPidfile` will check.
+ *
+ * Polling is unavoidable here: the daemon is another OS process this one is not
+ * the parent of, so there is no exit event to await, and the pidfile's removal
+ * is the only signal it publishes.
+ */
+async function stopDaemon(
+	client: DaemonClient,
+	stateDir: string,
+): Promise<DaemonStopResult> {
+	const acked = await client.call<DaemonStopResult>("daemon_stop", {});
+	const pidPath = join(stateDir, PID_FILE);
+
+	const deadline = Date.now() + STOP_DEADLINE_MS;
+	while (Date.now() < deadline) {
+		if (!alive(acked.pid) && !existsSync(pidPath)) return acked;
+		await Bun.sleep(STOP_POLL_MS);
+	}
+	throw new DaemonRpcError(
+		`oh-my-agent daemon (pid ${acked.pid}) did not stop within ${STOP_DEADLINE_MS / 1000}s; ` +
+			`it is still running or ${pidPath} was left behind.`,
+	);
+}
+
+async function daemon(
+	client: DaemonClient,
+	args: string[],
+	agentDir: string,
+	io: CliIo,
+	json: boolean,
+): Promise<void> {
+	if (args.length !== 2) throw new UsageError();
+	const action = args[1];
+	if (action !== "stop" && action !== "restart") throw new UsageError();
+
+	const stopped = await stopDaemon(client, join(agentDir, STATE_DIR));
+	if (action === "stop") {
+		output(io, stopped, json, `stopped\t${stopped.pid}`);
+		return;
+	}
+
+	// Only now, with the pidfile released, can a new daemon claim it. The
+	// launcher is the same one `omp-agent daemon` runs, so a restart and a cold
+	// start produce identical daemons rather than two boot paths to keep in step.
+	//
+	// `PI_CODING_AGENT_DIR` is set explicitly rather than inherited: this CLI
+	// may have been pointed at a profile by `--agentDir`, and a replacement that
+	// read the ambient environment would boot a different profile than the one
+	// just stopped.
+	const launcher = Bun.spawn({
+		cmd: [process.execPath, MAIN_PATH, "daemon"],
+		env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	const exitCode = await launcher.exited;
+	if (exitCode !== 0) {
+		const stderr = (await new Response(launcher.stderr).text()).trim();
+		throw new DaemonRpcError(
+			`oh-my-agent daemon failed to restart (exit ${exitCode})${stderr.length > 0 ? `: ${stderr}` : ""}`,
+		);
+	}
+	// The launcher exits only after the child announces, and the child announces
+	// only once its socket is served — so this line is proof the replacement is
+	// up, not merely spawned.
+	const started = (await new Response(launcher.stdout).text()).trim();
+	output(
+		io,
+		{ stopped: stopped.pid, socket: started.split("\n", 1)[0] ?? "" },
+		json,
+		`restarted\t${started.split("\n", 1)[0] ?? ""}`,
+	);
 }
 
 export async function runCli(
@@ -471,6 +591,9 @@ export async function runCli(
 			case "console":
 				if (args.length !== 1) throw new UsageError();
 				await consoleUrl(client, stateDir, io);
+				return 0;
+			case "daemon":
+				await daemon(client, args, agentDir, io, json);
 				return 0;
 			default:
 				throw new UsageError();

@@ -46,6 +46,7 @@ import type {
 	ChatSendResult,
 	ChatUnreactResult,
 	ChatWaitResult,
+	DaemonStopResult,
 	InjectResult,
 	JsonRpcFailure,
 	JsonRpcSuccess,
@@ -1204,9 +1205,15 @@ describe("bootDaemon — protocol errors", () => {
 			schedules_arm: { scheduleId: "missing", enabled: false },
 			kill: { name: "reviewer" },
 			bump: { account: "anthropic", budgetUsd: 5 },
+			// Declared here so the exhaustive `Record` keeps its drift guard,
+			// but never dispatched below: stopping the daemon mid-sweep would
+			// tear down the socket the rest of these calls still need. Its own
+			// tests cover that it is served, acked, and refused.
+			daemon_stop: {},
 		};
 
 		for (const [method, payload] of Object.entries(params)) {
+			if (method === "daemon_stop") continue;
 			const frame = await rpc(handle.socketPath, method, payload);
 			if ("error" in frame) {
 				// A handler may legitimately reject its arguments; it may never
@@ -1303,6 +1310,129 @@ describe("bootDaemon — shutdown", () => {
 		const { handle } = await boot();
 		await handle.close();
 		await handle.close();
+	});
+
+	test("daemon_stop acks before the socket disappears, then closes the daemon", async () => {
+		const { handle } = await boot();
+
+		// The ack is the whole point: a handler that awaited its own shutdown
+		// would tear the socket down under the reply, and this caller would see
+		// a connection error instead of a result. So the frame is read and
+		// contract-validated first, and only then is shutdown observed.
+		const acked = await call<DaemonStopResult>(
+			handle.socketPath,
+			"daemon_stop",
+		);
+		expect(acked).toEqual({ stopping: true, pid: process.pid });
+
+		// `close()` is memoized, so this joins the shutdown the ack scheduled
+		// rather than starting a second one — shutdown awaited as an event, not
+		// watched for on a timer.
+		await handle.close();
+
+		// This daemon runs in-process, so its close path is observable directly
+		// rather than through a pid: the files it advertises itself with are
+		// gone and the socket has stopped answering.
+		expect(existsSync(handle.pidPath)).toBe(false);
+		expect(existsSync(handle.socketPath)).toBe(false);
+		await expect(rpc(handle.socketPath, "status")).rejects.toThrow();
+	});
+
+	test("a second daemon_stop acks again and still closes exactly once", async () => {
+		const { handle } = await boot();
+
+		// Both calls are issued before either can be answered, so the second is
+		// guaranteed to reach a socket that is still up — no race to catch, and
+		// no "connection failed" outcome to have to accept as a pass.
+		const [first, second] = await Promise.all([
+			call<DaemonStopResult>(handle.socketPath, "daemon_stop", {}, 1),
+			call<DaemonStopResult>(handle.socketPath, "daemon_stop", {}, 2),
+		]);
+		expect(first).toEqual({ stopping: true, pid: process.pid });
+		// Idempotent means the same ack, not a refusal for arriving second.
+		expect(second).toEqual(first);
+
+		await handle.close();
+		expect(existsSync(handle.pidPath)).toBe(false);
+
+		// Two acks, one shutdown: `close()` is memoized, so this second call
+		// returns the same completed close rather than tearing down twice.
+		await handle.close();
+	});
+
+	test("daemon_stop refuses when the pidfile names another process", async () => {
+		const { handle } = await boot();
+
+		// Overwrite the pidfile with a pid that is not this daemon: the guard
+		// is ownership, so a daemon whose pidfile was taken over by another
+		// boot must refuse rather than tear down state it no longer owns.
+		const corpse = Bun.spawn([process.execPath, "-e", "process.exit(0)"], {
+			stdio: ["ignore", "ignore", "ignore"],
+		});
+		await corpse.exited;
+		await writeFile(handle.pidPath, String(corpse.pid), "utf8");
+
+		const failure = expectFailure(await rpc(handle.socketPath, "daemon_stop"));
+		expect(failure.error.code).toBe(ERROR_CODE.INVALID_PARAMS);
+		expect(failure.error.message).toMatch(/pidfile/i);
+
+		// Refused means still serving, and still holding its own files.
+		const status = await call<StatusResult>(handle.socketPath, "status", {}, 2);
+		expect(status.protocolVersion).toBe(PROTOCOL_VERSION);
+		expect(existsSync(handle.socketPath)).toBe(true);
+	});
+
+	test("daemon_stop is operator-only", async () => {
+		const dir = await tempAgentDir();
+		const rooms = await RoomStore.open(join(dir, "stop-scope.db"));
+		cleanups.push(() => rooms.close());
+
+		let requested = 0;
+		const socket = await startControlSocket({
+			socketPath: join(dir, "stop-scope.sock"),
+			context: {
+				rooms,
+				supervisor: undefined as unknown as Supervisor,
+				peers: new Map(),
+				knownRooms: new Map(),
+				schedules: new Map(),
+				startedAt: Date.now(),
+				now: Date.now,
+				ensureRoom: async () => {},
+				spawnPeer: async () => ({ name: "none", state: "stopped" }),
+				armSchedule: () => undefined,
+				bumpAccount: async () => [],
+				requestDaemonStop: async () => {
+					requested++;
+					return { stopping: true, pid: process.pid };
+				},
+			},
+			identities: new Map([
+				[TEST_OPERATOR_TOKEN, { kind: "operator" }],
+				["worker-token", { kind: "worker", peerName: "reviewer" }],
+			]),
+		});
+		cleanups.push(() => socket.close());
+
+		const denied = expectFailure(
+			(await controlCall(
+				socket.socketPath,
+				"daemon_stop",
+				{},
+				"worker-token",
+			)) as JsonRpcSuccess | JsonRpcFailure,
+		);
+		expect(denied.error.code).toBe(ERROR_CODE.FORBIDDEN);
+		// Refused before the handler, not merely refused in the answer: a
+		// worker that reached the stop path has already killed the daemon.
+		expect(requested).toBe(0);
+
+		const allowed = await call<DaemonStopResult>(
+			socket.socketPath,
+			"daemon_stop",
+		);
+		expect(allowed.stopping).toBe(true);
+		expect(requested).toBe(1);
 	});
 
 	test("close stops every worker it started", async () => {
