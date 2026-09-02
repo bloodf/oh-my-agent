@@ -35,6 +35,7 @@ import {
 	resolveOmpCli,
 	startWorker,
 } from "../src/worker/lifecycle";
+import { supervisorContract } from "./contracts/supervisor-contract.test";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -432,15 +433,7 @@ describe("worker env allowlist", () => {
 
 // ── RPC subprocess lifecycle (§9.1) ─────────────────────────────────────────
 
-describe("worker lifecycle", () => {
-	test("starts a real child process in the running state", async () => {
-		const handle = await start();
-
-		expect(handle.state).toBe("running");
-		expect(handle.name).toBe("reviewer");
-		expect(handle.sessionId).toBeTruthy();
-	});
-
+describe("worker lifecycle backend invariants", () => {
 	test("reports the live child pid and clears it after stop", async () => {
 		const handle = await start();
 		const pid = handle.pid;
@@ -481,47 +474,11 @@ describe("worker lifecycle", () => {
 		);
 		expect(leaked).toEqual([]);
 	});
+});
 
-	test("park stops the process but keeps the fingerprint", async () => {
-		const handle = await start();
-		const { fingerprint } = handle;
-
-		await handle.park();
-
-		expect(handle.state).toBe("parked");
-		expect(handle.fingerprint).toBe(fingerprint);
-		expect(handle.sessionId).toBeUndefined();
-		expect(handle.pid).toBeUndefined();
-	});
-
-	test("a parked worker resumes as a fresh process", async () => {
-		const handle = await start();
-		const firstSession = handle.sessionId;
-
-		await handle.park();
-		await handle.resume();
-
-		expect(handle.state).toBe("running");
-		expect(handle.sessionId).toBeTruthy();
-		expect(handle.sessionId).not.toBe(firstSession);
-		expect(handle.pid).toBeGreaterThan(0);
-	});
-
-	test("stop is idempotent and terminal", async () => {
-		const handle = await start();
-		await handle.stop();
-		await handle.stop();
-
-		expect(handle.state).toBe("stopped");
-		expect(handle.sessionId).toBeUndefined();
-	});
-
-	test("a stopped worker refuses prompts and resumes", async () => {
-		const handle = await start();
-		await handle.stop();
-		await expect(handle.prompt("anything")).rejects.toThrow();
-		await expect(handle.resume()).rejects.toThrow();
-	});
+supervisorContract({
+	name: "RPC worker",
+	start: () => start({}, [{ text: "Completed." }]),
 });
 
 // ── §5.1 delegation contract, asserted against the live child ───────────────

@@ -50,6 +50,7 @@ import {
 	type InProcessWorkerOptions,
 	startInProcessWorker,
 } from "../src/worker/lifecycle";
+import { supervisorContract } from "./contracts/supervisor-contract.test";
 import { controlCall, operatorToken } from "./fixtures/control-client";
 import { hermeticChildEnv } from "./fixtures/hermetic-env";
 
@@ -191,8 +192,8 @@ function optsFor(
 
 // ── startInProcessWorker — handle shape ──────────────────────────────────────
 
-describe("startInProcessWorker — handle shape", () => {
-	test("returns a running worker with the right invariants", async () => {
+describe("startInProcessWorker — backend invariants", () => {
+	test("has no child process or shell sandbox", async () => {
 		const factory = scriptedFactory([{ kind: "idle-after" }]);
 		const cwd = await makeCwd();
 		const agentDir = await makeCwd();
@@ -201,12 +202,8 @@ describe("startInProcessWorker — handle shape", () => {
 		);
 		cleanups.push(() => handle.stop());
 
-		expect(handle.name).toBe("reviewer");
-		expect(handle.state).toBe("running");
 		expect(handle.sandboxed).toBe(false);
 		expect(handle.pid).toBeUndefined();
-		expect(handle.fingerprint).toBe("fp-1234");
-		expect(handle.sessionId).toBeTruthy();
 	});
 
 	test("the synthetic layout has no materializer root and no worker tokens", async () => {
@@ -248,39 +245,10 @@ describe("startInProcessWorker — handle shape", () => {
 
 // ── prompt ─────────────────────────────────────────────────────────────────
 
-describe("startInProcessWorker — prompt", () => {
-	test("awaits terminal run-state idle after session.prompt", async () => {
-		const factory = scriptedFactory([{ kind: "idle-after" }]);
-		const cwd = await makeCwd();
-		const agentDir = await makeCwd();
-		const handle = await startInProcessWorker(
-			optsFor(peer(), cwd, agentDir, factory),
-		);
-		cleanups.push(() => handle.stop());
-
-		await handle.prompt("summarize README");
-		// `idle-after` factory emits "running" then "idle" — the handle must
-		// have awaited the terminal `idle` before resolving.
-		expect(factory.sessions[0]?.emitRunState).toBeDefined();
-	});
-
-	test("throws on turnTimeoutMs expiry when run-state never goes idle", async () => {
-		const factory = scriptedFactory([{ kind: "never-idle" }]);
-		const cwd = await makeCwd();
-		const agentDir = await makeCwd();
-		const handle = await startInProcessWorker(
-			optsFor(peer(), cwd, agentDir, factory, { turnTimeoutMs: 50 }),
-		);
-		cleanups.push(() => handle.stop());
-
-		await expect(handle.prompt("hi")).rejects.toThrow();
-	});
-});
-
 // ── park / resume / stop ───────────────────────────────────────────────────
 
-describe("startInProcessWorker — lifecycle", () => {
-	test("park disposes the session and refuses further prompts", async () => {
+describe("startInProcessWorker — backend lifecycle", () => {
+	test("a parked worker refuses prompts", async () => {
 		const factory = scriptedFactory([
 			{ kind: "idle-after" },
 			{ kind: "idle-after" },
@@ -292,64 +260,11 @@ describe("startInProcessWorker — lifecycle", () => {
 		);
 
 		await handle.park();
-		expect(handle.state).toBe("parked");
-		expect(handle.sessionId).toBeUndefined();
-		expect(handle.pid).toBeUndefined();
 		await expect(handle.prompt("anything")).rejects.toThrow();
 		await handle.stop();
 	});
 
-	test("resume re-invokes createSession and returns to running", async () => {
-		const factory = scriptedFactory([
-			{ kind: "idle-after" },
-			{ kind: "idle-after" },
-		]);
-		const cwd = await makeCwd();
-		const agentDir = await makeCwd();
-		const handle = await startInProcessWorker(
-			optsFor(peer(), cwd, agentDir, factory),
-		);
-		const firstSession = handle.sessionId;
-		expect(firstSession).toBeTruthy();
-
-		await handle.park();
-		await handle.resume();
-		expect(handle.state).toBe("running");
-		expect(handle.sessionId).toBeTruthy();
-		expect(handle.sessionId).not.toBe(firstSession);
-		expect(factory.calls.length).toBe(2);
-
-		await handle.stop();
-	});
-
-	test("resume from stopped throws", async () => {
-		const factory = scriptedFactory([{ kind: "idle-after" }]);
-		const cwd = await makeCwd();
-		const agentDir = await makeCwd();
-		const handle = await startInProcessWorker(
-			optsFor(peer(), cwd, agentDir, factory),
-		);
-
-		await handle.stop();
-		await expect(handle.resume()).rejects.toThrow();
-	});
-
-	test("stop is idempotent and terminal; further prompts reject", async () => {
-		const factory = scriptedFactory([{ kind: "idle-after" }]);
-		const cwd = await makeCwd();
-		const agentDir = await makeCwd();
-		const handle = await startInProcessWorker(
-			optsFor(peer(), cwd, agentDir, factory),
-		);
-
-		await handle.stop();
-		await handle.stop();
-		expect(handle.state).toBe("stopped");
-		expect(handle.sessionId).toBeUndefined();
-		await expect(handle.prompt("nope")).rejects.toThrow();
-	});
-
-	test("end-to-end: park → resume → prompt → stop", async () => {
+	test("resume creates a second in-process session", async () => {
 		const factory = scriptedFactory([
 			{ kind: "idle-after" },
 			{ kind: "idle-after" },
@@ -361,14 +276,28 @@ describe("startInProcessWorker — lifecycle", () => {
 		);
 
 		await handle.park();
-		expect(handle.state).toBe("parked");
 		await handle.resume();
-		expect(handle.state).toBe("running");
-		await handle.prompt("do thing");
-		expect(handle.state).toBe("running");
+		expect(factory.calls).toHaveLength(2);
+
 		await handle.stop();
-		expect(handle.state).toBe("stopped");
 	});
+});
+
+supervisorContract({
+	name: "in-process worker",
+	start: async () => {
+		const factory = scriptedFactory([
+			{ kind: "idle-after" },
+			{ kind: "idle-after" },
+		]);
+		const cwd = await makeCwd();
+		const agentDir = await makeCwd();
+		const handle = await startInProcessWorker(
+			optsFor(peer(), cwd, agentDir, factory),
+		);
+		cleanups.push(() => handle.stop());
+		return handle;
+	},
 });
 
 // ── Daemon wiring: BootDaemonOptions.inProcessWorkers ──────────────────────
@@ -398,101 +327,46 @@ async function writePeerFile(agentDir: string, name: string): Promise<void> {
 }
 
 describe("daemon boot — inProcessWorkers selection", () => {
-	test("WorkerFactoryOptions.inProcess defaults to false", async () => {
+	async function selectedBackend(inProcessWorkers?: boolean): Promise<{
+		pid?: number;
+		sandboxed?: boolean;
+	}> {
 		const agentDir = await makeCwd();
 		await writePeerFile(agentDir, "reviewer");
-
-		let observed: boolean | undefined;
-		const factory: WorkerFactory = async (options) => {
-			observed = options.inProcess;
-			return {
-				name: options.peer.name,
-				state: "running" as const,
-				prompt: async () => {},
-				park: async () => {},
-				resume: async () => {},
-				stop: async () => {},
-			};
-		};
-
 		const handle = await bootDaemon({
-			env: hermeticChildEnv(),
+			env: hermeticChildEnv({ OMA_CONSOLE: "0" }),
 			agentDir,
 			projectDir: agentDir,
-			workerFactory: factory,
+			...(inProcessWorkers === undefined ? {} : { inProcessWorkers }),
 		});
 		cleanups.push(() => handle.close());
-		expect(observed).toBe(false);
+
+		const token = await operatorToken(join(agentDir, "oh-my-agent"));
+		const response = (await controlCall(
+			handle.socketPath,
+			"agent_status",
+			{},
+			token,
+		)) as {
+			result?: { agents?: Array<{ pid?: number; sandboxed?: boolean }> };
+		};
+		const selected = response.result?.agents?.[0];
+		expect(selected).toBeDefined();
+		return selected ?? {};
+	}
+
+	test("uses the in-process backend when enabled", async () => {
+		const worker = await selectedBackend(true);
+
+		expect(worker.pid).toBeUndefined();
+		expect(worker.sandboxed).toBe(false);
 	});
 
-	test("WorkerFactoryOptions.inProcess is plumbed true when boot sets inProcessWorkers", async () => {
-		const agentDir = await makeCwd();
-		await writePeerFile(agentDir, "reviewer");
+	test("uses the RPC backend by default", async () => {
+		const worker = await selectedBackend();
 
-		let observed: boolean | undefined;
-		const factory: WorkerFactory = async (options) => {
-			observed = options.inProcess;
-			return {
-				name: options.peer.name,
-				state: "running" as const,
-				prompt: async () => {},
-				park: async () => {},
-				resume: async () => {},
-				stop: async () => {},
-			};
-		};
-
-		const handle = await bootDaemon({
-			env: hermeticChildEnv(),
-			agentDir,
-			projectDir: agentDir,
-			inProcessWorkers: true,
-			workerFactory: factory,
-		});
-		cleanups.push(() => handle.close());
-		expect(observed).toBe(true);
-	});
-
-	test("the default factory's in-process branch uses startInProcessWorker", async () => {
-		// Drive the production default factory through `bootDaemon` with the
-		// flag on. The default factory ignores any `inProcess` field that
-		// isn't on the type, so this test only passes once the production
-		// branch is wired: a custom workerFactory that asserts the
-		// `inProcess` flag was `true` at the call site, AND we separately
-		// verify the option is part of the public type at compile time
-		// (import-shape assertion).
-		const agentDir = await makeCwd();
-		await writePeerFile(agentDir, "reviewer");
-		const projectDir = await makeCwd();
-
-		let observed: boolean | undefined;
-		const factory: WorkerFactory = async (options) => {
-			observed = options.inProcess;
-			// The handle we return is shaped like the in-process backend: no
-			// pid, not sandboxed. The test below asserts the call site routed
-			// through the in-process branch by checking `observed === true`.
-			return {
-				name: options.peer.name,
-				state: "running" as const,
-				pid: undefined,
-				sandboxed: false,
-				fingerprint: fingerprintPeerDefinition(options.peer),
-				prompt: async () => {},
-				park: async () => {},
-				resume: async () => {},
-				stop: async () => {},
-			};
-		};
-
-		const handle = await bootDaemon({
-			env: hermeticChildEnv(),
-			agentDir,
-			projectDir,
-			inProcessWorkers: true,
-			workerFactory: factory,
-		});
-		cleanups.push(() => handle.close());
-		expect(observed).toBe(true);
+		expect(worker.pid).toBeGreaterThan(0);
+		expect(worker.sandboxed).toBe(false);
 	});
 });
 
