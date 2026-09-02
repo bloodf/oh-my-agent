@@ -2061,19 +2061,23 @@ describe("accessibility", () => {
 			);
 			expect(inPane?.inThread).toBe(true);
 
-			// A keyboard reply posts from here. The console API drops parentId
-			// (console-api.ts reads only { body, author }), so the reply lands
-			// as a root message rather than inside the pane — a server-side
-			// T-1101 gap outside this task's editable files. The a11y claim
-			// under test is keyboard operability: Enter in the thread composer
-			// sends without a pointer.
+			// A keyboard reply posts from here, and lands in the thread: Enter
+			// in the thread composer sends without a pointer, and the composer
+			// carries the open root's id so the reply renders inside the pane
+			// instead of appearing as a second root in the transcript.
 			await focusInPage(page, "#thread-composer-input");
 			await page.keyboard.type("Reply from the keyboard.");
 			await page.keyboard.press("Enter");
 			await waitFor(
-				"keyboard thread reply posted",
-				() => transcriptText(page),
+				"keyboard thread reply in the pane",
+				() =>
+					page
+						.$eval("#thread-messages", (node) => node.textContent ?? "")
+						.catch(() => ""),
 				(t) => t.includes("Reply from the keyboard."),
+			);
+			expect(await transcriptText(page)).not.toContain(
+				"Reply from the keyboard.",
 			);
 
 			// Escape closes the pane and returns focus to the opener.

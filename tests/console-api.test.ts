@@ -528,6 +528,182 @@ describe("messages", () => {
 		});
 	});
 
+	test("a posted reply lands in the parent's thread", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const root = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Root question.",
+		});
+
+		const res = await h.call("/api/channels/%23reviews/messages", {
+			method: "POST",
+			body: JSON.stringify({ body: "Threaded answer.", parentId: root.id }),
+		});
+
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as {
+			message: {
+				id: number;
+				parentId: number | null;
+				threadRootId: number | null;
+			};
+		};
+		// The whole point of the route: parentage survives the trip through the
+		// supervisor into the store, so the reply is in the thread and not a
+		// second root beside it.
+		expect(body.message.parentId).toBe(root.id);
+		expect(body.message.threadRootId).toBe(root.id);
+	});
+
+	test("a reply is read back by its own parentage, not by body alone", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const root = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Root question.",
+		});
+		// The same words as a root and as a reply: a read-back that matched on
+		// author and body alone would hand back whichever landed last.
+		await h.call("/api/channels/%23reviews/messages", {
+			method: "POST",
+			body: JSON.stringify({ body: "Same words." }),
+		});
+
+		const res = await h.call("/api/channels/%23reviews/messages", {
+			method: "POST",
+			body: JSON.stringify({ body: "Same words.", parentId: root.id }),
+		});
+
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as {
+			message: { parentId: number | null; threadRootId: number | null };
+		};
+		expect(body.message.parentId).toBe(root.id);
+		expect(body.message.threadRootId).toBe(root.id);
+	});
+
+	test("a parentId in another room is a 400", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		await h.ensureRoom("#ops");
+		const elsewhere = await h.rooms.post({
+			room: "#ops",
+			author: "@you",
+			body: "Not this room.",
+		});
+
+		const res = await h.call("/api/channels/%23reviews/messages", {
+			method: "POST",
+			body: JSON.stringify({ body: "Reply.", parentId: elsewhere.id }),
+		});
+
+		// The store owns the rule; the route only has to surface its refusal
+		// in the store's own words rather than answering 500.
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as {
+			error: { code: string; message: string };
+		};
+		expect(body.error.code).toBe("invalid_request");
+		expect(body.error.message).toContain("MESSAGE_NOT_IN_ROOM");
+
+		// And nothing landed.
+		const messages = await h.rooms.listMessages("#reviews", {});
+		expect(messages).toHaveLength(0);
+	});
+
+	test("an unknown parentId is a 400", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+
+		const res = await h.call("/api/channels/%23reviews/messages", {
+			method: "POST",
+			body: JSON.stringify({ body: "Reply.", parentId: 9999 }),
+		});
+
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: { code: string } };
+		expect(body.error.code).toBe("invalid_request");
+	});
+
+	test("a malformed parentId is refused before the store sees it", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+
+		for (const parentId of [0, -1, 1.5, "1", true, {}]) {
+			const res = await h.call("/api/channels/%23reviews/messages", {
+				method: "POST",
+				body: JSON.stringify({ body: "Reply.", parentId }),
+			});
+			expect(res.status).toBe(400);
+			const body = (await res.json()) as { error: { code: string } };
+			expect(body.error.code).toBe("invalid_request");
+		}
+
+		expect(await h.rooms.listMessages("#reviews", {})).toHaveLength(0);
+	});
+
+	test("an absent or null parentId posts a root", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+
+		const res = await h.call("/api/channels/%23reviews/messages", {
+			method: "POST",
+			body: JSON.stringify({ body: "A root.", parentId: null }),
+		});
+
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as {
+			message: { parentId: number | null };
+		};
+		expect(body.message.parentId).toBeNull();
+	});
+
+	test("a supervisor failure stays a 500, not a caller error", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		// Only the store's parentage rules are the caller's fault. A delivery
+		// fault is the daemon's, and reporting it as 400 would tell an
+		// operator to fix a message that was never wrong.
+		h.supervisor.post = async () => {
+			throw new Error("worker socket closed");
+		};
+
+		const res = await h.call("/api/channels/%23reviews/messages", {
+			method: "POST",
+			body: JSON.stringify({ body: "Please review PR 12." }),
+		});
+
+		expect(res.status).toBe(500);
+		const body = (await res.json()) as {
+			error: { code: string; message: string };
+		};
+		expect(body.error.code).toBe("internal");
+		expect(body.error.message).toContain("worker socket closed");
+	});
+
+	test("a message that does not land is a 500, not a caller error", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		// A post the supervisor swallows silently leaves the read-back empty.
+		// That is a daemon fault too, and the 400 mapping must not absorb it.
+		h.supervisor.post = async () => [];
+
+		const res = await h.call("/api/channels/%23reviews/messages", {
+			method: "POST",
+			body: JSON.stringify({ body: "Please review PR 12." }),
+		});
+
+		expect(res.status).toBe(500);
+		const body = (await res.json()) as {
+			error: { code: string; message: string };
+		};
+		expect(body.error.code).toBe("internal");
+		expect(body.error.message).toContain("did not land");
+	});
+
 	test("messages paginate with afterId and limit", async () => {
 		const h = await harness();
 		await h.ensureRoom("#reviews");

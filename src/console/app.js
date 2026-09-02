@@ -698,15 +698,28 @@
 	};
 
 	/**
+	 * Send one message, as a root or into an open thread.
+	 *
+	 * A refused post renders the daemon's own words in the notice: the
+	 * composer has already been cleared by the time this runs, so swallowing
+	 * the error would lose the operator's text with no explanation of where
+	 * it went.
 	 * @param {string} body
 	 * @param {number | null} parentId
 	 */
 	const postMessage = async (body, parentId) => {
 		if (currentRoom === null) return;
-		await api(`/api/channels/${encodeURIComponent(currentRoom)}/messages`, {
-			method: "POST",
-			body: { body, author: HUMAN_AUTHOR, parentId },
-		});
+		noticeEl.textContent = "";
+		try {
+			await api(`/api/channels/${encodeURIComponent(currentRoom)}/messages`, {
+				method: "POST",
+				body: { body, author: HUMAN_AUTHOR, parentId },
+			});
+		} catch (error) {
+			noticeEl.textContent =
+				error instanceof Error ? error.message : String(error);
+			return;
+		}
 		await refresh();
 	};
 

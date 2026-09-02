@@ -349,16 +349,26 @@ export async function startConsoleApi(
 	/**
 	 * Post through the supervisor — which is what wakes subscribed peers — then
 	 * read our own message back so the caller gets its id and thread fields.
+	 *
+	 * The read-back matches on parentage as well as author and body: the same
+	 * operator sending the same words as a root and as a reply is ordinary
+	 * traffic, and matching on the text alone would hand back the wrong row.
 	 */
 	const post = async (
 		roomId: string,
 		author: string,
 		body: string,
+		parentId: number | null,
 	): Promise<RoomMessage> => {
 		const before = (await rooms.listMessages(roomId, {})).at(-1)?.id ?? 0;
-		await supervisor.post({ room: roomId, author, body });
+		await supervisor.post({ room: roomId, author, body, parentId });
 		const landed = (await rooms.listMessages(roomId, { afterId: before }))
-			.filter((message) => message.author === author && message.body === body)
+			.filter(
+				(message) =>
+					message.author === author &&
+					message.body === body &&
+					message.parentId === parentId,
+			)
 			.at(-1);
 		if (!landed) throw new Error(`Post to ${roomId} did not land`);
 		return landed;
@@ -786,14 +796,60 @@ export async function startConsoleApi(
 				}
 				const fields =
 					typeof payload === "object" && payload !== null
-						? (payload as { body?: unknown; author?: unknown })
+						? (payload as {
+								body?: unknown;
+								author?: unknown;
+								parentId?: unknown;
+							})
 						: {};
 				const body = typeof fields.body === "string" ? fields.body.trim() : "";
 				if (body.length === 0) {
 					return fail(400, "invalid_request", "Message body is required");
 				}
+				// Absent and null both mean "a root"; anything else has to be a
+				// real message id, because a `0` or a `"12"` reaching the store
+				// would either be silently dropped or refused as a server error
+				// rather than answered as the caller's mistake.
+				let parentId: number | null = null;
+				if (fields.parentId !== undefined && fields.parentId !== null) {
+					if (
+						typeof fields.parentId !== "number" ||
+						!Number.isInteger(fields.parentId) ||
+						fields.parentId < 1
+					) {
+						return fail(
+							400,
+							"invalid_request",
+							"parentId must be a positive integer message id",
+						);
+					}
+					parentId = fields.parentId;
+				}
 				const author = humanAuthor(fields.author, "post author");
-				return json(201, { message: await post(roomId, author, body) });
+				try {
+					return json(201, {
+						message: await post(roomId, author, body, parentId),
+					});
+				} catch (error) {
+					// Thread parentage is the store's rule to enforce — it alone
+					// knows the room's history — so its refusal is relayed in its
+					// own words rather than restated here.
+					//
+					// Only those two are the caller's fault. Everything else — a
+					// dead worker, a post that never landed — is the daemon's,
+					// and is rethrown to the 500 the server wraps `handle` in:
+					// answering 400 would tell an operator to fix a message that
+					// was never wrong, and hide an outage as a typo.
+					const failure =
+						error instanceof Error ? error.message : String(error);
+					if (
+						failure !== "MESSAGE_NOT_IN_ROOM" &&
+						failure !== "MESSAGE_NOT_FOUND"
+					) {
+						throw error;
+					}
+					return fail(400, "invalid_request", failure);
+				}
 			}
 
 			return fail(405, "method_not_allowed", `${request.method} not allowed`);

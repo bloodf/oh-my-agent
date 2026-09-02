@@ -398,6 +398,7 @@ export class Supervisor {
 		room: string;
 		author: string;
 		body: string;
+		parentId?: number | null;
 	}): Promise<string[]> {
 		const message = await this.deps.rooms.post(input);
 
