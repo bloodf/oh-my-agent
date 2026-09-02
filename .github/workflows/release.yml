@@ -1,15 +1,22 @@
 name: release
 
 on:
-  push:
-    tags:
-      - "v*"
+  # Manual dispatch only, on both counts. This job runs the consumer-install
+  # E2E smoke, and E2E workflows are manual-trigger only; publishing is also
+  # irreversible, so a tag push must never be able to put a version on the
+  # registry by itself. An operator names the tag and says, in the same
+  # action, whether this run publishes it.
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to dry-run (e.g. v1.2.3)"
+        description: "Release tag to verify (e.g. v1.2.3)"
         required: true
         type: string
+      publish:
+        description: "Publish the verified tarball to npm (unchecked = verify only)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -21,13 +28,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ inputs.tag }}
 
       - uses: oven-sh/setup-bun@v2
 
       - name: Tag matches package.json version and omp.version
         env:
-          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           bun -e '
             const manifest = await Bun.file("package.json").json();
@@ -103,7 +110,7 @@ jobs:
         run: bun run test:consumer-install
 
       - name: Publish
-        if: github.event_name == 'push'
+        if: inputs.publish
         run: |
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
           npm publish "$OMA_PACKED_TARBALL" --provenance
