@@ -12,18 +12,20 @@
  * Upstream deps: `./boot` (broker hosting), `./credential-gateway`,
  * `../rooms/store`, `./scheduler`, `./supervisor`, `./peer-store`, `./socket`,
  * `./console-api`, `./operations` (composed once here and handed to both the
- * socket and the console, so kill, inject, logs-tail, and bump have one
- * implementation), and — through the default worker factory — `./materializer`
- * plus `../worker/lifecycle`.
+ * socket and console), and the `OMA_REMOTE` / `OMA_CONSOLE_ORIGIN` environment
+ * contract; through the default worker factory, `./materializer` plus
+ * `../worker/lifecycle`.
  *
  * Downstream consumers: the CLI entry point below, plus T-508's persistence and
  * T-504's TUI, which reach this process only through the socket.
  *
- * Failure modes: a live pidfile for the same agent dir refuses the boot rather
- * than letting two daemons share one vault, one socket, and one room database. A
- * stale pidfile or socket file left by a crash is replaced. Anything already
- * started when a later step fails is closed before the error propagates, so a
- * failed boot leaves no orphaned broker, gateway, or database handle.
+ * Failure modes: a live pidfile for the same agent dir refuses boot rather than
+ * letting two daemons share one vault, socket, and room database. Invalid
+ * exposure configuration, including an unsafe or missing external origin when
+ * remote mode serves the console, is rejected before the pidfile or any
+ * listener. A headless remote daemon (`OMA_CONSOLE=0`) has no console URL to
+ * expose and so needs no origin. Anything started when a later step fails is
+ * closed before the error propagates.
  *
  * Performance: one broker, one gateway, one SQLite handle, and one child process
  * per running peer.
@@ -60,6 +62,8 @@ import type {
 import type { WorkerHandle } from "../worker/lifecycle";
 import { startInProcessWorker, startWorker } from "../worker/lifecycle";
 import { resolveBrokerHosting } from "./boot";
+import type { DaemonStartOptions, WorkerBackend } from "./cli";
+import { parseDaemonStartArgs, runCli, USAGE, UsageError } from "./cli";
 import type { ConsoleApi } from "./console-api";
 import { isLoopback, startConsoleApi } from "./console-api";
 import { startCredentialGateway } from "./credential-gateway";
@@ -180,6 +184,8 @@ export interface DaemonHandle {
 	pidPath: string;
 	/** Where this daemon's stderr is persisted, across restarts. */
 	logPath: string;
+	/** Loopback listener URL for a trusted host-local proxy. Never persisted or announced. */
+	consoleListenerUrl?: string;
 	/** Where the console is served, token included; absent when disabled. */
 	consoleUrl?: string;
 	/**
@@ -418,6 +424,48 @@ export async function bootDaemon(
 	// and refusing after the pidfile would leave a dead daemon's claim behind
 	// for the operator to clean up by hand.
 	const remoteMode = env.OMA_REMOTE === "1";
+	// Whether the console listens at all in this boot, decided here rather
+	// than at the point of use: the origin requirement below has to see the
+	// same value the console-startup branch checks later, or a boot could
+	// pass this preflight for a headless daemon and then serve the console
+	// anyway on a token-bearing URL it was never allowed to announce.
+	const consoleEnabled = env.OMA_CONSOLE !== "0";
+	let externalConsoleOrigin: string | undefined;
+	const configuredConsoleOrigin = env.OMA_CONSOLE_ORIGIN;
+	if (configuredConsoleOrigin !== undefined && configuredConsoleOrigin !== "") {
+		let origin: URL;
+		try {
+			origin = new URL(configuredConsoleOrigin);
+		} catch {
+			throw new Error(
+				`Invalid OMA_CONSOLE_ORIGIN: ${JSON.stringify(configuredConsoleOrigin)}`,
+			);
+		}
+		if (
+			!remoteMode ||
+			origin.protocol !== "https:" ||
+			origin.username !== "" ||
+			origin.password !== "" ||
+			origin.pathname !== "/" ||
+			origin.search !== "" ||
+			origin.hash !== ""
+		) {
+			throw new Error(
+				`Invalid OMA_CONSOLE_ORIGIN: expected remote mode and an HTTPS origin without credentials, path, query, or hash; received ${JSON.stringify(configuredConsoleOrigin)}`,
+			);
+		}
+		externalConsoleOrigin = `${origin.origin}/`;
+	}
+	// Remote mode with the console enabled must have an external origin: a
+	// token-bearing URL announced or persisted over an untrusted network is
+	// exactly the exposure ADR-012 exists to close. `OMA_CONSOLE=0` is the
+	// documented escape hatch for a headless remote daemon (T-1204's
+	// parentage build), which has no URL to leak in the first place.
+	if (remoteMode && consoleEnabled && externalConsoleOrigin === undefined) {
+		throw new Error(
+			"OMA_CONSOLE_ORIGIN is required when OMA_REMOTE=1 and the console is enabled; set it to the external HTTPS origin the console is served behind, or set OMA_CONSOLE=0 for a headless remote daemon.",
+		);
+	}
 
 	// Every listener the daemon owns, named with the variable that would move
 	// it. Enumerated rather than checked ad hoc so a listener added later has
@@ -451,6 +499,7 @@ export async function bootDaemon(
 	// after the gateway and the broker were already listening.
 	await verifySecretMode(join(stateDir, TOKEN_FILE));
 	if (remoteMode) await verifySecretMode(join(stateDir, PROXY_SECRET_FILE));
+	log(`trust model: ${remoteMode ? "remote" : "loopback"}`);
 
 	await claimPidfile(pidPath);
 	// A crash can leave the socket file behind; `Bun.serve` will not bind over it.
@@ -1524,9 +1573,8 @@ export async function bootDaemon(
 		 * Serve the console, unless the operator asked for a headless daemon.
 		 *
 		 * Serving it is the point of the surface, so it is on by default; the
-		 * kill switch exists for a daemon nobody is meant to look at. The URL
-		 * carries the token, so it is announced once and never written to disk
-		 * beside the token file it would duplicate.
+		 * kill switch exists for a daemon nobody is meant to look at. Loopback URLs
+		 * carry the token; a configured external origin never does.
 		 *
 		 * Assigning `consoleApi` here — declared beside the supervisor — is
 		 * what completes the transition feed: the supervisor's `emit` hook and
@@ -1535,7 +1583,8 @@ export async function bootDaemon(
 		 * those transitions reaches connected consoles.
 		 */
 		let consoleUrl: string | undefined;
-		if (env.OMA_CONSOLE !== "0") {
+		let consoleListenerUrl: string | undefined;
+		if (consoleEnabled) {
 			const token = operatorToken;
 			// A typo'd port must not quietly become a random one: set means valid,
 			// and anything else refuses the boot (the materializer's standard).
@@ -1571,11 +1620,14 @@ export async function bootDaemon(
 				remoteMode,
 				...(proxySecret === undefined ? {} : { proxySecret }),
 			});
+			const api = consoleApi;
 			// Registered before anything below can throw, so a failed boot takes
 			// the listener down with it rather than leaving a bound port.
-			const api = consoleApi;
 			started.push(() => api.close());
-			consoleUrl = `${api.url}/?token=${encodeURIComponent(token)}`;
+			consoleListenerUrl = api.url;
+			consoleUrl =
+				externalConsoleOrigin ??
+				`${api.url}/?token=${encodeURIComponent(token)}`;
 			log(`console: ${consoleUrl}`);
 			// Persist the URL so a later `omp-agent console` can recover it
 			// without the launcher still being around to relay it.
@@ -1733,6 +1785,7 @@ export async function bootDaemon(
 			pidPath,
 			logPath,
 			...(consoleUrl === undefined ? {} : { consoleUrl }),
+			...(consoleListenerUrl === undefined ? {} : { consoleListenerUrl }),
 			close: closeDaemon,
 		};
 	} catch (error) {
@@ -1758,8 +1811,9 @@ export async function bootDaemon(
  * with the same registry makes shutdown a cleanup the host awaits instead of a
  * handler it races.
  */
-async function runDaemon(): Promise<void> {
+async function runDaemon(workerBackend: WorkerBackend): Promise<void> {
 	const handle = await bootDaemon({
+		inProcessWorkers: workerBackend === "in-process",
 		logger: (message) => {
 			process.stderr.write(`${message}\n`);
 		},
@@ -1777,14 +1831,17 @@ async function runDaemon(): Promise<void> {
 
 if (import.meta.main) {
 	const argv = process.argv.slice(2);
-	const verb = argv[0] ?? "daemon";
-	// Bare `daemon` boots one; `daemon stop` and `daemon restart` are CLI verbs
-	// about a daemon, not requests to become one. Routing on the verb alone
-	// would send them into the detached launcher, which is how `daemon stop`
-	// starts a second daemon instead of stopping the first.
-	if (verb !== "daemon" || argv.length > 1) {
+	let start: DaemonStartOptions | undefined;
+	try {
+		start = parseDaemonStartArgs(argv);
+	} catch (error) {
+		if (!(error instanceof UsageError)) throw error;
+		if (error.message.length > 0) process.stderr.write(`${error.message}\n`);
+		process.stderr.write(USAGE);
+		process.exit(2);
+	}
+	if (start === undefined) {
 		// The CLI handles its own dispatch, usage, and exit codes.
-		const { runCli } = await import("./cli");
 		const code = await runCli(argv, {
 			agentDir: process.env.PI_CODING_AGENT_DIR,
 		});
@@ -1792,7 +1849,7 @@ if (import.meta.main) {
 	}
 
 	if (process.env[DETACHED_ENV] === "1") {
-		await runDaemon();
+		await runDaemon(start.workerBackend);
 	} else {
 		// Surviving a closed terminal is the product's core claim, so the
 		// launching process must not be the daemon: re-spawn detached, print
@@ -1848,7 +1905,8 @@ if (import.meta.main) {
 			await logFile.close();
 		}
 		child.unref();
-		process.stdout.write(`${join(stateDir, "daemon.sock")}\n`);
+		const socketPath = join(stateDir, "daemon.sock");
+		if (!start.json) process.stdout.write(`${socketPath}\n`);
 
 		// Stop at the first newline rather than at EOF: the child closes stdout
 		// right after announcing, but a launcher that waited for EOF regardless
@@ -1866,8 +1924,14 @@ if (import.meta.main) {
 		} finally {
 			await reader.cancel().catch(() => {});
 		}
-		const url = readiness.split("\n", 1)[0]?.trim();
-		if (url !== undefined && url.length > 0) process.stdout.write(`${url}\n`);
+		const consoleUrl = readiness.split("\n", 1)[0]?.trim() || null;
+		if (start.json) {
+			process.stdout.write(
+				`${JSON.stringify({ socket: socketPath, consoleUrl, workerBackend: start.workerBackend })}\n`,
+			);
+		} else if (consoleUrl !== null) {
+			process.stdout.write(`${consoleUrl}\n`);
+		}
 
 		process.exit(0);
 	}

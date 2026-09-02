@@ -22,6 +22,7 @@ import {
 	ERROR_CODE,
 	type JsonRpcFailure,
 	type JsonRpcSuccess,
+	METHOD_NAMES,
 	type MethodName,
 } from "../src/shared/protocol";
 
@@ -54,6 +55,59 @@ function failure(frame: JsonRpcSuccess | JsonRpcFailure): JsonRpcFailure {
 		throw new Error(`Expected failure: ${JSON.stringify(frame)}`);
 	return frame;
 }
+
+const WORKER_METHODS: Partial<Record<MethodName, true>> = {
+	chat_send: true,
+	chat_read: true,
+	chat_wait: true,
+	chat_react: true,
+	chat_unreact: true,
+	agent_status: true,
+	agent_spawn: true,
+	task_handoff: true,
+	logs_tail: true,
+};
+
+const OPERATOR_ONLY_METHODS = METHOD_NAMES.filter(
+	(method) => WORKER_METHODS[method] !== true,
+);
+
+const VALID_PARAMS: Record<MethodName, unknown> = {
+	status: {},
+	chat_send: { room: "#general", body: "hello" },
+	chat_read: { room: "#general" },
+	chat_wait: { room: "#general", timeoutMs: 1 },
+	chat_react: { messageId: 1, actor: "reviewer", emoji: "+1" },
+	chat_unreact: { messageId: 1, actor: "reviewer", emoji: "+1" },
+	agent_spawn: { name: "child", parent: "reviewer" },
+	agent_status: { name: "reviewer" },
+	agent_create: {
+		name: "created",
+		description: "Created peer.",
+		model: ["openai/gpt-4.1"],
+		spawns: "*",
+		body: "Work.",
+	},
+	definition_get: { name: "reviewer" },
+	definition_update: {
+		name: "reviewer",
+		changes: { description: "Updated peer." },
+	},
+	logs_tail: { name: "reviewer" },
+	inject: { name: "reviewer", message: "continue" },
+	task_handoff: {
+		fromAgent: "reviewer",
+		toAgent: "other",
+		summary: "finish the audit",
+	},
+	rooms_list: {},
+	rooms_post: { room: "#general", body: "operator post" },
+	schedules_list: {},
+	schedules_arm: { scheduleId: "reviewer:schedule:0", enabled: false },
+	kill: { name: "other" },
+	bump: { account: "test", budgetUsd: 20 },
+	daemon_stop: {},
+};
 
 async function socketHarness(harness?: {
 	/**
@@ -243,32 +297,20 @@ describe("control-socket identity", () => {
 		});
 	});
 
-	test("requires a worker spawn parent to equal its identity", async () => {
+	test("loopback worker spawns may use foreign or omitted parents", async () => {
 		const { socketPath, spawnCalls } = await socketHarness();
-		expect(
-			failure(
-				await rpc(
-					socketPath,
-					"agent_spawn",
-					{ name: "child", parent: "other" },
-					"worker-token",
-				),
-			).error.code,
-		).toBe(ERROR_CODE.FORBIDDEN);
-		expect(
-			failure(
-				await rpc(socketPath, "agent_spawn", { name: "child" }, "worker-token"),
-			).error.code,
-		).toBe(ERROR_CODE.FORBIDDEN);
-		expect(
-			await rpc(
-				socketPath,
-				"agent_spawn",
-				{ name: "child", parent: "reviewer" },
-				"worker-token",
-			),
-		).toMatchObject({ result: { name: "child", state: "running" } });
-		expect(spawnCalls).toEqual([{ name: "child", parent: "reviewer" }]);
+		for (const params of [
+			{ name: "foreign-child", parent: "other" },
+			{ name: "unparented-child" },
+		]) {
+			expect(
+				await rpc(socketPath, "agent_spawn", params, "worker-token"),
+			).toMatchObject({ result: { name: params.name, state: "running" } });
+		}
+		expect(spawnCalls).toEqual([
+			{ name: "foreign-child", parent: "other" },
+			{ name: "unparented-child" },
+		]);
 	});
 
 	test("lets the operator call every operator-only method family", async () => {
@@ -551,14 +593,10 @@ describe("control-socket worker scope", () => {
  * out-of-scope on loopback.
  *
  * The worker surface is asserted unchanged in both, which is clause (b) and
- * T-1004: workers reach this same unix path with scoped tokens, and T-1204's
- * parentage enforcement is defined over the identity that resolves here. A
- * change that bought clause (a) by locking workers out would fail the pair of
- * `workerMethods` assertions below.
- *
- * T-1204's loopback-versus-remote parentage rule is deliberately not asserted
- * here: `agent_spawn` under a worker bearer must still require self-parentage
- * in remote mode today, and the test below pins that as the current contract.
+ * T-1004: workers reach this same unix path with scoped tokens. T-1204 adds
+ * hierarchy enforcement only in remote mode: a worker may spawn only with
+ * itself as parent remotely, while loopback keeps cooperative foreign and
+ * omitted parents.
  */
 describe("control-socket remote mode", () => {
 	test("refuses an unauthenticated call in remote mode", async () => {
@@ -627,6 +665,21 @@ describe("control-socket remote mode", () => {
 		expect(kills).toEqual([]);
 	});
 
+	test("every operator-only method requires the operator bearer remotely", async () => {
+		const { socketPath } = await socketHarness({ remoteMode: true });
+		for (const method of OPERATOR_ONLY_METHODS) {
+			expect(
+				failure(
+					await rpc(socketPath, method, VALID_PARAMS[method], "worker-token"),
+				).error,
+			).toEqual({
+				code: ERROR_CODE.UNAUTHORIZED,
+				message: "Unauthorized",
+				data: { protocolVersion: 1 },
+			});
+		}
+	});
+
 	test("the daemon-log selector requires the operator token in remote mode", async () => {
 		// `logs_tail` is worker-callable, but its `source: "daemon"` selector
 		// is operator-only (socket.ts) because the daemon's stderr carries the
@@ -655,23 +708,19 @@ describe("control-socket remote mode", () => {
 		});
 	});
 
-	test("worker spawn parentage is unchanged in remote mode (T-1204 boundary)", async () => {
+	test("remote worker spawns require the caller as parent", async () => {
 		const { socketPath, spawnCalls } = await socketHarness({
 			remoteMode: true,
 		});
-		// T-1201 does not relax hierarchy authorization. Pinned here so the
-		// T-1204 change that does relax it has to edit this expectation
-		// deliberately rather than pass by accident.
-		expect(
-			failure(
-				await rpc(
-					socketPath,
-					"agent_spawn",
-					{ name: "child", parent: "other" },
-					"worker-token",
-				),
-			).error.code,
-		).toBe(ERROR_CODE.FORBIDDEN);
+		for (const params of [
+			{ name: "foreign-child", parent: "other" },
+			{ name: "unparented-child" },
+		]) {
+			expect(
+				failure(await rpc(socketPath, "agent_spawn", params, "worker-token"))
+					.error.code,
+			).toBe(ERROR_CODE.FORBIDDEN);
+		}
 		expect(
 			await rpc(
 				socketPath,
