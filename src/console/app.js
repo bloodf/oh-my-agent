@@ -180,7 +180,7 @@
 
 	/**
 	 * @param {string} path
-	 * @param {{ method?: string, body?: unknown }} [init]
+	 * @param {{ method?: string, body?: unknown, headers?: Record<string, string> }} [init]
 	 * @returns {Promise<any>} parsed JSON; throws on an error envelope.
 	 */
 	const api = async (path, init = {}) => {
@@ -191,6 +191,10 @@
 				...(init.body === undefined
 					? {}
 					: { "content-type": "application/json" }),
+				// Last, so a caller can name what a request is for — a test proxy
+				// scopes a fault by that marker rather than by guessing from the
+				// query string, which any later caller could collide with.
+				...init.headers,
 			},
 			...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
 		});
@@ -1370,8 +1374,27 @@
 	 * those and never a notice somebody else put there. @type {string} */
 	let staleNotice = "";
 
+	/** Rooms read at once by one reconcile pass. A console can carry many
+	 * channels and the pass runs on every socket open, so the reads are
+	 * pooled rather than fired as one burst per room. */
+	const RECONCILE_CONCURRENCY = 4;
+
+	/** The pass now running, so a flapping socket cannot stack them.
+	 * @type {Promise<void> | null} */
+	let reconcilePass = null;
+	/** A socket opened while a pass was running. That pass read the store
+	 * before this open, so it may predate what this open owes: exactly one
+	 * more pass is queued, and further opens collapse into that same one. */
+	let reconcileQueued = false;
+
 	/**
 	 * Heal unread state from room transcripts after missed socket frames.
+	 *
+	 * Only rooms the operator has actually opened are read. A room with no
+	 * cursor has never been seen, so everything in it is history rather than
+	 * something missed while deaf — marking those would badge the whole
+	 * sidebar on the first socket open of every session, and would pay one
+	 * request per room to do it.
 	 *
 	 * A read that fails is caught per room rather than at the join. Settling
 	 * the join and reading nothing back would swallow the failure whole: the
@@ -1382,43 +1405,107 @@
 	 * retried by the next socket open, which is the only thing that fetches
 	 * a background room at all.
 	 */
-	const reconcileUnread = async () => {
-		const channels = lastChannels;
+	const reconcileOnce = async () => {
+		const rooms = lastChannels.filter(
+			(channel) =>
+				channel.id !== currentRoom && (lastSeen.get(channel.id) ?? 0) > 0,
+		);
 		/** @type {string[]} */
 		const stale = [];
-		await Promise.all(
-			channels
-				.filter((channel) => channel.id !== currentRoom)
-				.map(async (channel) => {
-					const seen = lastSeen.get(channel.id) ?? 0;
-					/** @type {any} */
-					let payload;
-					try {
-						payload = await api(
-							`/api/channels/${encodeURIComponent(channel.id)}/messages?afterId=${seen}&limit=1`,
-						);
-					} catch {
-						stale.push(channel.id);
-						return;
-					}
+		let next = 0;
+		const worker = async () => {
+			while (next < rooms.length) {
+				const channel = rooms[next];
+				next += 1;
+				// Re-read the cursor this room is actually at: the operator can
+				// visit a room mid-pass, which both moves its cursor and makes
+				// it the open room.
+				const seen = lastSeen.get(channel.id) ?? 0;
+				if (channel.id === currentRoom || seen === 0) continue;
+				// Total: anything thrown in here — the read, the payload's
+				// shape — is this room's failure alone. An escaping throw would
+				// reject the join and skip both the repaint and the notice
+				// while other rooms' marks were already committed.
+				try {
+					const payload = await api(
+						`/api/channels/${encodeURIComponent(channel.id)}/messages?afterId=${seen}&limit=1`,
+						// Names what this read is for, so a proxy or a log can
+						// tell reconciliation from a transcript load without
+						// pattern-matching a query string any later caller
+						// could collide with.
+						{ headers: { "X-Reconcile": "1" } },
+					);
 					const activity = /** @type {RoomMessage[]} */ (payload.messages)[0];
+					const currentSeen = lastSeen.get(channel.id) ?? 0;
 					if (
-						channel.id !== currentRoom &&
-						activity !== undefined &&
-						activity.id > (lastSeen.get(channel.id) ?? 0)
+						channel.id === currentRoom ||
+						currentSeen === 0 ||
+						activity === undefined ||
+						activity.id <= currentSeen
 					) {
-						unreadRooms.add(channel.id);
+						continue;
 					}
-				}),
-		);
-		renderChannels(lastChannels);
-		if (stale.length > 0) {
-			staleNotice = `Unread state is stale for ${stale.join(", ")}; retrying on the next reconnect.`;
-			noticeEl.textContent = staleNotice;
-		} else if (staleNotice !== "" && noticeEl.textContent === staleNotice) {
-			noticeEl.textContent = "";
-			staleNotice = "";
+					unreadRooms.add(channel.id);
+				} catch {
+					stale.push(channel.id);
+				}
+			}
+		};
+		try {
+			await Promise.all(
+				Array.from(
+					{ length: Math.min(RECONCILE_CONCURRENCY, rooms.length) },
+					() => worker(),
+				),
+			);
+		} finally {
+			renderChannels(lastChannels);
+			if (stale.length > 0) {
+				// Written only over silence or over this console's own stale
+				// words. Every other notice answers something the operator just
+				// did, and a background pass must not wipe it. `staleNotice` is
+				// set only on the write that lands, so a later retraction can
+				// never erase text this console does not own.
+				if (
+					noticeEl.textContent === "" ||
+					noticeEl.textContent === staleNotice
+				) {
+					staleNotice = `Unread state is stale for ${stale.join(", ")}; retrying on the next reconnect.`;
+					noticeEl.textContent = staleNotice;
+				}
+			} else if (staleNotice !== "" && noticeEl.textContent === staleNotice) {
+				noticeEl.textContent = "";
+				staleNotice = "";
+			}
+			window.__consoleReconcilePasses += 1;
 		}
+	};
+
+	/**
+	 * Run a reconcile pass, coalescing socket opens that arrive during one.
+	 *
+	 * A flapping socket must not stack passes: a running pass may have read
+	 * the store before this open, so exactly one more pass is queued behind
+	 * it and every further open collapses into that same one.
+	 */
+	const reconcileUnread = async () => {
+		if (reconcilePass !== null) {
+			reconcileQueued = true;
+			return reconcilePass;
+		}
+		reconcilePass = (async () => {
+			try {
+				await reconcileOnce();
+				while (reconcileQueued) {
+					reconcileQueued = false;
+					await reconcileOnce();
+				}
+			} finally {
+				reconcilePass = null;
+				reconcileQueued = false;
+			}
+		})();
+		return reconcilePass;
 	};
 
 	/** @param {string} room */
@@ -1731,6 +1818,7 @@
 	// Exposed for tests: a harness can sever the socket in-page.
 	const sockets = /** @type {WebSocket[]} */ ([]);
 	window.__consoleSockets = sockets;
+	window.__consoleReconcilePasses = 0;
 
 	/**
 	 * Connect, and on drop reconnect with backoff and refetch. The refetch is
@@ -1755,7 +1843,12 @@
 
 		socket.addEventListener("message", (event) => {
 			/** @type {ConsoleEvent} */
-			const frame = JSON.parse(String(event.data));
+			let frame;
+			try {
+				frame = JSON.parse(String(event.data));
+			} catch {
+				return;
+			}
 			// Each type drives exactly one refresher, never the transcript: a
 			// panel-level change must not rebuild the message list, which
 			// costs the reader their scroll position and focus. An unknown
