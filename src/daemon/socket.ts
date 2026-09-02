@@ -18,17 +18,22 @@
  * operator client speaks to this socket rather than to those objects.
  *
  * Failure modes: protocol problems are data, never exceptions. Missing or
- * unknown bearers answer `unauthorized`; authenticated callers outside their
- * method scope answer `forbidden`; malformed calls retain their declared
- * protocol errors. Handler throws answer an internal error. A worker's chat
- * attribution is overwritten with its own identity rather than refused
- * (ADR-014); the operator token keeps full override as the human's privileged
- * credential.
+ * unknown bearers answer `unauthorized`; in remote mode every operator-only
+ * surface answers `unauthorized` to a worker bearer too — the methods outside
+ * `workerMethods` and `logs_tail`'s `source: "daemon"` selector — because
+ * those authenticate against the operator token specifically (ADR-012 (a)).
+ * Authenticated callers outside their own scope answer `forbidden`; malformed
+ * calls retain their declared protocol errors. Handler throws answer an
+ * internal error. A worker's chat attribution is overwritten with its own
+ * identity rather than refused (ADR-014); the operator token keeps full
+ * override as the human's privileged credential.
  *
  * Performance: one dispatch per request. `chat_wait` parks on a polling loop;
  * reaction state checks scan public message listings across known rooms.
  * `close()` wakes polling sleeps so shutdown never waits out a long poll.
  */
+import { createHash, timingSafeEqual } from "node:crypto";
+
 import type { RoomStore, RoomMessage as StoredMessage } from "../rooms/store";
 import type { PeerDefinition } from "../shared/agent-definition";
 import { fingerprintPeerDefinition } from "../shared/agent-definition";
@@ -288,10 +293,57 @@ export type ControlIdentity =
 	| { kind: "operator" }
 	| { kind: "worker"; peerName: string };
 
+/**
+ * Bearer authentication here is unconditional: this listener refuses any
+ * connection whose bearer resolves to no registered identity, in every mode
+ * and including the default empty registry.
+ *
+ * Remote mode adds the scope half of ADR-012 clause (a): the operator surface
+ * authenticates against the operator token specifically, so a worker bearer
+ * reaching it is refused as a caller that did not present this surface's
+ * credential, not as a registered caller out of scope. That surface is every
+ * method outside `workerMethods`, plus `logs_tail`'s `source: "daemon"`
+ * selector, which is operator-only inside a worker-callable method.
+ *
+ * Clause (b) is why the worker surface is otherwise untouched: a worker's
+ * scoped token still reaches `workerMethods` in remote mode, and that resolved
+ * identity is what T-1204's parentage enforcement is defined over. The
+ * constant-time resolution below never varies with the flag.
+ */
 export interface StartControlSocketOptions {
 	socketPath: string;
 	context: DaemonContext;
+	/**
+	 * Bearer → identity. Resolved by constant-time comparison rather than by
+	 * `get`, so a caller cannot learn a valid prefix from how long a lookup
+	 * takes (ADR-012). The map is still the registry the daemon mutates as
+	 * workers come and go; only the read is different.
+	 */
 	identities?: ReadonlyMap<string, ControlIdentity>;
+	/**
+	 * Whether the daemon was booted with `OMA_REMOTE=1`. Absent means loopback,
+	 * which is what every existing caller composes.
+	 *
+	 * Read by `authorize`, and only there: it selects which refusal a worker
+	 * bearer gets on an operator-only surface. Loopback answers `forbidden` —
+	 * a registered caller outside its scope — which is byte-identical to the
+	 * behavior that predates this flag. Remote answers `unauthorized`, because
+	 * ADR-012 clause (a) makes the operator token the credential the operator
+	 * surface authenticates against, and a worker token is not that credential.
+	 *
+	 * Applied at both operator-only surfaces, so the rule is the surface's
+	 * rather than the method table's: the methods outside `workerMethods`, and
+	 * `logs_tail`'s daemon-log selector. A worker reading another worker's
+	 * logs stays `forbidden` in both modes — that is scoping within the worker
+	 * surface, not an operator resource.
+	 *
+	 * What it deliberately does not change: the bearer requirement itself,
+	 * which is unconditional in both modes, and the worker surface, which
+	 * clause (b) and T-1004 require keep working on scoped tokens over this
+	 * same unix path. T-1204 owns the second read — loopback-versus-remote
+	 * parentage — and reads the same threaded value.
+	 */
+	remoteMode?: boolean;
 }
 
 /**
@@ -417,10 +469,31 @@ function failure(id: JsonRpcId, code: number, message: string): JsonRpcFailure {
 	};
 }
 
+/**
+ * Compare over digests rather than raw bytes: `timingSafeEqual` throws on a
+ * length mismatch, and branching on length first would leak the credential's
+ * size. Hashing makes both operands 32 bytes whatever the input.
+ *
+ * Mirrors `./console-api`'s own comparison — the two listeners are separate
+ * modules and neither imports the other, so the constant-time property is
+ * stated at each surface rather than shared through a third module this
+ * task's file scope may not create.
+ */
+function tokenMatches(presented: string, expected: string): boolean {
+	const left = createHash("sha256").update(presented).digest();
+	const right = createHash("sha256").update(expected).digest();
+	return timingSafeEqual(left, right);
+}
+
 export async function startControlSocket(
 	options: StartControlSocketOptions,
 ): Promise<ControlSocket> {
-	const { socketPath, context, identities = new Map() } = options;
+	const {
+		socketPath,
+		context,
+		identities = new Map(),
+		remoteMode = false,
+	} = options;
 
 	/**
 	 * The shared operations, or an equivalent derived from this context.
@@ -955,7 +1028,16 @@ export async function startControlSocket(
 	): JsonRpcFailure | undefined => {
 		if (identity.kind === "operator") return undefined;
 		if (workerMethods[method] !== true) {
-			return forbidden(id, `Workers may not call ${method}`);
+			// ADR-012 (a): in remote mode the operator surface is reachable
+			// only with the operator token, so a worker bearer here has not
+			// presented the credential this surface authenticates against —
+			// the declared `unauthorized` shape, the same one a missing or
+			// unregistered bearer gets, rather than the `forbidden` that means
+			// "registered caller, out of scope". The worker surface below is
+			// untouched in both modes, which is clause (b).
+			return remoteMode
+				? unauthorized(id)
+				: forbidden(id, `Workers may not call ${method}`);
 		}
 		if (
 			method === "agent_spawn" &&
@@ -982,17 +1064,25 @@ export async function startControlSocket(
 			}
 			// The daemon's own stderr carries every peer's activity and the
 			// console URL that grants operator access, so the source selector
-			// is operator-only even though the method is not.
+			// is operator-only even though the method is not — and an
+			// operator-only surface is one the operator token is required for,
+			// so remote mode refuses a worker bearer here the same way it
+			// refuses one on an operator-only method (ADR-012 (a)). The
+			// refusal above stays `forbidden` in both modes: reading another
+			// worker's logs is scoping within the worker surface, not a fixed
+			// operator resource, so clause (a) has nothing to say about it.
 			if (
 				typeof params === "object" &&
 				params !== null &&
 				"source" in params &&
 				params.source === "daemon"
 			) {
-				return forbidden(
-					id,
-					`Worker ${identity.peerName} may not read the daemon log`,
-				);
+				return remoteMode
+					? unauthorized(id)
+					: forbidden(
+							id,
+							`Worker ${identity.peerName} may not read the daemon log`,
+						);
 			}
 		}
 		return undefined;
@@ -1096,7 +1186,18 @@ export async function startControlSocket(
 			const token = authorization?.startsWith("Bearer ")
 				? authorization.slice("Bearer ".length)
 				: undefined;
-			const identity = token === undefined ? undefined : identities.get(token);
+			// Constant-time: a `Map` lookup is a hash and a key comparison that
+			// stops at the first differing byte, so its timing is a function of
+			// how much of a valid bearer the caller already has. Every
+			// registered credential is compared, and the loop does not break on
+			// a hit, so the work is the same whether the token matches the
+			// first entry, the last, or none (ADR-012).
+			let identity: ControlIdentity | undefined;
+			if (token !== undefined) {
+				for (const [candidate, registered] of identities) {
+					if (tokenMatches(token, candidate)) identity = registered;
+				}
+			}
 			if (identity === undefined) {
 				return Response.json(unauthorized(0));
 			}

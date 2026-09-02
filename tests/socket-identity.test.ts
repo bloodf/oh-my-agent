@@ -55,7 +55,16 @@ function failure(frame: JsonRpcSuccess | JsonRpcFailure): JsonRpcFailure {
 	return frame;
 }
 
-async function socketHarness(): Promise<{
+async function socketHarness(harness?: {
+	/**
+	 * Composes the listener the way a `OMA_REMOTE=1` daemon does. T-1201's
+	 * contract is that the bearer requirement and the worker surface are
+	 * identical to loopback, and that the operator surface additionally
+	 * requires the operator token specifically — so a worker bearer reaching
+	 * an operator-only method is `unauthorized` here and `forbidden` there.
+	 */
+	remoteMode?: boolean;
+}): Promise<{
 	socketPath: string;
 	rooms: RoomStore;
 	identities: Map<string, ControlIdentity>;
@@ -178,7 +187,12 @@ async function socketHarness(): Promise<{
 		["worker-token", { kind: "worker", peerName: "reviewer" }],
 	]);
 	const socketPath = join(dir, "daemon.sock");
-	const socket = await startControlSocket({ socketPath, context, identities });
+	const socket = await startControlSocket({
+		socketPath,
+		context,
+		identities,
+		remoteMode: harness?.remoteMode ?? false,
+	});
 	cleanups.push(() => socket.close());
 	return { socketPath, rooms, identities, spawnCalls, kills, prompts };
 }
@@ -523,5 +537,205 @@ describe("control-socket worker scope", () => {
 		// The handoff posts into the shared room, and the post is what wakes
 		// the receiver — a handoff nobody was prompted for is just a message.
 		expect(prompts.get("other")?.join("\n")).toContain("finish the audit");
+	});
+});
+
+// ── Remote mode bearer contract (T-1201) ─────────────────────────────────────
+
+/**
+ * The control socket's bearer requirement does not vary with remote mode: a
+ * registered token is required in both, and an unregistered one is refused in
+ * both. What does vary is which credential the operator surface authenticates
+ * against — ADR-012 clause (a) — so a worker bearer on an operator-only
+ * method is refused as unauthenticated for that surface in remote mode and as
+ * out-of-scope on loopback.
+ *
+ * The worker surface is asserted unchanged in both, which is clause (b) and
+ * T-1004: workers reach this same unix path with scoped tokens, and T-1204's
+ * parentage enforcement is defined over the identity that resolves here. A
+ * change that bought clause (a) by locking workers out would fail the pair of
+ * `workerMethods` assertions below.
+ *
+ * T-1204's loopback-versus-remote parentage rule is deliberately not asserted
+ * here: `agent_spawn` under a worker bearer must still require self-parentage
+ * in remote mode today, and the test below pins that as the current contract.
+ */
+describe("control-socket remote mode", () => {
+	test("refuses an unauthenticated call in remote mode", async () => {
+		const { socketPath } = await socketHarness({ remoteMode: true });
+		expect(
+			failure(await rpc(socketPath, "chat_read", { room: "#general" })).error,
+		).toEqual({
+			code: ERROR_CODE.UNAUTHORIZED,
+			message: "Unauthorized",
+			data: { protocolVersion: 1 },
+		});
+	});
+
+	test("refuses an unregistered bearer in remote mode", async () => {
+		const { socketPath } = await socketHarness({ remoteMode: true });
+		expect(
+			failure(
+				await rpc(
+					socketPath,
+					"chat_read",
+					{ room: "#general" },
+					"not-a-registered-token",
+				),
+			).error.code,
+		).toBe(ERROR_CODE.UNAUTHORIZED);
+	});
+
+	test("answers the operator bearer in remote mode", async () => {
+		const { socketPath, kills } = await socketHarness({ remoteMode: true });
+		expect(
+			await rpc(
+				socketPath,
+				"chat_read",
+				{ room: "#general" },
+				"operator-token",
+			),
+		).toMatchObject({ result: { messages: [] } });
+		// An operator-only method too, so the pass is the full operator scope
+		// rather than the one method every identity may call.
+		expect(
+			await rpc(socketPath, "kill", { name: "other" }, "operator-token"),
+		).toHaveProperty("result");
+		expect(kills).toEqual(["other"]);
+	});
+
+	test("a scoped worker bearer keeps its own surface in remote mode", async () => {
+		// ADR-012 (b) / T-1004: the worker surface is the half that must not
+		// move. A success on a worker-callable method is the load-bearing
+		// assertion — refusing everything would satisfy the operator-side
+		// clause while breaking every worker on the same socket.
+		const { socketPath, kills } = await socketHarness({ remoteMode: true });
+		expect(
+			await rpc(socketPath, "chat_read", { room: "#general" }, "worker-token"),
+		).toMatchObject({ result: { messages: [] } });
+		// And nothing more: an operator-only method is refused as a caller
+		// that did not present the operator token, which is clause (a) made
+		// real rather than nominal.
+		expect(
+			failure(await rpc(socketPath, "kill", { name: "other" }, "worker-token"))
+				.error,
+		).toEqual({
+			code: ERROR_CODE.UNAUTHORIZED,
+			message: "Unauthorized",
+			data: { protocolVersion: 1 },
+		});
+		expect(kills).toEqual([]);
+	});
+
+	test("the daemon-log selector requires the operator token in remote mode", async () => {
+		// `logs_tail` is worker-callable, but its `source: "daemon"` selector
+		// is operator-only (socket.ts) because the daemon's stderr carries the
+		// console URL that grants operator access. An operator-only surface
+		// inside a worker-callable method is still an operator-only surface,
+		// so clause (a) applies here too — otherwise the rule would hold for
+		// the method table and go nominal at the one selector that guards the
+		// operator's own credential.
+		//
+		// Both refusals return from `authorize` before `operations` runs, so
+		// this needs no daemon log on the context.
+		const { socketPath } = await socketHarness({ remoteMode: true });
+		expect(
+			failure(
+				await rpc(
+					socketPath,
+					"logs_tail",
+					{ name: "reviewer", source: "daemon" },
+					"worker-token",
+				),
+			).error,
+		).toEqual({
+			code: ERROR_CODE.UNAUTHORIZED,
+			message: "Unauthorized",
+			data: { protocolVersion: 1 },
+		});
+	});
+
+	test("worker spawn parentage is unchanged in remote mode (T-1204 boundary)", async () => {
+		const { socketPath, spawnCalls } = await socketHarness({
+			remoteMode: true,
+		});
+		// T-1201 does not relax hierarchy authorization. Pinned here so the
+		// T-1204 change that does relax it has to edit this expectation
+		// deliberately rather than pass by accident.
+		expect(
+			failure(
+				await rpc(
+					socketPath,
+					"agent_spawn",
+					{ name: "child", parent: "other" },
+					"worker-token",
+				),
+			).error.code,
+		).toBe(ERROR_CODE.FORBIDDEN);
+		expect(
+			await rpc(
+				socketPath,
+				"agent_spawn",
+				{ name: "child", parent: "reviewer" },
+				"worker-token",
+			),
+		).toMatchObject({ result: { name: "child", state: "running" } });
+		expect(spawnCalls).toEqual([{ name: "child", parent: "reviewer" }]);
+	});
+
+	test("the loopback default is unchanged by the flag", async () => {
+		// The control: the same bearers and the same methods against the
+		// default composition. Every refusal here keeps the code it had before
+		// remote mode existed — the worker's operator-only call is `forbidden`,
+		// not the `unauthorized` its remote-mode counterpart now answers.
+		const { socketPath, kills } = await socketHarness();
+		expect(
+			failure(await rpc(socketPath, "chat_read", { room: "#general" })).error
+				.code,
+		).toBe(ERROR_CODE.UNAUTHORIZED);
+		expect(
+			failure(
+				await rpc(
+					socketPath,
+					"chat_read",
+					{ room: "#general" },
+					"not-a-registered-token",
+				),
+			).error.code,
+		).toBe(ERROR_CODE.UNAUTHORIZED);
+		expect(
+			await rpc(
+				socketPath,
+				"chat_read",
+				{ room: "#general" },
+				"operator-token",
+			),
+		).toHaveProperty("result");
+		expect(
+			await rpc(socketPath, "chat_read", { room: "#general" }, "worker-token"),
+		).toHaveProperty("result");
+		// Scope, matching the remote cases: the worker is refused the
+		// operator-only method and the operator is not.
+		expect(
+			failure(await rpc(socketPath, "kill", { name: "other" }, "worker-token"))
+				.error.code,
+		).toBe(ERROR_CODE.FORBIDDEN);
+		expect(
+			await rpc(socketPath, "kill", { name: "other" }, "operator-token"),
+		).toHaveProperty("result");
+		// The daemon-log selector's loopback half: `forbidden` here, and
+		// `unauthorized` in the remote-mode test above, so the flag's effect on
+		// this selector is pinned from both sides.
+		expect(
+			failure(
+				await rpc(
+					socketPath,
+					"logs_tail",
+					{ name: "reviewer", source: "daemon" },
+					"worker-token",
+				),
+			).error.code,
+		).toBe(ERROR_CODE.FORBIDDEN);
+		expect(kills).toEqual(["other"]);
 	});
 });

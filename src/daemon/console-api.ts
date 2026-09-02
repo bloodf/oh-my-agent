@@ -65,6 +65,24 @@ import type { Supervisor } from "./supervisor";
 /** Loopback: a console reachable from the network is a rooms leak. */
 const DEFAULT_HOSTNAME = "127.0.0.1";
 
+/**
+ * Whether a hostname names this machine only.
+ *
+ * Exported because the daemon's composition root refuses a routable bind for
+ * every listener before it opens any of them (ADR-012), and a second copy of
+ * this predicate there is a second answer to "is this loopback" — the pair
+ * would drift and the looser one would decide.
+ */
+export function isLoopback(hostname: string): boolean {
+	if (hostname === "localhost" || hostname === "::1" || hostname === "[::1]") {
+		return true;
+	}
+	const match = /^(?:127)(?:\.(\d{1,3})){3}$/.exec(hostname);
+	return (
+		match !== null && hostname.split(".").every((part) => Number(part) <= 255)
+	);
+}
+
 /** How often the live feed re-reads rooms while a console is connected. */
 const DEFAULT_POLL_INTERVAL_MS = 250;
 
@@ -180,6 +198,26 @@ export interface StartConsoleApiOptions {
 	operations: Operations;
 	/** Operator token. Generation and storage are the daemon's concern. */
 	token: string;
+	/**
+	 * Remote mode (ADR-012): authentication and enforcement only.
+	 *
+	 * The bind stays loopback in every mode — this never widens it. What it
+	 * changes is what a request must carry: the operator token becomes
+	 * mandatory on every path including the ones a browser can only reach
+	 * with a query token, and forwarded identity is ignored until the proxy
+	 * secret below proves the request actually came through the operator's
+	 * own reverse proxy.
+	 */
+	remoteMode?: boolean;
+	/**
+	 * Per-install secret the reverse proxy presents, required in remote mode.
+	 *
+	 * Minted at boot beside the operator token. Without it, `X-Forwarded-*`
+	 * is anonymous client input — a direct loopback caller can set those
+	 * headers freely — so remote mode refuses a request that lacks it rather
+	 * than reading an identity out of a header anyone can forge.
+	 */
+	proxySecret?: string;
 	hostname?: string;
 	/** `0` lets the OS pick, which is what the daemon and tests both want. */
 	port?: number;
@@ -286,6 +324,23 @@ export async function startConsoleApi(
 	} = options;
 	const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 	const hostname = options.hostname ?? DEFAULT_HOSTNAME;
+	// Unconditional, flag or no flag: there is no mode in which this listener
+	// answers a routable address (ADR-012). The daemon refuses the same
+	// address at boot before anything opens; this is the last line of that
+	// same refusal, for a caller that reaches the module directly.
+	if (!isLoopback(hostname)) {
+		throw new Error(`Refusing non-loopback console bind: ${hostname}`);
+	}
+	const remoteMode = options.remoteMode ?? false;
+	// Narrowed once, here, rather than asserted at the gate: remote mode
+	// without a secret is a console that would trust forged forwarded headers,
+	// so it fails to start instead of serving with the check disabled.
+	const proxySecret = options.proxySecret;
+	if (remoteMode && (proxySecret === undefined || proxySecret.length === 0)) {
+		throw new Error(
+			"Refusing remote console mode without a proxy shared secret",
+		);
+	}
 
 	const json = (status: number, body: unknown): Response =>
 		Response.json(body, { status });
@@ -1434,6 +1489,21 @@ export async function startConsoleApi(
 			const presented = presentedToken(request, url, isUpgrade || isStatic);
 			if (presented === undefined || !tokenMatches(presented, token)) {
 				return fail(401, "unauthorized", "Operator token required");
+			}
+			// Remote mode only. The forwarded headers a proxy sets are also
+			// headers a direct loopback caller can set, so they mean nothing
+			// until this per-install secret proves the request came through
+			// the operator's own proxy. Checked before any route runs, so
+			// there is no path on which forged `X-Forwarded-*` is read first
+			// and refused second.
+			if (remoteMode && proxySecret !== undefined) {
+				const presentedSecret = request.headers.get("X-OMA-Proxy-Secret");
+				if (
+					presentedSecret === null ||
+					!tokenMatches(presentedSecret, proxySecret)
+				) {
+					return fail(401, "unauthorized", "Proxy shared secret required");
+				}
 			}
 
 			if (isStatic) {

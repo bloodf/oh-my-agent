@@ -61,7 +61,7 @@ import type { WorkerHandle } from "../worker/lifecycle";
 import { startInProcessWorker, startWorker } from "../worker/lifecycle";
 import { resolveBrokerHosting } from "./boot";
 import type { ConsoleApi } from "./console-api";
-import { startConsoleApi } from "./console-api";
+import { isLoopback, startConsoleApi } from "./console-api";
 import { startCredentialGateway } from "./credential-gateway";
 import type { RunTrigger } from "./db";
 import { DaemonDb } from "./db";
@@ -275,42 +275,70 @@ const TOKEN_FILE = "console-token";
 const TOKEN_MODE = 0o600;
 
 /**
- * Load the operator token, or mint one.
+ * Where the per-install proxy shared secret lives, beside the operator token
+ * and under the same mode. Minted only in remote mode: a loopback daemon has
+ * no proxy to authenticate, and a file that gates nothing is a secret to
+ * rotate for no reason.
+ */
+const PROXY_SECRET_FILE = "console-proxy-secret";
+
+/**
+ * Refuse a secret file that any other local process can read.
  *
- * A stored token is reused so the URL an operator bookmarked keeps working
+ * Split out of the loader below because the check has to run twice: once in
+ * the boot preflight, before a single listener opens, and once implicitly on
+ * the load itself. A file that does not exist yet passes — it is minted at
+ * 0600 further down, and refusing an absent file would refuse a first boot.
+ */
+async function verifySecretMode(path: string): Promise<void> {
+	let mode: number;
+	try {
+		mode = (await stat(path)).mode & 0o777;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+		throw error;
+	}
+	if (mode === TOKEN_MODE) return;
+	throw new Error(
+		`${path} has mode ${mode.toString(8)}, not 0600: any local process can read the console token. ` +
+			`Run 'chmod 600 ${path}' to keep this token, or delete the file to rotate it.`,
+	);
+}
+
+/**
+ * Load a stored secret, or mint one.
+ *
+ * A stored value is reused so the URL an operator bookmarked keeps working
  * across restarts; deleting the file is how you rotate. A file with looser
  * permissions than 0600 fails the boot rather than being quietly replaced:
  * regenerating would revoke the URL the operator is holding without saying so,
  * and leaving it would keep serving a secret every local process can read.
+ *
+ * Shared by the operator token and the proxy secret because the two have the
+ * same lifecycle down to the mode — a second copy of this would be a second
+ * place for the 0600 rule to drift out of.
  */
-async function loadConsoleToken(stateDir: string): Promise<string> {
-	const path = join(stateDir, TOKEN_FILE);
+async function loadSecret(stateDir: string, file: string): Promise<string> {
+	const path = join(stateDir, file);
+	await verifySecretMode(path);
 	try {
-		const stats = await stat(path);
-		const mode = stats.mode & 0o777;
-		if (mode !== TOKEN_MODE) {
-			throw new Error(
-				`${path} has mode ${mode.toString(8)}, not 0600: any local process can read the console token. ` +
-					`Run 'chmod 600 ${path}' to keep this token, or delete the file to rotate it.`,
-			);
-		}
-		const token = (await readFile(path, "utf8")).trim();
-		if (token.length > 0) return token;
-		// An empty file is crash debris, not a token: nothing was revoked by
+		const stored = (await readFile(path, "utf8")).trim();
+		if (stored.length > 0) return stored;
+		// An empty file is crash debris, not a secret: nothing was revoked by
 		// replacing it, because it never gated anything.
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
 
 	// 32 bytes of CSPRNG, base64url so it survives a URL without escaping.
-	const token = randomBytes(32).toString("base64url");
+	const secret = randomBytes(32).toString("base64url");
 	// `mode` on write only applies to a file being created, so an existing
 	// empty one is removed first rather than left with whatever mode it had.
 	await rm(path, { force: true });
-	await writeFile(path, token, { encoding: "utf8", mode: TOKEN_MODE });
+	await writeFile(path, secret, { encoding: "utf8", mode: TOKEN_MODE });
 	// umask can mask bits off the create mode; set them explicitly.
 	await chmod(path, TOKEN_MODE);
-	return token;
+	return secret;
 }
 
 /**
@@ -379,6 +407,51 @@ export async function bootDaemon(
 	const logPath = join(stateDir, LOG_FILE);
 
 	await mkdir(stateDir, { recursive: true });
+
+	// ── Exposure preflight (ADR-012) ──────────────────────────────────────────
+	//
+	// Everything here runs before `claimPidfile`, and therefore before the
+	// broker, the credential gateway, the control socket, and the console —
+	// before any listener opens at all. That ordering is the acceptance
+	// criterion, not a preference: refusing after `startCredentialGateway` has
+	// returned would mean a routable-bind request had already opened a port,
+	// and refusing after the pidfile would leave a dead daemon's claim behind
+	// for the operator to clean up by hand.
+	const remoteMode = env.OMA_REMOTE === "1";
+
+	// Every listener the daemon owns, named with the variable that would move
+	// it. Enumerated rather than checked ad hoc so a listener added later has
+	// an obvious place to declare itself, and so the refusal can name the
+	// variable the operator actually set.
+	//
+	// The credential gateway is on this list and is loopback-always: it never
+	// joins remote auth, it is never proxied, and remote mode changes nothing
+	// about it. It appears here only so that asking it to move is refused with
+	// the same message as the other two.
+	for (const variable of [
+		"OMA_CONSOLE_HOST",
+		"OMA_CONTROL_HOST",
+		"OMA_CREDENTIAL_GATEWAY_HOST",
+	]) {
+		const requested = env[variable];
+		if (requested === undefined || requested === "") continue;
+		if (isLoopback(requested)) continue;
+		// stderr, not the injected logger: a test's logger swallows this, and
+		// the operator who set the variable is the one who has to read it.
+		const reason =
+			`${variable}=${requested} is not a loopback address. The daemon never binds a routable ` +
+			`address in any mode, with or without OMA_REMOTE; expose it through a reverse proxy that ` +
+			`forwards to the loopback listener (ADR-012).`;
+		process.stderr.write(`daemon: ${reason}\n`);
+		throw new Error(reason);
+	}
+
+	// The operator token's mode, checked before anything opens rather than at
+	// the point of use: `loadSecret` would refuse a 0640 file too, but only
+	// after the gateway and the broker were already listening.
+	await verifySecretMode(join(stateDir, TOKEN_FILE));
+	if (remoteMode) await verifySecretMode(join(stateDir, PROXY_SECRET_FILE));
+
 	await claimPidfile(pidPath);
 	// A crash can leave the socket file behind; `Bun.serve` will not bind over it.
 	await rm(socketPath, { force: true });
@@ -406,6 +479,23 @@ export async function bootDaemon(
 	const started: (() => Promise<void>)[] = [() => rm(pidPath, { force: true })];
 
 	try {
+		// Both credentials, minted before the first listener of any kind.
+		//
+		// Ahead of `resolveBrokerHosting`: the broker and the credential
+		// gateway are listeners too, so minting further down — where the
+		// operator token used to load — would make "generated at boot" true
+		// only relative to the console. Inside the `try` rather than above it,
+		// so a read or mint that throws unwinds the pidfile `started` already
+		// holds instead of orphaning the claim.
+		const operatorToken = await loadSecret(stateDir, TOKEN_FILE);
+		// Remote mode only: a loopback daemon has no proxy to authenticate, so
+		// a secret file there would be a credential on disk gating nothing.
+		// Minted whether or not the console is served, so a daemon started with
+		// `OMA_CONSOLE=0` still has one for the console a later boot serves.
+		const proxySecret = remoteMode
+			? await loadSecret(stateDir, PROXY_SECRET_FILE)
+			: undefined;
+
 		const hosting = await resolveBrokerHosting({ agentDir, env });
 		started.push(() => hosting.close());
 
@@ -454,7 +544,6 @@ export async function bootDaemon(
 		const knownRooms = new Map<string, RoomInfo>();
 		const schedules = new Map<string, ScheduleRecord>();
 		const definitions = new Map<string, PeerDefinition>();
-		const operatorToken = await loadConsoleToken(stateDir);
 		const identities = new Map<string, ControlIdentity>([
 			[operatorToken, { kind: "operator" }],
 		]);
@@ -1419,6 +1508,15 @@ export async function bootDaemon(
 			socketPath,
 			context,
 			identities,
+			// Remote mode is a property of the daemon, not of the console alone:
+			// the control socket is composed with the same flag the console API
+			// gets, so the listener enforces a value threaded here rather than
+			// re-derived from the environment. On this socket the flag makes
+			// the operator surface require the operator token specifically
+			// (ADR-012 (a)); the bearer requirement itself is unconditional in
+			// both modes, and a worker's scoped token keeps its own surface in
+			// both, which is clause (b) and what T-1204 builds parentage on.
+			remoteMode,
 		});
 		started.push(() => socket.close());
 
@@ -1465,10 +1563,13 @@ export async function bootDaemon(
 				// The same object the control socket got, not a second copy.
 				operations,
 				token,
-				// Loopback only. Binding wider is T-1004's decision, not a
-				// default this task gets to make.
+				// Loopback only, in every mode. Remote mode changes what a
+				// request must carry, never where this listens (ADR-012); the
+				// preflight above has already refused any attempt to move it.
 				hostname: "127.0.0.1",
 				port: consolePort,
+				remoteMode,
+				...(proxySecret === undefined ? {} : { proxySecret }),
 			});
 			// Registered before anything below can throw, so a failed boot takes
 			// the listener down with it rather than leaving a bound port.
@@ -1717,7 +1818,7 @@ if (import.meta.main) {
 		// deliberately protecting.
 		//
 		// Both the create mode and the `chmod`, for the same reason
-		// `loadConsoleToken` does both. The create mode closes the window where
+		// `loadSecret` does both. The create mode closes the window where
 		// a newly created log sits at 0644 while the daemon is already writing
 		// its console URL into it; the `chmod` covers a log an earlier boot left
 		// behind, which `open`'s mode argument never touches — and umask can
