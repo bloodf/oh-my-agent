@@ -24,7 +24,7 @@ The repo has a written versioning policy and a changelog the release workflow co
 
 | Path | Role | Note |
 |---|---|---|
-| `CHANGELOG.md` (to be created) | New | Keep-a-changelog format: the policy in a header paragraph, Unreleased on top. |
+| [`CHANGELOG.md`](../../../CHANGELOG.md) | New | Keep-a-changelog format: the policy in a header paragraph, Unreleased on top. |
 | [`README.md`](../../../README.md) | Edited | A one-paragraph pointer to the policy; the ritual lives in the changelog header. |
 | [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) | Edited | Runs the version/changelog comparison alongside the existing gates. |
 

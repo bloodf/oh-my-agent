@@ -22,7 +22,7 @@ CI proves every file under patches/ is a code-only patch whose pin matches the l
 
 | Path | Role | Note |
 |---|---|---|
-| `scripts/check-patches.py` (to be created) | New | Parses unified diffs under patches/; fails on binary hunks, non-patch files, hunks outside source paths, and patch keys that decode (%2F) to no patchedDependencies entry or a stale version; has a --selftest fixture mode. |
+| [`scripts/check-patches.py`](../../../scripts/check-patches.py) | New | Parses unified diffs under patches/; fails on binary hunks, non-patch files, hunks outside source paths, and patch keys that decode (%2F) to no patchedDependencies entry or a stale version; has a --selftest fixture mode. |
 | [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) | Edited | Runs the gate alongside the existing gates. |
 
 ## Steps

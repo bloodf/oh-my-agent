@@ -16,3 +16,4 @@ Dogfooding against real accounts, with findings landing back in the tree as task
 | [T-1402](../tasks/T-1402-dogfood-harness.md) | [EP-14](../epics/EP-14-dogfooding.md) | Scripted dogfood scenario driver | Blocked |
 | [T-1403](../tasks/T-1403-first-live-session.md) | [EP-14](../epics/EP-14-dogfooding.md) | First live session and triage | Blocked |
 | [T-1404](../tasks/T-1404-live-session-safety-rails.md) | [EP-14](../epics/EP-14-dogfooding.md) | Live-session safety rails | Blocked |
+| [T-1405](../tasks/T-1405-daemon-backend-selector.md) | [EP-14](../epics/EP-14-dogfooding.md) | Explicit worker-backend selector on the daemon CLI | Blocked |

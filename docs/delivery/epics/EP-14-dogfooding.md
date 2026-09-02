@@ -36,3 +36,4 @@ Eight hundred tests prove the machinery; they say nothing about a live account's
 | [T-1402](../tasks/T-1402-dogfood-harness.md) | Scripted dogfood scenario driver | Blocked |
 | [T-1403](../tasks/T-1403-first-live-session.md) | First live session and triage | Blocked |
 | [T-1404](../tasks/T-1404-live-session-safety-rails.md) | Live-session safety rails | Blocked |
+| [T-1405](../tasks/T-1405-daemon-backend-selector.md) | Explicit worker-backend selector on the daemon CLI | Blocked |

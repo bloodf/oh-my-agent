@@ -11,7 +11,7 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**75 of 96 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
+**75 of 97 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
 Every runtime subsystem is built and under test: workers, isolation, credentials, rooms, scheduling, and quota handling. Two things keep that from meaning finished.
 
@@ -59,7 +59,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-11](epics/EP-11-operator-polish.md) | Operator polish: AAA console and the CLI surface | Ready | 5 |
 | [EP-12](epics/EP-12-remote-exposure.md) | Beyond loopback: remote exposure with a real trust model | Ready | 6 |
 | [EP-13](epics/EP-13-distribution.md) | Distribution: packable artifact, versioning, and release CI | Ready | 6 |
-| [EP-14](epics/EP-14-dogfooding.md) | Live-account hardening | Ready | 4 |
+| [EP-14](epics/EP-14-dogfooding.md) | Live-account hardening | Ready | 5 |
 | [EP-15](epics/EP-15-upstream-filings.md) | Upstream pi-coding-agent hygiene | Ready | 4 |
 | [EP-16](epics/EP-16-fidelity-and-hardening.md) | Surface fidelity and protocol hardening | Done | 15 |
 

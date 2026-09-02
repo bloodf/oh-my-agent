@@ -26,7 +26,7 @@ In remote mode, parentage stops being cooperative metadata: kill, inject, and sp
 |---|---|---|
 | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Edited | Remote mode flips the enforcement switch T-1004 built; loopback keeps cooperative behavior. |
 | [`tests/socket-identity.test.ts`](../../../tests/socket-identity.test.ts) | Edited | The enforcement assertions run in remote mode. |
-| `tests/remote-exposure.test.ts` (to be created) | Edited | Created by T-1201; the flip is on in remote mode and off on loopback — both asserted. |
+| [`tests/remote-exposure.test.ts`](../../../tests/remote-exposure.test.ts) | Edited | Created by T-1201; the flip is on in remote mode and off on loopback — both asserted. |
 
 ## Steps
 

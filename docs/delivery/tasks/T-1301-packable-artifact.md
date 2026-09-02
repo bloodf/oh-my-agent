@@ -24,7 +24,7 @@
 | Path | Role | Note |
 |---|---|---|
 | [`package.json`](../../../package.json) | Edited | The files allowlist and a prepack script that runs the gates. |
-| `tests/pack.test.ts` (to be created) | New | Parses `npm pack --dry-run --json` and asserts both directions: expected paths present, private paths absent. |
+| [`tests/pack.test.ts`](../../../tests/pack.test.ts) | New | Parses `npm pack --dry-run --json` and asserts both directions: expected paths present, private paths absent. |
 
 ## Steps
 

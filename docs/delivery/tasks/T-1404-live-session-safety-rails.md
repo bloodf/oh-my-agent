@@ -24,7 +24,7 @@ The harness can never run away with real accounts: a documented abort procedure,
 | Path | Role | Note |
 |---|---|---|
 | `scripts/dogfood.ts` (to be created) | Edited | Created by T-1402; gains the allowlist/ceiling refusals and the cleanup phase that runs in a finally. |
-| `docs/dogfooding.md` (to be created) | Edited | Created by T-1401; gains the abort procedure with the exact commands. |
+| [`docs/dogfooding.md`](../../../docs/dogfooding.md) | Edited | Created by T-1401; gains the abort procedure with the exact commands. |
 | `tests/dogfood.test.ts` (to be created) | Edited | Created by T-1402; asserts the refusals and the no-survivors abort against the fixture daemon. |
 
 ## Steps

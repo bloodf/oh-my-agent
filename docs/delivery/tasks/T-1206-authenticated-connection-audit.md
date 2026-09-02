@@ -28,7 +28,7 @@ The daemon logs every authenticated remote-mode connection (identity, source, ti
 | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Edited | Logs identity, source, and time on every authenticated control-socket connection in remote mode; tracks the live set. |
 | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | The same log line for authenticated console connections in remote mode. |
 | [`src/daemon/cli.ts`](../../../src/daemon/cli.ts) | Edited | The `audit` verb: prints the active trust model and the live authenticated connections. |
-| `tests/remote-exposure.test.ts` (to be created) | Edited | Created by T-1201; asserts the log lines and the verb output. |
+| [`tests/remote-exposure.test.ts`](../../../tests/remote-exposure.test.ts) | Edited | Created by T-1201; asserts the log lines and the verb output. |
 
 ## Steps
 

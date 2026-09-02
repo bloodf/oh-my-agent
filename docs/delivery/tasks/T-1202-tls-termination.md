@@ -25,7 +25,7 @@ Remote mode is reachable only behind TLS: the docs ship copy-paste proxy recipes
 | Path | Role | Note |
 |---|---|---|
 | `docs/remote-exposure.md` (to be created) | New | The three recipes — Caddy, tailscale serve, SSH tunnel — each setting the proxy shared-secret header, carrying a rate-limit stanza and a log-scrub note, and ending in the same three checks. |
-| `tests/remote-exposure.test.ts` (to be created) | Edited | Created by T-1201; behind-proxy assertions: forwarded headers honored only with the secret, unproxied remote access refused. |
+| [`tests/remote-exposure.test.ts`](../../../tests/remote-exposure.test.ts) | Edited | Created by T-1201; behind-proxy assertions: forwarded headers honored only with the secret, unproxied remote access refused. |
 | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | Proxy-aware request handling per the recipe contract: scheme and host from forwarded headers, only when the shared secret matches. |
 
 ## Steps

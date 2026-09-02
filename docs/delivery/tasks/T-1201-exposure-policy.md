@@ -29,7 +29,7 @@ One explicit remote-mode switch exists and governs auth and enforcement only; an
 | [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | Parses the remote-mode flag/config at boot; the unconditional bind refusal runs before any listener opens. |
 | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Edited | The loopback-only comment becomes an enforced gate: non-loopback is refused always, and remote mode adds the operator token plus the proxy shared-secret check on every request. |
 | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Edited | The same gate for the control socket's bind and per-connection identity; token comparison goes constant-time here too. |
-| `tests/remote-exposure.test.ts` (to be created) | New | Unconditional bind refusal; token required in remote mode; forged forwarded headers gain nothing; loopback flows unchanged. |
+| [`tests/remote-exposure.test.ts`](../../../tests/remote-exposure.test.ts) | New | Unconditional bind refusal; token required in remote mode; forged forwarded headers gain nothing; loopback flows unchanged. |
 
 ## Steps
 

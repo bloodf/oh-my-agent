@@ -1,0 +1,12 @@
+{
+	"name": "bun-plugin-memo-repro",
+	"private": true,
+	"type": "module",
+	"packageManager": "bun@1.3.14",
+	"scripts": {
+		"repro": "bun repro.ts"
+	},
+	"dependencies": {
+		"@oh-my-pi/pi-coding-agent": "18.0.7"
+	}
+}

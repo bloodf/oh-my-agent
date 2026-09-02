@@ -1,0 +1,456 @@
+/**
+ * Standalone repro: a runtime `Bun.plugin` `onResolve` handler that resolves
+ * the same specifier it matched re-enters itself, and `import.meta.resolve`
+ * stops returning what it returns with no hook installed.
+ *
+ * Observation only. This file records what each configuration prints. The
+ * single claim it makes is the one its own output evidences: a runtime
+ * `onResolve` handler is re-entered by the resolution it performs. The two
+ * cases end differently — the hand-written control throws, upstream's handler
+ * returns a long `file:`-prefixed string — and this file records both without
+ * explaining either. No further mechanism is asserted.
+ *
+ * An earlier cross-package memoization theory is falsified by upstream's
+ * per-specifier cache key
+ * (`@oh-my-pi/pi-coding-agent/src/extensibility/plugins/legacy-pi-compat.ts`,
+ * `getResolvedSpecifier`, ~1127-1135): that cache is keyed by the exact
+ * specifier string, so it cannot carry one package's path into another's.
+ *
+ * Correct/corrupted is decided by difference, not by any validity rule this
+ * file invents. The parent process installs no hook, so its own resolution is
+ * the baseline; each case prints its raw results and compares them to that
+ * baseline string. Nothing here inspects the *shape* of a specifier.
+ *
+ * A `Bun.plugin` runtime hook is process-global and permanent — nothing
+ * uninstalls it. So each case runs in its own child process:
+ *
+ *   installed  — upstream's shim, activated through its public export
+ *   removed    — the same resolutions with no plugin at all (the control)
+ *   bare       — a hand-written minimal onResolve hook, in a temp directory
+ *                with its own trivial local package, no OMP package present
+ *                and no OMP code loaded, `--no-install`, isolated HOME and
+ *                BUN_INSTALL
+ *
+ * The `bare` outcome selects the filing target. It is deliberately built so
+ * that it cannot borrow anything from this directory: it runs against a
+ * package fixture it creates itself, so "no OMP in the process" is a property
+ * of the filesystem it runs in and not a promise made in a comment.
+ *
+ * Exit codes:
+ *   0  reproduced, and the bare control decided a filing target
+ *   1  ran cleanly, the reported failure did not appear
+ *   2  could not run: wrong Bun, or the plugin-free baseline itself threw
+ *   3  reproduced, but the bare control was inconclusive — nothing to file
+ */
+
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const REQUIRED_BUN = "1.3.14";
+const N = 10;
+
+/**
+ * The specifier our own workaround avoids resolving, and the one the corrupted
+ * resolution was observed on. It matches upstream's `@(scope)/pi-*` filter and
+ * is resolvable under the package's exports map. Corruption is
+ * specifier-dependent: `@oh-my-pi/pi-coding-agent/extensibility/skills` matches
+ * the same filter and resolves normally, so the specifier is part of the
+ * record, not an interchangeable detail.
+ */
+const SPECIFIER = "@oh-my-pi/pi-coding-agent/package.json";
+
+/** The `bare` sandbox resolves its own fixture package, never an OMP one. */
+const BARE_SPECIFIER = "plainpkg/package.json";
+
+type Case = "installed" | "removed" | "bare";
+const CASES: Case[] = ["installed", "removed", "bare"];
+/** The two cases that run as `--case` children of this file. */
+const CHILD_CASES: Case[] = ["installed", "removed"];
+
+type Counts = { differs: number; threw: number };
+const VOID_COUNTS: Counts = { differs: -1, threw: -1 };
+
+/** Runtime gate. Runs before any hook is installed, in every process. */
+function requireExactBun(): void {
+	console.log(`Bun.version: ${Bun.version}`);
+	if (Bun.version !== REQUIRED_BUN) {
+		console.error(
+			`This repro is recorded against Bun ${REQUIRED_BUN} exactly; refusing to run on ${Bun.version}.`,
+		);
+		process.exit(2);
+	}
+}
+
+/** One resolution. A throw is reported as such, never flattened into a string. */
+function resolveOnce():
+	| { ok: true; value: string }
+	| { ok: false; message: string } {
+	try {
+		return { ok: true, value: import.meta.resolve(SPECIFIER) };
+	} catch (error) {
+		return {
+			ok: false,
+			message: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
+/**
+ * N consecutive resolutions; every raw result printed. `differs` counts
+ * results that are not byte-identical to the plugin-free baseline the parent
+ * observed. `threw` is counted separately: a throw is not evidence that the
+ * resolution returned a different string, so it must never be scored as a
+ * byte difference.
+ */
+function record(label: Case, baseline: string): Counts {
+	let differs = 0;
+	let threw = 0;
+	for (let i = 1; i <= N; i++) {
+		const result = resolveOnce();
+		if (!result.ok) {
+			threw++;
+			console.log(`[${label}] ${i}/${N} threw ${result.message}`);
+			continue;
+		}
+		const same = result.value === baseline;
+		if (!same) differs++;
+		console.log(
+			`[${label}] ${i}/${N} ${same ? "same-as-baseline" : "differs"} len=${result.value.length} ${result.value}`,
+		);
+	}
+	console.log(`[${label}] RESULT differs=${differs}/${N} threw=${threw}/${N}`);
+	return { differs, threw };
+}
+
+/** One child process per plugin configuration, because hooks cannot be removed. */
+async function runChildCase(label: Case, baseline: string): Promise<void> {
+	requireExactBun();
+	console.log(`[${label}] specifier ${SPECIFIER}`);
+	console.log(`[${label}] baseline len=${baseline.length} ${baseline}`);
+
+	if (label === "installed") {
+		// Dynamic import is required, not stylistic: a static import is hoisted
+		// and would load this module — and with it the shim's install-time side
+		// effects — in every case, including the `removed` control that must run
+		// with no plugin in the process. The specifier is literal but the *point
+		// at which it loads* is the variable under test.
+		//
+		// Shortest real activation path in the installed package: the shim's own
+		// exported installer, reached through the published `./extensibility/*`
+		// exports entry. Importing
+		// `@oh-my-pi/pi-coding-agent/extensibility/plugins/loader` installs it as
+		// a bare import side effect (loader.ts:21); this call is the explicit
+		// form of the same thing.
+		const { installLegacyPiSpecifierShim } = await import(
+			"@oh-my-pi/pi-coding-agent/extensibility/plugins/legacy-pi-compat"
+		);
+		installLegacyPiSpecifierShim();
+	}
+
+	record(label, baseline);
+}
+
+/**
+ * The `bare` sandbox program, written into a temp directory at run time.
+ *
+ * It mirrors only the structural shape of upstream's hook — match a specifier,
+ * resolve that same specifier from inside the handler, return the path — and
+ * imports nothing. It is a separate file rather than a `--case` branch of this
+ * one precisely so that it can run somewhere this directory's `node_modules`
+ * is not reachable.
+ */
+function sandboxSource(): string {
+	return `// Generated by repro.ts. Hand-written minimal Bun.plugin onResolve hook.
+// Imports nothing: no OMP package is installed in this directory, and no OMP
+// code is loaded into this process.
+const REQUIRED_BUN = ${JSON.stringify(REQUIRED_BUN)};
+const N = ${N};
+const SPECIFIER = ${JSON.stringify(BARE_SPECIFIER)};
+const FILTER = /^plainpkg(?:\\/.*)?$/;
+
+console.log("[bare] Bun.version: " + Bun.version);
+if (Bun.version !== REQUIRED_BUN) {
+	console.error("[bare] requires Bun " + REQUIRED_BUN + "; got " + Bun.version);
+	process.exit(2);
+}
+
+function resolveOnce() {
+	try {
+		return { ok: true, value: import.meta.resolve(SPECIFIER) };
+	} catch (error) {
+		return {
+			ok: false,
+			message: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
+if (process.argv.includes("--emit-baseline")) {
+	const first = resolveOnce();
+	if (!first.ok) {
+		console.error("BARE_BASELINE_THREW " + first.message);
+		process.exit(2);
+	}
+	console.log("BARE_BASELINE " + first.value);
+	process.exit(0);
+}
+
+const baselineFlag = process.argv.indexOf("--baseline");
+const baseline = baselineFlag === -1 ? "" : process.argv[baselineFlag + 1];
+if (!baseline) {
+	console.error("[bare] missing --baseline");
+	process.exit(2);
+}
+console.log("[bare] specifier " + SPECIFIER);
+console.log("[bare] baseline len=" + baseline.length + " " + baseline);
+
+Bun.plugin({
+	name: "repro:bare-hook",
+	setup(build) {
+		build.onResolve({ filter: FILTER, namespace: "file" }, (args) => ({
+			path: Bun.resolveSync(args.path, import.meta.dir),
+		}));
+	},
+});
+
+let differs = 0;
+let threw = 0;
+for (let i = 1; i <= N; i++) {
+	const result = resolveOnce();
+	if (!result.ok) {
+		threw++;
+		console.log("[bare] " + i + "/" + N + " threw " + result.message);
+		continue;
+	}
+	const same = result.value === baseline;
+	if (!same) differs++;
+	console.log(
+		"[bare] " + i + "/" + N + " " + (same ? "same-as-baseline" : "differs") +
+			" len=" + result.value.length + " " + result.value,
+	);
+}
+console.log("[bare] RESULT differs=" + differs + "/" + N + " threw=" + threw + "/" + N);
+`;
+}
+
+function parseResult(label: Case, out: string): Counts | null {
+	const match = out.match(
+		new RegExp(`\\[${label}\\] RESULT differs=(\\d+)/${N} threw=(\\d+)/${N}`),
+	);
+	if (!match) return null;
+	return { differs: Number(match[1]), threw: Number(match[2]) };
+}
+
+/**
+ * The `bare` case, in a temp directory it builds itself: a package fixture
+ * with one trivial local package and nothing else, `--no-install` so Bun
+ * cannot fetch anything, and HOME/BUN_INSTALL pointed inside the sandbox so no
+ * global cache or global install directory is consulted.
+ *
+ * Two sandbox processes: one with no hook to establish that directory's own
+ * plugin-free baseline, one with the hook installed. Returns `null` when the
+ * control could not be established, which is not a result.
+ */
+function runBareCase(): Counts | null {
+	const dir = mkdtempSync(join(tmpdir(), "bun-onresolve-bare-"));
+	console.log(`[bare] sandbox ${dir}`);
+	try {
+		mkdirSync(join(dir, "node_modules", "plainpkg"), { recursive: true });
+		mkdirSync(join(dir, "home"), { recursive: true });
+		mkdirSync(join(dir, "bun-install"), { recursive: true });
+		writeFileSync(
+			join(dir, "package.json"),
+			`${JSON.stringify({ name: "bare-sandbox", private: true, type: "module" }, null, 2)}\n`,
+		);
+		writeFileSync(
+			join(dir, "node_modules", "plainpkg", "package.json"),
+			`${JSON.stringify({ name: "plainpkg", version: "1.0.0", main: "index.js" }, null, 2)}\n`,
+		);
+		writeFileSync(
+			join(dir, "node_modules", "plainpkg", "index.js"),
+			"export default 1;\n",
+		);
+		writeFileSync(join(dir, "sandbox.ts"), sandboxSource());
+
+		const env = {
+			PATH: process.env.PATH ?? "/usr/bin:/bin",
+			HOME: join(dir, "home"),
+			BUN_INSTALL: join(dir, "bun-install"),
+			TMPDIR: dir,
+		};
+		const sandbox = join(dir, "sandbox.ts");
+
+		const first = Bun.spawnSync(
+			[process.execPath, "--no-install", sandbox, "--emit-baseline"],
+			{ cwd: dir, env, stdout: "pipe", stderr: "pipe" },
+		);
+		const firstOut = first.stdout.toString();
+		process.stdout.write(firstOut);
+		const firstErr = first.stderr.toString();
+		if (firstErr) process.stderr.write(firstErr);
+		const baselineMatch = firstOut.match(/^BARE_BASELINE (.+)$/m);
+		if (first.exitCode !== 0 || !baselineMatch) {
+			console.error(
+				"[bare] control void: the sandbox could not resolve its own fixture with no hook installed",
+			);
+			return null;
+		}
+		const baseline = baselineMatch[1];
+
+		const hooked = Bun.spawnSync(
+			[process.execPath, "--no-install", sandbox, "--baseline", baseline],
+			{ cwd: dir, env, stdout: "pipe", stderr: "pipe" },
+		);
+		const hookedOut = hooked.stdout.toString();
+		process.stdout.write(hookedOut);
+		const hookedErr = hooked.stderr.toString();
+		if (hookedErr) process.stderr.write(hookedErr);
+		if (hooked.exitCode !== 0) {
+			console.error(`[bare] hooked sandbox exited ${hooked.exitCode}`);
+			return null;
+		}
+		const counts = parseResult("bare", hookedOut);
+		if (!counts) {
+			console.error("[bare] hooked sandbox produced no RESULT line");
+			return null;
+		}
+		return counts;
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+async function runAll(): Promise<void> {
+	requireExactBun();
+
+	// This process installs no plugin, so its resolution is the baseline every
+	// case is compared against. If the plugin-free resolution itself throws,
+	// there is no baseline to compare anything to and the run is void.
+	const baselineResult = resolveOnce();
+	if (!baselineResult.ok) {
+		console.error(
+			`baseline resolution threw with no plugin installed: ${baselineResult.message}`,
+		);
+		console.error(
+			"Without a plugin-free baseline there is nothing to compare against.",
+		);
+		process.exit(2);
+	}
+	const baseline = baselineResult.value;
+	console.log(`specifier: ${SPECIFIER}`);
+	console.log(
+		`baseline (no plugin installed): len=${baseline.length} ${baseline}`,
+	);
+
+	const results: Record<Case, Counts> = {
+		installed: VOID_COUNTS,
+		removed: VOID_COUNTS,
+		bare: VOID_COUNTS,
+	};
+
+	for (const label of CHILD_CASES) {
+		console.log(`\n=== case: ${label} ===`);
+		const child = Bun.spawnSync(
+			[
+				process.execPath,
+				import.meta.path,
+				"--case",
+				label,
+				"--baseline",
+				baseline,
+			],
+			{ cwd: import.meta.dir, stdout: "pipe", stderr: "pipe" },
+		);
+		const out = child.stdout.toString();
+		process.stdout.write(out);
+		const err = child.stderr.toString();
+		if (err) process.stderr.write(err);
+		if (child.exitCode !== 0) {
+			console.error(`case ${label} exited ${child.exitCode}`);
+			process.exit(child.exitCode ?? 1);
+		}
+		const counts = parseResult(label, out);
+		if (!counts) {
+			console.error(`case ${label} produced no RESULT line`);
+			process.exit(1);
+		}
+		results[label] = counts;
+	}
+
+	console.log("\n=== case: bare ===");
+	const bare = runBareCase();
+	if (bare) results.bare = bare;
+
+	// A throw is not evidence that a resolution returned a different string, so
+	// any throw in the two cases that carry the claim voids it rather than
+	// supporting it.
+	const reproduced =
+		results.installed.differs === N &&
+		results.installed.threw === 0 &&
+		results.removed.differs === 0 &&
+		results.removed.threw === 0;
+
+	// The bare case is OMP-free by construction, so it decides the tracker.
+	// Either ending — every resolution throwing, or every resolution returning
+	// a string that is not the baseline — is the hook changing what the same
+	// call returns without it, with no OMP package on disk and no OMP code in
+	// the process, so either routes to Bun. Only a clean N/N of one kind, or a
+	// clean 0/0, decides anything; a mixed count is ambiguous evidence and must
+	// not be filed anywhere as if it were not.
+	const target = !bare
+		? "inconclusive"
+		: bare.threw === N
+			? "oven-sh/bun"
+			: bare.threw === 0 && bare.differs === N
+				? "oven-sh/bun"
+				: bare.threw === 0 && bare.differs === 0
+					? "oh-my-pi"
+					: "inconclusive";
+
+	console.log("\n=== summary ===");
+	console.log(`bun: ${Bun.version}`);
+	console.log(`specifier: ${SPECIFIER}`);
+	console.log(`bare specifier: ${BARE_SPECIFIER}`);
+	console.log(`baseline: len=${baseline.length} ${baseline}`);
+	for (const label of CASES) {
+		const counts = results[label];
+		console.log(
+			counts === VOID_COUNTS
+				? `${label}: void (no result recorded)`
+				: `${label}: differs ${counts.differs}/${N} threw ${counts.threw}/${N}`,
+		);
+	}
+	console.log(`reproduced: ${reproduced}`);
+	console.log(`file against: ${target}`);
+
+	// Non-zero when the recorded failure does not appear: there is then nothing
+	// to file, and a green run would be misleading. A reproduction whose
+	// control came back ambiguous is also not filing-ready, and says so with
+	// its own code rather than passing as if the target were known.
+	if (!reproduced) process.exit(1);
+	if (target === "inconclusive") {
+		console.error(
+			"reproduced, but the bare control decided no tracker; read the raw [bare] lines before filing.",
+		);
+		process.exit(3);
+	}
+	process.exit(0);
+}
+
+const caseFlag = process.argv.indexOf("--case");
+if (caseFlag !== -1) {
+	const label = process.argv[caseFlag + 1] as Case;
+	if (!CHILD_CASES.includes(label)) {
+		console.error(`unknown case: ${label}`);
+		process.exit(2);
+	}
+	const baselineFlag = process.argv.indexOf("--baseline");
+	if (baselineFlag === -1 || !process.argv[baselineFlag + 1]) {
+		console.error("missing --baseline");
+		process.exit(2);
+	}
+	await runChildCase(label, process.argv[baselineFlag + 1]);
+} else {
+	await runAll();
+}
