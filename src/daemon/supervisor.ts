@@ -42,6 +42,9 @@ import type { PeerDefinition } from "../shared/agent-definition";
 import { fingerprintPeerDefinition } from "../shared/agent-definition";
 import type { AccountMode } from "./account-registry";
 import { AccountRegistry } from "./account-registry";
+// Type-only: erases at runtime, so the daemon's state owner does not depend
+// on the browser-facing module whose frames it is checked against.
+import type { ConsoleEvent } from "./console-api";
 import type { PeerStore } from "./peer-store";
 import type { QuotaBlock } from "./quota-state";
 import type { Scheduler } from "./scheduler";
@@ -91,6 +94,20 @@ export interface SupervisorDeps {
 	respawn?: (request: RespawnRequest) => Promise<SupervisedWorker>;
 	/** Surfaced when a queued park/resume fails; the daemon must not strand. */
 	onError?: (error: unknown, peerName: string) => void;
+	/**
+	 * Publish one state transition (ADR-015).
+	 *
+	 * Called only *after* the transition it describes has committed — a hook
+	 * run before a write that then throws publishes a state the daemon is not
+	 * in. The daemon entry point supplies it; unwired, every transition is
+	 * silent and behavior is otherwise unchanged.
+	 *
+	 * `ConsoleEvent` is imported for its shape only. The import erases at
+	 * runtime, so this is a compile-time contract rather than a dependency on
+	 * the browser-facing module: every emission below is checked against the
+	 * frame taxonomy instead of being trusted as `unknown`.
+	 */
+	emit?: (event: ConsoleEvent) => void;
 }
 
 export interface RegisterPeerOptions {
@@ -149,7 +166,7 @@ export class Supervisor {
 			scheduler: deps.scheduler,
 			now: deps.now,
 			onPark: (accountId, runIds) => {
-				for (const runId of runIds) this.#track(this.#parkPeer(runId));
+				this.#track(this.#parkAccount(accountId, runIds));
 				const budget = this.#accountConfigs.get(accountId)?.budgetUsd;
 				if (budget !== undefined) {
 					this.#queueAccountNotification(
@@ -162,6 +179,7 @@ export class Supervisor {
 				this.#track(this.#resumeAccount(accountId, runIds));
 			},
 			onWarning: (accountId) => {
+				this.#emit({ type: "budget", account: accountId, state: "warned" });
 				const budget = this.#accountConfigs.get(accountId)?.budgetUsd;
 				if (budget !== undefined) {
 					this.#queueAccountNotification(
@@ -188,13 +206,52 @@ export class Supervisor {
 		this.#inFlight.add(tracked);
 	}
 
-	async #parkPeer(runId: string): Promise<void> {
+	/**
+	 * Publish one committed transition, if the daemon wired a sink.
+	 *
+	 * A sink that throws is swallowed: the transition already happened, and
+	 * failing here would report a state change as an error after the fact —
+	 * and, on a park path, strand the peer it was reporting.
+	 */
+	#emit(event: ConsoleEvent): void {
+		try {
+			this.deps.emit?.(event);
+		} catch {
+			// A broken observer is not the transition's problem.
+		}
+	}
+
+	async #parkPeer(runId: string): Promise<boolean> {
 		const peer = this.#peers.get(runId);
-		if (!peer) return;
+		if (!peer) return false;
 		try {
 			await peer.worker.park();
 		} catch (error) {
+			// A park that threw left the worker running; reporting it as
+			// parked would show the operator a state the daemon is not in.
 			this.deps.onError?.(error, runId);
+			return false;
+		}
+		this.#emit({ type: "agent", agent: runId, state: "parked" });
+		return true;
+	}
+
+	/**
+	 * Park every run on one account, then report the account once.
+	 *
+	 * Once, not per peer: the budget frame describes the *account's* position,
+	 * and one frame per parked worker would have a console repaint the same
+	 * transition as many times as the account has runs.
+	 */
+	async #parkAccount(accountId: string, runIds: string[]): Promise<void> {
+		let parked = 0;
+		for (const runId of runIds) {
+			if (await this.#parkPeer(runId)) parked += 1;
+		}
+		// An account whose every park failed still has running workers, so
+		// nothing about its budget position actually changed.
+		if (parked > 0) {
+			this.#emit({ type: "budget", account: accountId, state: "parked" });
 		}
 	}
 
@@ -203,17 +260,23 @@ export class Supervisor {
 		if (!peer) return false;
 		try {
 			await peer.worker.resume();
-			return true;
 		} catch (error) {
 			this.deps.onError?.(error, runId);
 			return false;
 		}
+		this.#emit({ type: "agent", agent: runId, state: "running" });
+		return true;
 	}
 
 	async #resumeAccount(accountId: string, runIds: string[]): Promise<void> {
 		const resumed: string[] = [];
 		for (const runId of runIds) {
 			if (await this.#resumePeer(runId)) resumed.push(runId);
+		}
+		// Only once at least one worker actually came back: an account whose
+		// every resume failed is still parked, whatever the timer intended.
+		if (resumed.length > 0) {
+			this.#emit({ type: "budget", account: accountId, state: "resumed" });
 		}
 
 		if (this.#accountConfigs.get(accountId)?.budgetUsd !== undefined) {
@@ -306,6 +369,10 @@ export class Supervisor {
 		// Replace rather than merge: a removal is a membership change too, and
 		// merging would make leaving a channel impossible.
 		peer.rooms = new Set(rooms);
+		// After the cached set moved, never before: this set is what `post()`
+		// filters against, so a frame published ahead of it describes a
+		// membership the daemon would not yet act on.
+		this.#emit({ type: "membership", agent: peerName, rooms: [...rooms] });
 		return [...rooms];
 	}
 
@@ -609,6 +676,14 @@ export class Supervisor {
 		}
 		this.registry.bumpBudget(accountId, meter);
 		this.#accountConfigs.set(accountId, { ...config, budgetUsd });
+		// After both the latch reset and the stored ceiling: a frame published
+		// between them would name a budget the supervisor is not yet holding.
+		this.#emit({
+			type: "budget",
+			account: accountId,
+			state: "bumped",
+			budgetUsd,
+		});
 	}
 
 	/** Record a quota block; parking and the resume timer follow from it. */

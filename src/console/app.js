@@ -36,8 +36,18 @@
 	 * @property {MessageReaction[]} reactions
 	 */
 	/**
+	 * Frames the daemon pushes (ADR-015). Additive: this shell may be a
+	 * cached build older than the daemon, so an unrecognised `type` is
+	 * ignored rather than treated as an error.
 	 * @typedef {{ type: "message", message: RoomMessage }
-	 *   | { type: "reaction", room: string, messageId: number, actor: string, emoji: string }} ConsoleEvent
+	 *   | { type: "reaction", room: string, messageId: number, actor: string,
+	 *       emoji: string, reacted: boolean }
+	 *   | { type: "agent", agent: string, state: string }
+	 *   | { type: "definition", agent: string, rebuildRequired: boolean }
+	 *   | { type: "membership", agent: string, rooms: string[] }
+	 *   | { type: "channel", channel: RoomInfo }
+	 *   | { type: "budget", account: string, state: string, budgetUsd?: number }
+	 *   | { type: "schedule", agent: string, phase: "armed" | "fired" }} ConsoleEvent
 	 */
 
 	const HUMAN_AUTHOR = "@you";
@@ -269,19 +279,88 @@
 	};
 
 	/**
-	 * Group reactions into chips of (emoji, count, mine).
+	 * Group reactions by emoji, keeping the actors behind each chip.
+	 *
+	 * The actors, not just a count, are what make a live update idempotent: a
+	 * frame applies as a set insert or delete, so the same actor's reaction
+	 * arriving twice — a frame landing on top of the snapshot the socket-open
+	 * refetch already painted — cannot count them twice.
 	 * @param {MessageReaction[]} reactions
+	 * @returns {Map<string, string[]>} emoji to its actors
 	 */
 	const reactionChips = (reactions) => {
-		/** @type {Map<string, { count: number, mine: boolean }>} */
+		/** @type {Map<string, string[]>} */
 		const byEmoji = new Map();
 		for (const reaction of reactions) {
-			const chip = byEmoji.get(reaction.emoji) ?? { count: 0, mine: false };
-			chip.count += 1;
-			if (reaction.actor === HUMAN_AUTHOR) chip.mine = true;
-			byEmoji.set(reaction.emoji, chip);
+			const actors = byEmoji.get(reaction.emoji) ?? [];
+			if (!actors.includes(reaction.actor)) actors.push(reaction.actor);
+			byEmoji.set(reaction.emoji, actors);
 		}
 		return byEmoji;
+	};
+
+	/**
+	 * Paint one chip's label and state from the actors behind it.
+	 *
+	 * The actor list rides on the element as JSON because an actor name is
+	 * free text: a delimited string would split on a name containing the
+	 * delimiter and lose somebody's reaction.
+	 * @param {HTMLElement} chip
+	 * @param {string} emoji
+	 * @param {string[]} actors
+	 */
+	const paintChip = (chip, emoji, actors) => {
+		const mine = actors.includes(HUMAN_AUTHOR);
+		chip.className = mine ? "reaction mine" : "reaction";
+		chip.dataset.emoji = emoji;
+		chip.dataset.actors = JSON.stringify(actors);
+		chip.setAttribute("aria-pressed", mine ? "true" : "false");
+		chip.setAttribute(
+			"aria-label",
+			`React with ${emoji}, ${actors.length} so far`,
+		);
+		chip.textContent = `${emoji} ${actors.length}`;
+	};
+
+	/**
+	 * The actors behind a rendered chip, as it last painted.
+	 * @param {HTMLElement} chip
+	 * @returns {string[]}
+	 */
+	const chipActors = (chip) => {
+		try {
+			const parsed = JSON.parse(chip.dataset.actors ?? "[]");
+			// `data-actors` is DOM text and a page can be edited in place, so
+			// the parse is narrowed to actor ids: a number or an object left
+			// in the array would otherwise be compared against a real actor by
+			// `includes` and silently never match.
+			return Array.isArray(parsed)
+				? parsed.filter((actor) => typeof actor === "string")
+				: [];
+		} catch {
+			// A hand-edited or truncated attribute is not worth a broken feed.
+			return [];
+		}
+	};
+
+	/**
+	 * One reaction chip, ready to append.
+	 *
+	 * Shared with the live-feed handler, which builds a chip for an emoji
+	 * nobody had used yet: a chip built there by hand would drift from this
+	 * one the first time the label or the pressed state changes.
+	 * @param {number} messageId
+	 * @param {string} emoji
+	 * @param {string[]} actors
+	 */
+	const renderChip = (messageId, emoji, actors) => {
+		const button = document.createElement("button");
+		button.type = "button";
+		paintChip(button, emoji, actors);
+		button.addEventListener("click", () => {
+			void toggleReaction(messageId, emoji);
+		});
+		return button;
 	};
 
 	/**
@@ -317,20 +396,8 @@
 
 		const chips = document.createElement("span");
 		chips.className = "reactions";
-		for (const [emoji, chip] of reactionChips(message.reactions)) {
-			const button = document.createElement("button");
-			button.type = "button";
-			button.className = chip.mine ? "reaction mine" : "reaction";
-			button.setAttribute("aria-pressed", chip.mine ? "true" : "false");
-			button.setAttribute(
-				"aria-label",
-				`React with ${emoji}, ${chip.count} so far`,
-			);
-			button.textContent = `${emoji} ${chip.count}`;
-			button.addEventListener("click", () => {
-				void toggleReaction(message.id, emoji);
-			});
-			chips.append(button);
+		for (const [emoji, actors] of reactionChips(message.reactions)) {
+			chips.append(renderChip(message.id, emoji, actors));
 		}
 		row.append(chips);
 
@@ -347,33 +414,129 @@
 		return row;
 	};
 
+	// ── Repaint focus and scroll stability (T-1615) ──────────────────────────
+
+	/**
+	 * @typedef {object} FocusKey
+	 * @property {string} kind Control class: `reaction`, `thread-open`, `channel`.
+	 * @property {string} id Identity within that kind; `""` when the kind is
+	 *   unique inside its row.
+	 * @property {string | null} rowId `.message[data-id]` the control sits in,
+	 *   or `null` for a control that is not inside a message row.
+	 */
+
+	/**
+	 * Stable identity of one focusable control, or `null` when it has none.
+	 *
+	 * Identity, never ordinal, and never the class list: `mine`, `active`, and
+	 * `unread` are all toggled by the very updates that trigger a repaint, so
+	 * a key built from every class stops matching the control it came from at
+	 * exactly the moment a restore is needed. An ordinal is worse still — a
+	 * reaction added or removed ahead of the focused chip shifts every index
+	 * below it, and the restore lands on a *different emoji*.
+	 * @param {HTMLElement} element
+	 * @returns {{ kind: string, id: string } | null}
+	 */
+	const controlIdentity = (element) => {
+		// "👀 2" carries a count that changes on every repaint, so only the
+		// emoji segment is identity.
+		if (element.classList.contains("reaction")) {
+			return {
+				kind: "reaction",
+				id: (element.textContent ?? "").split(" ")[0] ?? "",
+			};
+		}
+		if (element.classList.contains("thread-open")) {
+			return { kind: "thread-open", id: "" };
+		}
+		if (element.classList.contains("channel")) {
+			return { kind: "channel", id: element.dataset.id ?? "" };
+		}
+		return null;
+	};
+
+	/**
+	 * Identity of the control focus sits on inside `container`, or `null`.
+	 *
+	 * `null` when focus is elsewhere, on the container itself (which survives
+	 * a repaint of its children), or on a control with no stable identity —
+	 * in every one of those cases a repaint has nothing to restore.
+	 * @param {HTMLElement} container
+	 * @returns {FocusKey | null}
+	 */
+	const captureFocus = (container) => {
+		const active = document.activeElement;
+		if (!(active instanceof HTMLElement)) return null;
+		if (active === container || !container.contains(active)) return null;
+		const identity = controlIdentity(active);
+		if (identity === null) return null;
+		const row = active.closest(".message");
+		return {
+			...identity,
+			rowId: row instanceof HTMLElement ? (row.dataset.id ?? null) : null,
+		};
+	};
+
+	/**
+	 * Put focus back on the control `key` names, or give it up cleanly.
+	 *
+	 * Fallback rule: an identity that is gone drops focus to the container
+	 * when the container can hold focus, and to `<body>` otherwise. Never a
+	 * sibling and never the first match — the neighbours of a reaction chip
+	 * are other reactions, so re-pointing the keyboard at one of them means
+	 * the operator's next Enter posts a reaction they never chose.
+	 * @param {HTMLElement} container
+	 * @param {FocusKey | null} key
+	 */
+	const restoreFocus = (container, key) => {
+		if (key === null) return;
+		const scope =
+			key.rowId === null
+				? container
+				: container.querySelector(
+						`.message[data-id="${CSS.escape(key.rowId)}"]`,
+					);
+		for (const candidate of scope?.querySelectorAll(`.${key.kind}`) ?? []) {
+			if (!(candidate instanceof HTMLElement)) continue;
+			if (controlIdentity(candidate)?.id !== key.id) continue;
+			candidate.focus();
+			return;
+		}
+		// The identity is gone. Fall back to the container when it can hold
+		// focus — `#messages` carries a tabindex for keyboard scrolling — and
+		// otherwise blur to `<body>` explicitly. `#thread-messages` is not
+		// focusable, and leaving focus wherever the browser happens to drop it
+		// after a node is removed is exactly the unpredictability this rule
+		// exists to forbid.
+		if (container.tabIndex >= 0) {
+			container.focus();
+			return;
+		}
+		if (document.activeElement instanceof HTMLElement) {
+			document.activeElement.blur();
+		}
+	};
+
+	/**
+	 * Distance in px from the bottom of a scroll box, `0` when it does not
+	 * scroll. Sub-pixel layout means an "at the bottom" box rarely reports
+	 * exactly `0`, so callers compare against a small threshold.
+	 * @param {HTMLElement} box
+	 */
+	const distanceFromBottom = (box) =>
+		box.scrollHeight - box.scrollTop - box.clientHeight;
+
+	/** Under this many px from the bottom counts as "reading the newest". */
+	const STICKY_BOTTOM_PX = 4;
+
 	/** @param {RoomMessage[]} messages */
 	const renderTranscript = (messages) => {
-		// A repaint destroys a focused control; remember which one and
-		// restore it after, so a live update never dumps keyboard focus on
-		// <body> — the same rule the channel list follows. Keyed by message
-		// row + classes + index among the row's same-class controls, since a
-		// message holds several reaction chips with identical classes.
-		const active = document.activeElement;
-		const activeRow =
-			active instanceof HTMLElement && messagesEl.contains(active)
-				? active.closest(".message")
-				: null;
-		/** @type {{ messageId: string; selector: string; index: number } | null} */
-		let focusKey = null;
-		if (active instanceof HTMLElement && activeRow instanceof HTMLElement) {
-			const selector = [...active.classList]
-				.map((name) => `.${CSS.escape(name)}`)
-				.join("");
-			const messageId = /** @type {HTMLElement} */ (activeRow).dataset.id;
-			if (selector !== "" && messageId !== undefined) {
-				focusKey = {
-					messageId,
-					selector,
-					index: [...activeRow.querySelectorAll(selector)].indexOf(active),
-				};
-			}
-		}
+		const focusKey = captureFocus(messagesEl);
+		// Pin to the bottom only for a reader who was already there. Slamming
+		// scrollTop unconditionally yanks anyone reading history back to the
+		// newest line on every live update, with no way back to their place.
+		const wasAtBottom = distanceFromBottom(messagesEl) < STICKY_BOTTOM_PX;
+		const previousTop = messagesEl.scrollTop;
 		messagesEl.replaceChildren();
 		/** @type {string | null} */
 		let previousAuthor = null;
@@ -384,21 +547,25 @@
 			);
 			previousAuthor = message.author;
 		}
-		messagesEl.scrollTop = messagesEl.scrollHeight;
-		if (focusKey) {
-			const row = messagesEl.querySelector(
-				`.message[data-id="${CSS.escape(focusKey.messageId)}"]`,
-			);
-			const matches = [...(row?.querySelectorAll(focusKey.selector) ?? [])];
-			const restore = matches[focusKey.index] ?? matches[0];
-			if (restore instanceof HTMLElement) restore.focus();
-		}
+		if (wasAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+		else messagesEl.scrollTop = previousTop;
+		restoreFocus(messagesEl, focusKey);
 	};
 
 	/** @param {RoomMessage[]} messages */
 	const renderThread = (messages) => {
+		// The pane repaints inside the same refresh() as the transcript, so it
+		// needs the same protection: a reply landing while the operator is on
+		// a chip in the pane must not throw focus out of it.
+		const focusKey = captureFocus(threadMessagesEl);
 		threadMessagesEl.replaceChildren();
-		if (openThreadRoot === null) return;
+		// Restore before the early return too: a pane that just closed has
+		// destroyed whatever the operator was focused on, and leaving focus
+		// on a detached node strands the keyboard with nothing to act on.
+		if (openThreadRoot === null) {
+			restoreFocus(threadMessagesEl, focusKey);
+			return;
+		}
 		/** @type {string | null} */
 		let previousAuthor = null;
 		for (const message of messages) {
@@ -408,6 +575,7 @@
 			);
 			previousAuthor = message.author;
 		}
+		restoreFocus(threadMessagesEl, focusKey);
 	};
 
 	/**
@@ -422,9 +590,11 @@
 
 	/** @param {RoomInfo[]} channels */
 	const renderChannels = (channels) => {
-		// A repaint destroys the focused option; remember and restore, so a
-		// keyboard selection does not dump focus on <body>.
-		const hadFocus = channelsEl.contains(document.activeElement);
+		// Keyed by channel id, not by the roving tabindex: the roving option
+		// is whichever room is *open*, which is rarely the option the operator
+		// has arrowed focus onto, so restoring "the option in the tab order"
+		// silently moves focus to a different channel.
+		const focusKey = captureFocus(channelsEl);
 		channelsEl.replaceChildren();
 		// Roving tabindex: exactly one option sits in the tab order — the
 		// open room, or the first option before any room is open.
@@ -448,6 +618,9 @@
 			if (channel.id === currentRoom) classes.push("active");
 			if (unreadRooms.has(channel.id)) classes.push("unread");
 			button.className = classes.join(" ");
+			// The rendered label is `name ?? id` and a name is free text, so
+			// the id rides along as the option's identity for focus restore.
+			button.dataset.id = channel.id;
 			button.textContent = channel.name ?? channel.id;
 			button.addEventListener("click", () => {
 				void selectRoom(channel.id);
@@ -455,11 +628,7 @@
 			item.append(button);
 			channelsEl.append(item);
 		}
-		if (hadFocus) {
-			/** @type {HTMLElement | null} */
-			const roving = channelsEl.querySelector('.channel[tabindex="0"]');
-			roving?.focus();
-		}
+		restoreFocus(channelsEl, focusKey);
 	};
 
 	// Arrow keys rove focus through the options without selecting; Enter or
@@ -683,9 +852,12 @@
 	};
 
 	/**
-	 * Toggle the operator's own reaction through the daemon's reaction route,
-	 * then refetch: the server is the transcript's source of truth and the
-	 * poll feed races any local edit.
+	 * Toggle the operator's own reaction through the daemon's reaction route.
+	 *
+	 * No refetch afterwards: the write's own change comes back as a reaction
+	 * frame like anyone else's, and applying it twice — once from a refetch,
+	 * once from the frame — counts the same actor twice. The socket-open
+	 * refetch remains the healing path if a frame is missed (ADR-015).
 	 * @param {number} messageId
 	 * @param {string} emoji
 	 */
@@ -694,7 +866,6 @@
 			method: "POST",
 			body: { actor: HUMAN_AUTHOR, emoji },
 		});
-		await refresh();
 	};
 
 	/**
@@ -872,6 +1043,59 @@
 		void createAgent();
 	});
 
+	/**
+	 * Apply one reaction frame to the open transcript in place.
+	 *
+	 * In place rather than `refresh()`: a refetch rebuilds every row, which
+	 * throws away scroll, focus, and the thread pane's contents for a change
+	 * to one chip — and it races the poll feed that delivered the frame. The
+	 * socket-open refetch stays as the healing path for anything missed while
+	 * the socket was down (ADR-015).
+	 *
+	 * A frame for a message this console is not showing is dropped: the row
+	 * may be in a collapsed thread or below the transcript's window, and both
+	 * paint from the store the next time they render.
+	 * @param {{ messageId: number, actor: string, emoji: string, reacted: boolean }} frame
+	 */
+	const applyReaction = (frame) => {
+		const selector = `.message[data-id="${CSS.escape(String(frame.messageId))}"]`;
+		for (const container of [messagesEl, threadMessagesEl]) {
+			const row = container.querySelector(selector);
+			if (row === null) continue;
+			const chips = row.querySelector(".reactions");
+			if (chips === null) continue;
+			/** @type {HTMLElement | null} */
+			const chip = chips.querySelector(
+				`.reaction[data-emoji="${CSS.escape(frame.emoji)}"]`,
+			);
+
+			// Applied as a set operation over the chip's actors, never as a
+			// ±1 on its count: the socket-open refetch paints authoritative
+			// state, and a frame for a reaction that snapshot already showed
+			// would otherwise count the same actor twice.
+			const actors = chip === null ? [] : chipActors(chip);
+			const next = frame.reacted
+				? actors.includes(frame.actor)
+					? actors
+					: [...actors, frame.actor]
+				: actors.filter((actor) => actor !== frame.actor);
+
+			if (next.length === 0) {
+				chip?.remove();
+				continue;
+			}
+			if (chip === null) {
+				chips.append(renderChip(frame.messageId, frame.emoji, next));
+				continue;
+			}
+			// Repaint the existing node rather than replacing it: a
+			// replacement is a different element, so the operator's focus —
+			// and the click handler bound to it — would be destroyed by
+			// somebody else's reaction landing.
+			paintChip(chip, frame.emoji, next);
+		}
+	};
+
 	// ── Live feed with reconnect ─────────────────────────────────────────────
 
 	// Exposed for tests: a harness can sever the socket in-page.
@@ -902,6 +1126,12 @@
 		socket.addEventListener("message", (event) => {
 			/** @type {ConsoleEvent} */
 			const frame = JSON.parse(String(event.data));
+			// Each type drives exactly one refresher, never the transcript: a
+			// panel-level change must not rebuild the message list, which
+			// costs the reader their scroll position and focus. An unknown
+			// type falls through and is ignored — this shell may be a cached
+			// build older than the daemon's frame taxonomy, and a console that
+			// threw on a new type would break on every daemon upgrade.
 			if (frame.type === "message") {
 				if (frame.message.room === currentRoom) {
 					void refresh();
@@ -912,7 +1142,20 @@
 					renderChannels(lastChannels);
 				}
 			} else if (frame.type === "reaction" && frame.room === currentRoom) {
-				void refresh();
+				applyReaction(frame);
+			} else if (
+				frame.type === "agent" ||
+				frame.type === "definition" ||
+				frame.type === "membership" ||
+				frame.type === "budget" ||
+				frame.type === "schedule"
+			) {
+				// All five render in the agents panel: run state, the rebuild
+				// a definition owes, membership for the open channel, and the
+				// account state a peer is parked by.
+				void refreshAgents();
+			} else if (frame.type === "channel") {
+				void refreshChannels();
 			}
 		});
 

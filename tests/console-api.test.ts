@@ -25,7 +25,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ConsoleApi } from "../src/daemon/console-api";
+import type { ConsoleApi, ConsoleEvent } from "../src/daemon/console-api";
 import { startConsoleApi } from "../src/daemon/console-api";
 import type { PeerStoreRoots } from "../src/daemon/peer-store";
 import { createPeerStore } from "../src/daemon/peer-store";
@@ -123,6 +123,14 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 	/** Rebuilds the supervisor asked for; empty is "no restart happened". */
 	const respawns: string[] = [];
 
+	/**
+	 * Where the supervisor's transitions go, and the ordering that forces the
+	 * seam: the supervisor is constructed before the console exists, so it
+	 * forwards through a mutable reference that stays a no-op until
+	 * `startConsoleApi` has returned a handle to point it at.
+	 */
+	let sink: ((event: ConsoleEvent) => void) | undefined;
+
 	const supervisor = new Supervisor({
 		rooms,
 		scheduler,
@@ -135,6 +143,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 			respawns.push(peerName);
 			return stubWorker(peerName, fingerprintPeerDefinition(definition)).worker;
 		},
+		emit: (event) => sink?.(event),
 	});
 
 	const peers = new Map<string, PeerRecord>();
@@ -159,6 +168,11 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 			: { pollIntervalMs: options.pollIntervalMs }),
 	});
 	cleanups.push(() => api.close());
+	// Nameable only after construction, which is the whole reason the console
+	// exposes a handle method rather than a start option. `emit` and not
+	// `publish`: the supervisor's transitions go through the swappable sink,
+	// which defaults to the socket broadcast.
+	sink = api.emit;
 
 	/**
 	 * Register a peer with the supervisor and index it as the daemon does,
@@ -188,6 +202,31 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		return { prompts: stub.prompts, state: () => stub.worker.state };
 	};
 
+	/**
+	 * A metered peer, so budget transitions have a real account to move.
+	 * `budgetUsd` is the ceiling the registry warns and parks against.
+	 */
+	const registerMeteredPeer = async (
+		name: string,
+		accountId: string,
+		budgetUsd: number,
+	): Promise<void> => {
+		await writeFile(
+			join(roots.project, `${name}.md`),
+			peerDocument(name, []),
+			"utf8",
+		);
+		const stub = stubWorker(name);
+		await supervisor.register({
+			worker: stub.worker,
+			accountId,
+			mode: "metered",
+			budgetUsd,
+			rooms: [],
+		});
+		peers.set(name, { worker: stub.worker, accountId, rooms: [] });
+	};
+
 	const call = (
 		path: string,
 		init: RequestInit & { token?: string | null } = {},
@@ -214,8 +253,15 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		knownRooms,
 		ensureRoom,
 		registerPeer,
+		registerMeteredPeer,
 		reload,
 		call,
+		/**
+		 * Emit as the supervisor does, through the same seam: this is what
+		 * `SupervisorDeps.emit` reaches, so a test drives the daemon-side
+		 * emitters without owning `main.ts`.
+		 */
+		emit: (event: ConsoleEvent) => sink?.(event),
 	};
 }
 
@@ -257,6 +303,39 @@ function opened(socket: WebSocket, timeoutMs = 2_000): Promise<void> {
 		reject(new Error("websocket errored"));
 	});
 	return promise;
+}
+
+/**
+ * `REACTION_WINDOW` as the poller applies it (`console-api.ts`). Pinned here
+ * rather than imported: importing it would make this test track whatever the
+ * production value became, so a bound that silently shrank would still pass
+ * while consoles started fabricating removals.
+ */
+const REACTION_WINDOW = 200;
+
+/** Every frame the socket has delivered so far, parsed and in order. */
+function collectFrames(socket: WebSocket): ConsoleEvent[] {
+	const frames: ConsoleEvent[] = [];
+	socket.addEventListener("message", (event) => {
+		frames.push(JSON.parse(String(event.data)) as ConsoleEvent);
+	});
+	return frames;
+}
+
+/** Poll a condition until it holds; the timeout only bounds failure. */
+async function until(
+	label: string,
+	holds: () => boolean,
+	timeoutMs = 5_000,
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!holds()) {
+		if (Date.now() > deadline)
+			throw new Error(`Timed out waiting for ${label}`);
+		const tick = Promise.withResolvers<void>();
+		setTimeout(tick.resolve, 10);
+		await tick.promise;
+	}
 }
 
 // ── Operator token ───────────────────────────────────────────────────────────
@@ -884,6 +963,7 @@ describe("websocket", () => {
 			messageId: posted.id,
 			actor: "reviewer",
 			emoji: "👀",
+			reacted: true,
 		});
 	});
 
@@ -925,6 +1005,466 @@ describe("websocket", () => {
 		expect(await frame).toMatchObject({
 			type: "message",
 			message: { body: "Anyone?" },
+		});
+	});
+
+	test("an unreact emits a reacted:false frame", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.ensureRoom("#reviews");
+		const posted = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Pick this up.",
+		});
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+
+		const added = nextFrame(socket);
+		await h.rooms.react(posted.id, "reviewer", "👀");
+		// The add path carries the same boolean, so a client reads one field
+		// rather than inferring direction from the frame's mere existence.
+		expect(await added).toEqual({
+			type: "reaction",
+			room: "#reviews",
+			messageId: posted.id,
+			actor: "reviewer",
+			emoji: "👀",
+			reacted: true,
+		});
+
+		const removed = nextFrame(socket);
+		await h.rooms.unreact(posted.id, "reviewer", "👀");
+		expect(await removed).toEqual({
+			type: "reaction",
+			room: "#reviews",
+			messageId: posted.id,
+			actor: "reviewer",
+			emoji: "👀",
+			reacted: false,
+		});
+	});
+
+	test("two reactions whose parts concatenate alike both emit removals", async () => {
+		// Reaction identity is (message, actor, emoji), and both an actor and
+		// an emoji are caller-supplied text. Joined with a separator these two
+		// produce the same string, so a key built that way holds one entry for
+		// two reactions and the second removal is silently never emitted.
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.ensureRoom("#reviews");
+		const posted = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Ambiguous keys.",
+		});
+		await h.rooms.react(posted.id, "a:b", "c");
+		await h.rooms.react(posted.id, "a", "b:c");
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		await h.rooms.unreact(posted.id, "a:b", "c");
+		await h.rooms.unreact(posted.id, "a", "b:c");
+		await until(
+			"both removals",
+			() =>
+				frames.filter(
+					(frame) => frame.type === "reaction" && frame.reacted === false,
+				).length === 2,
+		);
+
+		// Order within a tick is the store's read order, not a contract; the
+		// claim is that both reactions are named, each with its own parts.
+		expect(
+			frames
+				.filter((frame) => frame.type === "reaction")
+				.map((frame) => `${frame.actor}|${frame.emoji}|${frame.reacted}`)
+				.sort(),
+		).toEqual(["a:b|c|false", "a|b:c|false"].sort());
+	});
+
+	test("a remove and re-add inside one tick collapses to no frame", async () => {
+		// The poller reports state, not history: a reaction that is gone and
+		// back before the next read never changed as far as any console can
+		// observe, and emitting a removal there would make a chip flicker off
+		// and on for a state transition that never happened.
+		const h = await harness({ pollIntervalMs: 10_000 });
+		await h.ensureRoom("#reviews");
+		const posted = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Steady state.",
+		});
+		await h.rooms.react(posted.id, "reviewer", "👀");
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+
+		await h.rooms.unreact(posted.id, "reviewer", "👀");
+		await h.rooms.react(posted.id, "reviewer", "👀");
+
+		await expect(nextFrame(socket, 200)).rejects.toThrow();
+	});
+
+	test("a reaction removed while nothing was connected is not replayed", async () => {
+		// `primeCursors` seeds the set from the store's current state, so its
+		// first tick has nothing to diff against and must not manufacture a
+		// removal for a key it never broadcast.
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.ensureRoom("#reviews");
+		const posted = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Reacted before anyone looked.",
+		});
+		await h.rooms.react(posted.id, "reviewer", "👀");
+		await h.rooms.unreact(posted.id, "reviewer", "👀");
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+
+		await expect(nextFrame(socket, 200)).rejects.toThrow();
+	});
+
+	test("a reaction ageing out of the window is not reported as a removal", async () => {
+		// The reaction diff is bounded to the most recent `REACTION_WINDOW`
+		// message ids. A key falling below that floor left the *read*, not the
+		// store — treating it as a removal would have every long-lived console
+		// erase old chips it can no longer see.
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.ensureRoom("#reviews");
+		const old = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "The message that ages out.",
+		});
+		await h.rooms.react(old.id, "reviewer", "👀");
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		// Push the reacted message more than REACTION_WINDOW ids into the past.
+		for (let i = 0; i < REACTION_WINDOW + 10; i += 1) {
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: `Filler ${i}.`,
+			});
+		}
+		await until(`a frame for Filler ${REACTION_WINDOW + 9}.`, () =>
+			frames.some(
+				(frame) =>
+					frame.type === "message" &&
+					frame.message.body === `Filler ${REACTION_WINDOW + 9}.`,
+			),
+		);
+
+		// The reaction is untouched in the store; no frame may claim otherwise.
+		expect(frames.filter((frame) => frame.type === "reaction")).toEqual([]);
+	});
+});
+
+// ── Typed daemon frames (T-1604, ADR-015) ───────────────────────────────────
+
+describe("typed frames", () => {
+	test("a membership change emits a membership frame", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.registerPeer("reviewer", ["#reviews"]);
+		await h.ensureRoom("#ops");
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		const res = await h.call("/api/agents/reviewer/rooms", {
+			method: "POST",
+			body: JSON.stringify({ room: "#ops" }),
+		});
+		expect(res.status).toBe(200);
+
+		await until("a membership frame", () =>
+			frames.some((frame) => frame.type === "membership"),
+		);
+		expect(frames.find((frame) => frame.type === "membership")).toEqual({
+			type: "membership",
+			agent: "reviewer",
+			rooms: ["#ops", "#reviews"],
+		});
+	});
+
+	test("creating an agent emits an agent frame", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		const res = await h.call("/api/agents", {
+			method: "POST",
+			body: JSON.stringify({
+				name: "scribe",
+				description: "Scribe peer for typed frame tests.",
+				spawns: ["scout"],
+				rooms: ["#notes"],
+				body: "You are scribe.",
+			}),
+		});
+		expect(res.status).toBe(201);
+
+		await until("an agent frame", () =>
+			frames.some((frame) => frame.type === "agent"),
+		);
+		// A created agent has no worker yet; it starts on the next daemon
+		// start, and the frame says so rather than implying a live process.
+		expect(frames.find((frame) => frame.type === "agent")).toEqual({
+			type: "agent",
+			agent: "scribe",
+			state: "stopped",
+		});
+	});
+
+	test("a channel created over HTTP emits a channel frame", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.ensureRoom("#reviews");
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		const res = await h.call("/api/channels", {
+			method: "POST",
+			body: JSON.stringify({ id: "#ops" }),
+		});
+		expect(res.status).toBe(201);
+
+		await until("a channel frame", () =>
+			frames.some((frame) => frame.type === "channel"),
+		);
+		expect(frames.find((frame) => frame.type === "channel")).toEqual({
+			type: "channel",
+			channel: { id: "#ops", kind: "channel", name: "#ops" },
+		});
+	});
+
+	test("a definition edit emits a definition frame carrying rebuildRequired", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.registerPeer("reviewer", ["#reviews"]);
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		const res = await h.call("/api/agents/reviewer", {
+			method: "PATCH",
+			body: JSON.stringify({ description: "A policy edit." }),
+		});
+		expect(res.status).toBe(200);
+
+		await until("a definition frame", () =>
+			frames.some((frame) => frame.type === "definition"),
+		);
+		// Policy, not membership: the running worker keeps the old policy
+		// until it rebuilds, and the frame carries that distinction.
+		expect(frames.find((frame) => frame.type === "definition")).toEqual({
+			type: "definition",
+			agent: "reviewer",
+			rebuildRequired: true,
+		});
+	});
+
+	test("the default sink broadcasts with no wiring at all", async () => {
+		// Zero-configuration is the point of the default: a daemon that never
+		// calls `setPublishSink` still feeds every connected console, so the
+		// supervisor's transitions are visible before anything is wired.
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.registerPeer("reviewer", ["#reviews"]);
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		h.emit({ type: "schedule", agent: "reviewer", phase: "fired" });
+		await until("a schedule frame", () =>
+			frames.some((frame) => frame.type === "schedule"),
+		);
+		expect(frames.find((frame) => frame.type === "schedule")).toEqual({
+			type: "schedule",
+			agent: "reviewer",
+			phase: "fired",
+		});
+	});
+
+	test("a sink set after start redirects the supervisor's frames", async () => {
+		// Ordering is the constraint the setter exists for: `main.ts` builds
+		// the supervisor before `startConsoleApi`, so the sink cannot be a
+		// start option — it has to be assignable on the returned handle, and
+		// reassignable there without restarting the server.
+		//
+		// Redirection, not observation: the installed sink *replaces* the
+		// default destination for supervisor emissions. An observer that only
+		// ran alongside the broadcast would be load-bearing for nothing —
+		// deleting the setter would break only its own test.
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.registerPeer("reviewer", ["#reviews"]);
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		const observed: ConsoleEvent[] = [];
+		h.api.setPublishSink((event) => observed.push(event));
+		h.emit({ type: "budget", account: "acct-1", state: "parked" });
+		await until("the budget frame on the installed sink", () =>
+			observed.some((event) => event.type === "budget"),
+		);
+		expect(observed).toEqual([
+			{ type: "budget", account: "acct-1", state: "parked" },
+		]);
+
+		// An ordering barrier rather than a sleep: this route-driven frame is
+		// published strictly after the redirected emission, so once the socket
+		// has it, a budget frame that was going to arrive already would have.
+		// Route emissions still broadcast — only the supervisor path moved.
+		expect(
+			(
+				await h.call("/api/channels", {
+					method: "POST",
+					body: JSON.stringify({ id: "#ops" }),
+				})
+			).status,
+		).toBe(201);
+		await until("the channel frame on the socket", () =>
+			frames.some((frame) => frame.type === "channel"),
+		);
+		expect(frames.some((frame) => frame.type === "budget")).toBe(false);
+	});
+
+	test("a sink that throws costs neither the transition nor the route", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.ensureRoom("#reviews");
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		h.api.setPublishSink(() => {
+			throw new Error("sink is broken");
+		});
+
+		// The frame describes a transition that already committed, so a sink
+		// failing after the fact must not propagate back into the supervisor
+		// and fail a park that already parked.
+		expect(() =>
+			h.emit({ type: "budget", account: "acct-1", state: "parked" }),
+		).not.toThrow();
+
+		// Routes never touch the sink, so a broken one costs them nothing:
+		// the create still returns 201 and the console still gets its frame.
+		const res = await h.call("/api/channels", {
+			method: "POST",
+			body: JSON.stringify({ id: "#ops" }),
+		});
+		expect(res.status).toBe(201);
+		await until("the channel frame despite the broken sink", () =>
+			frames.some((frame) => frame.type === "channel"),
+		);
+		expect((await h.call("/api/channels")).status).toBe(200);
+	});
+
+	test("a budget bump emits a budget frame through the supervisor hook", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.registerMeteredPeer("spender", "acct-metered", 5);
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		h.supervisor.bumpBudget("acct-metered", 25);
+		await until("a budget frame", () =>
+			frames.some((frame) => frame.type === "budget"),
+		);
+		expect(frames.find((frame) => frame.type === "budget")).toEqual({
+			type: "budget",
+			account: "acct-metered",
+			state: "bumped",
+			budgetUsd: 25,
+		});
+	});
+
+	test("a resubscribe emits a membership frame after the cached set moves", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.registerPeer("reviewer", ["#reviews"]);
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		await h.supervisor.resubscribe("reviewer");
+		await until("a membership frame", () =>
+			frames.some((frame) => frame.type === "membership"),
+		);
+		expect(frames.find((frame) => frame.type === "membership")).toEqual({
+			type: "membership",
+			agent: "reviewer",
+			rooms: ["#reviews"],
 		});
 	});
 });

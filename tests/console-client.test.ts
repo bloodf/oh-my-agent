@@ -74,7 +74,11 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 
-import { type ConsoleApi, startConsoleApi } from "../src/daemon/console-api";
+import {
+	type ConsoleApi,
+	type ConsoleEvent,
+	startConsoleApi,
+} from "../src/daemon/console-api";
 import type { PeerStoreRoots } from "../src/daemon/peer-store";
 import { createPeerStore } from "../src/daemon/peer-store";
 import { Scheduler } from "../src/daemon/scheduler";
@@ -222,10 +226,20 @@ async function clickInPage(page: Page, selector: string): Promise<void> {
 }
 
 /**
- * Focus a selector atomically in one in-page round-trip, immune to feed-event re-renders. `page.focus()` is a
- * selector resolution and a focus() in two CDP round-trips; a transcript repaint between them
- * leaves focus() landing on a detached node (silent no-op) — the flake that
- * took the thread keyboard test down intermittently.
+ * Focus a selector atomically in one in-page round-trip.
+ *
+ * `page.focus()` is two CDP round-trips — a selector resolution, then a
+ * `focus()` on the handle it returned — and the transcript repaints on every
+ * feed event. A repaint landing between the two detaches the resolved node,
+ * and `focus()` on a detached node is a silent no-op, so the test proceeds
+ * with focus still on `<body>`. Resolving and focusing inside one
+ * `page.evaluate` makes the pair atomic with respect to the repaint: the
+ * node cannot be replaced between the query and the call, because both run
+ * in the same task as the page's own script.
+ *
+ * The other half of the same problem is environmental and is fixed in
+ * `openPage` by `page.bringToFront()`: an unfocused document ignores
+ * `HTMLElement.focus()` outright, whatever the timing.
  */
 async function focusInPage(page: Page, selector: string): Promise<void> {
 	await page.waitForSelector(selector, { timeout: 10_000 });
@@ -322,6 +336,13 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 	await mkdir(roots.project, { recursive: true });
 	const peerStore = createPeerStore(roots);
 
+	/**
+	 * Where the supervisor's transitions go. The daemon builds the supervisor
+	 * before the console exists, so it forwards through a mutable reference
+	 * the handle names once `startConsoleApi` has returned.
+	 */
+	let sink: ((event: ConsoleEvent) => void) | undefined;
+
 	const supervisor = new Supervisor({
 		rooms,
 		scheduler,
@@ -329,6 +350,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		peers: peerStore,
 		respawn: async ({ peerName, definition }) =>
 			stubWorker(peerName, fingerprintPeerDefinition(definition)).worker,
+		emit: (event) => sink?.(event),
 	});
 
 	const peers = new Map<string, PeerRecord>();
@@ -350,6 +372,9 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		token: TOKEN,
 		pollIntervalMs: options.pollIntervalMs ?? 25,
 	});
+	// The supervisor's transitions go through the swappable sink, which
+	// defaults to the socket broadcast; route emissions use `publish`.
+	sink = api.emit;
 
 	const registerPeer = async (
 		name: string,
@@ -524,6 +549,8 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		reload,
 		promptsContaining,
 		consoleUrl,
+		/** The console API itself, for writes made behind the browser's back. */
+		apiUrl: api.url,
 	};
 }
 
@@ -726,6 +753,107 @@ describe("reactions", () => {
 		);
 		expect(errors).toEqual([]);
 	});
+
+	browserTest(
+		"an out-of-band unreact clears the chip with no reload",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const posted = await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Watch this chip.",
+			});
+			await h.rooms.react(posted.id, "reviewer", "👀");
+			await h.rooms.react(posted.id, "second-agent", "👀");
+			await h.rooms.react(posted.id, "third-agent", "✅");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"both chips",
+				() => renderedReactions(page, posted.id),
+				(chips) => chips.includes("👀 2") && chips.includes("✅ 1"),
+			);
+
+			// Stamp the document so a reload is observable rather than assumed:
+			// a navigation resets the title, an in-place mutation cannot.
+			await page.evaluate(() => {
+				(document as unknown as { title: string }).title = "no-reload";
+			});
+
+			// One of two actors drops theirs: the chip stays, the count falls.
+			await h.rooms.unreact(posted.id, "reviewer", "👀");
+			await waitFor(
+				"count falls to one",
+				() => renderedReactions(page, posted.id),
+				(chips) => chips.includes("👀 1"),
+			);
+
+			// The last actor drops theirs: the chip goes away entirely, and
+			// the unrelated ✅ is untouched.
+			await h.rooms.unreact(posted.id, "second-agent", "👀");
+			const remaining = await waitFor(
+				"the eye chip removed",
+				() => renderedReactions(page, posted.id),
+				(chips) => !chips.some((chip) => chip.startsWith("👀")),
+			);
+			expect(remaining).toEqual(["✅ 1"]);
+
+			expect(
+				await page.evaluate(
+					() => (document as unknown as { title: string }).title,
+				),
+			).toBe("no-reload");
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"an out-of-band reaction by the operator marks the chip as theirs",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const posted = await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Pressed state follows the frame.",
+			});
+			await h.rooms.react(posted.id, "reviewer", "👀");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			const chip = `#messages .message[data-id="${posted.id}"] .reaction`;
+			await waitFor(
+				"the chip, unpressed",
+				() =>
+					page
+						.$eval(chip, (n) => n.getAttribute("aria-pressed") ?? "")
+						.catch(() => null),
+				(pressed) => pressed === "false",
+			);
+
+			// The human reacting from somewhere else — a second console, the
+			// TUI — must flip this console's pressed state, because the chip
+			// is a toggle and a wrong pressed state inverts the next Enter.
+			await h.rooms.react(posted.id, "@you", "👀");
+			const pressed = await waitFor(
+				"the chip, pressed",
+				() =>
+					page
+						.$eval(chip, (n) => ({
+							pressed: n.getAttribute("aria-pressed") ?? "",
+							mine: n.className.includes("mine"),
+							text: (n.textContent ?? "").trim(),
+						}))
+						.catch(() => null),
+				(state) => state !== null && state.pressed === "true",
+			);
+			expect(pressed?.mine).toBe(true);
+			expect(pressed?.text).toBe("👀 2");
+			expect(errors).toEqual([]);
+		},
+	);
 });
 
 // ── Live updates and reconnect ───────────────────────────────────────────────
@@ -1061,6 +1189,68 @@ describe("membership controls", () => {
 			);
 			expect(notice.toLowerCase()).toContain("immediately");
 			expect(notice.toLowerCase()).not.toContain("rebuild");
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"a route-driven agent change updates the agents panel with no reload",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+			await h.registerPeer("reviewer", ["#reviews"]);
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"the agents panel",
+				() =>
+					page.$$eval("#agents .agent", (nodes) =>
+						nodes.map((n) => (n.textContent ?? "").trim()),
+					),
+				(list) => list.some((entry) => entry.includes("reviewer")),
+			);
+			// The open room is #reviews, so the toggle reads "Leave" there.
+			expect(
+				await page.$eval(
+					'#agents .agent[data-name="reviewer"] .membership-toggle',
+					(n) => n.getAttribute("data-member") ?? "",
+				),
+			).toBe("true");
+
+			await page.evaluate(() => {
+				(document as unknown as { title: string }).title = "no-reload";
+			});
+
+			// Membership changed behind the console's back — a second console,
+			// the TUI, the daemon itself. The panel must follow without the
+			// operator reloading, and without the transcript being rebuilt.
+			const removed = await fetch(
+				`${h.apiUrl}/api/agents/reviewer/rooms/${encodeURIComponent("#reviews")}`,
+				{
+					method: "DELETE",
+					headers: { Authorization: `Bearer ${TOKEN}` },
+				},
+			);
+			expect(removed.status).toBe(200);
+
+			await waitFor(
+				"the membership toggle to follow",
+				() =>
+					page
+						.$eval(
+							'#agents .agent[data-name="reviewer"] .membership-toggle',
+							(n) => n.getAttribute("data-member") ?? "",
+						)
+						.catch(() => null),
+				(member) => member === "false",
+			);
+			expect(
+				await page.evaluate(
+					() => (document as unknown as { title: string }).title,
+				),
+			).toBe("no-reload");
 			expect(errors).toEqual([]);
 		},
 	);
@@ -2327,4 +2517,315 @@ describe("accessibility", () => {
 		expect(normal).not.toBe("0s");
 		expect(errors).toEqual([]);
 	});
+});
+
+// ── Repaint stability (T-1615) ───────────────────────────────────────────────
+
+/** The emoji segment of the focused chip's label ("👀 2" -> "👀"). */
+const focusedEmoji = async (page: Page): Promise<string> => {
+	const probe = await focusProbe(page);
+	return (probe?.text ?? "").split(" ")[0] ?? "";
+};
+
+/**
+ * Scroll geometry of the transcript, for the sticky-bottom assertions.
+ *
+ * The repo has no DOM lib, so the element's scroll box is unexpressible
+ * here; puppeteer hands back the real `HTMLElement` and only these three
+ * numbers are read off it.
+ */
+const scrollState = (page: Page) =>
+	page.$eval("#messages", (node) => {
+		const box: {
+			scrollTop: number;
+			scrollHeight: number;
+			clientHeight: number;
+		} = node as unknown as {
+			scrollTop: number;
+			scrollHeight: number;
+			clientHeight: number;
+		};
+		return {
+			top: box.scrollTop,
+			fromBottom: box.scrollHeight - box.scrollTop - box.clientHeight,
+		};
+	});
+
+/** Fill the transcript until it overflows, so scroll position is meaningful. */
+async function overflowingRoom(rooms: RoomStore): Promise<void> {
+	for (let i = 0; i < 30; i += 1) {
+		await rooms.post({
+			room: "#reviews",
+			author: i % 2 === 0 ? "reviewer" : "second-agent",
+			body: `Filler line ${i} to force the transcript to overflow.`,
+		});
+	}
+}
+
+describe("repaint stability", () => {
+	browserTest(
+		"a repaint keeps focus on the same emoji chip, not the ordinal neighbor",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const posted = await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Three chips.",
+			});
+			await h.rooms.react(posted.id, "reviewer", "👀");
+			await h.rooms.react(posted.id, "second-agent", "✅");
+			await h.rooms.react(posted.id, "third-agent", "🚀");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			const chips = await waitFor(
+				"three chips",
+				() => renderedReactions(page, posted.id),
+				(list) => list.length === 3,
+			);
+			const [first, second] = chips.map((chip) => chip.split(" ")[0] ?? "");
+
+			// Focus the middle chip by its own identity, not its position.
+			await focusInPage(
+				page,
+				`#messages .message[data-id="${posted.id}"] .reaction:nth-of-type(2)`,
+			);
+			expect(await focusedEmoji(page)).toBe(second);
+
+			// Out-of-band: the chip *ahead* of the focused one disappears, so
+			// every ordinal below it shifts by one. A repaint keyed on the
+			// ordinal lands on the third chip — a control the operator never
+			// chose, and one whose click posts a different reaction.
+			await h.rooms.unreact(posted.id, "reviewer", first);
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Repaint trigger.",
+			});
+			await waitFor(
+				"repaint with two chips",
+				() => renderedReactions(page, posted.id),
+				(list) => list.length === 2,
+			);
+
+			expect(await focusedEmoji(page)).toBe(second);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"a chip whose identity vanished drops focus to the container, never a sibling",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const posted = await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Two chips.",
+			});
+			await h.rooms.react(posted.id, "reviewer", "👀");
+			await h.rooms.react(posted.id, "second-agent", "✅");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"two chips",
+				() => renderedReactions(page, posted.id),
+				(list) => list.length === 2,
+			);
+
+			await focusInPage(
+				page,
+				`#messages .message[data-id="${posted.id}"] .reaction:nth-of-type(1)`,
+			);
+			expect(await focusedEmoji(page)).toBe("👀");
+
+			// The focused chip itself is what vanishes. Falling back to the
+			// row's first remaining control would silently re-point the
+			// keyboard at ✅ — a different reaction, one Enter away.
+			await h.rooms.unreact(posted.id, "reviewer", "👀");
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Repaint trigger.",
+			});
+			await waitFor(
+				"repaint with one chip",
+				() => renderedReactions(page, posted.id),
+				(list) => list.length === 1,
+			);
+
+			// The container itself is an acceptable landing place; a sibling
+			// chip is not — that is the wrong-target defect this guards.
+			const landed = await focusProbe(page);
+			expect(landed?.className ?? "").not.toContain("reaction");
+			expect(["messages", ""]).toContain(landed?.id ?? "");
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest("a scrolled-up reader keeps their position", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		await overflowingRoom(h.rooms);
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await waitFor(
+			"transcript",
+			() => transcriptText(page),
+			(t) => t.includes("Filler line 29"),
+		);
+		await waitFor(
+			"transcript overflows",
+			() => scrollState(page),
+			(s) => s.fromBottom + s.top > 0,
+		);
+
+		await page.$eval("#messages", (node) => {
+			(node as unknown as { scrollTop: number }).scrollTop = 0;
+		});
+
+		await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "Landed while reading history.",
+		});
+		await waitFor(
+			"repaint",
+			() => transcriptText(page),
+			(t) => t.includes("Landed while reading history."),
+		);
+
+		// Slamming to the bottom yanks the reader out of the history they
+		// were reading, with no way back to where they were.
+		expect((await scrollState(page)).top).toBe(0);
+		expect(errors).toEqual([]);
+	});
+
+	browserTest("a reader at the bottom stays pinned there", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		await overflowingRoom(h.rooms);
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await waitFor(
+			"pinned to the bottom on first paint",
+			() => scrollState(page),
+			(s) => s.fromBottom < 4,
+		);
+
+		await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "Newest line of all.",
+		});
+		await waitFor(
+			"repaint",
+			() => transcriptText(page),
+			(t) => t.includes("Newest line of all."),
+		);
+
+		expect((await scrollState(page)).fromBottom).toBeLessThan(4);
+		expect(errors).toEqual([]);
+	});
+
+	browserTest("a thread-pane repaint keeps focus in the pane", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const root = await h.rooms.post({
+			room: "#reviews",
+			author: "@you",
+			body: "Root question.",
+		});
+		const reply = await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "Threaded answer.",
+			parentId: root.id,
+		});
+		await h.rooms.react(reply.id, "reviewer", "👀");
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await waitFor(
+			"transcript",
+			() => transcriptText(page),
+			(t) => t.includes("Root question."),
+		);
+		await clickInPage(
+			page,
+			`#messages .message[data-id="${root.id}"] .thread-open`,
+		);
+		await page.waitForSelector("#thread:not([hidden])", { timeout: 10_000 });
+
+		const chip = `#thread-messages .message[data-id="${reply.id}"] .reaction`;
+		await page.waitForSelector(chip, { timeout: 10_000 });
+		await focusInPage(page, chip);
+		expect((await focusProbe(page))?.inThread).toBe(true);
+
+		// The pane repaints inside the same refresh() as the transcript, and
+		// carried no focus protection of its own.
+		await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "Second reply.",
+			parentId: root.id,
+		});
+		await waitFor(
+			"thread repaint",
+			() =>
+				page
+					.$eval("#thread-messages", (node) => node.textContent ?? "")
+					.catch(() => ""),
+			(t) => t.includes("Second reply."),
+		);
+
+		const kept = await focusProbe(page);
+		expect(kept?.inThread).toBe(true);
+		expect(kept?.messageId).toBe(String(reply.id));
+		expect(errors).toEqual([]);
+	});
+
+	browserTest(
+		"a channel repaint restores the focused channel, not the roving one",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"two channel options",
+				() => page.$$eval("#channels .channel", (nodes) => nodes.length),
+				(count) => count >= 2,
+			);
+
+			// #reviews is open, so it owns the roving tabindex; focus sits on
+			// #ops. Restoring "the option in the tab order" therefore restores
+			// a different option than the one the operator was on.
+			await focusInPage(page, "#channels li:nth-of-type(2) .channel");
+			expect((await focusProbe(page))?.text ?? "").toContain("#ops");
+
+			await h.rooms.post({
+				room: "#ops",
+				author: "reviewer",
+				body: "Background activity.",
+			});
+			await waitFor(
+				"unread repaint",
+				() =>
+					page.$$eval("#channels .channel.unread", (nodes) =>
+						nodes.map((n) => (n.textContent ?? "").trim()),
+					),
+				(list) => list.length === 1,
+			);
+
+			expect((await focusProbe(page))?.text ?? "").toContain("#ops");
+			expect(errors).toEqual([]);
+		},
+	);
 });

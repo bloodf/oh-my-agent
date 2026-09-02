@@ -40,7 +40,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { join, resolve, sep } from "node:path";
 
-import type { RoomMessage, RoomStore } from "../rooms/store";
+import type { MessageReaction, RoomMessage, RoomStore } from "../rooms/store";
 import {
 	fingerprintPeerDefinition,
 	type PeerDefinition,
@@ -63,7 +63,15 @@ const DEFAULT_POLL_INTERVAL_MS = 250;
  */
 const REACTION_WINDOW = 200;
 
-/** A frame pushed to a connected console. */
+/**
+ * A frame pushed to a connected console (ADR-015).
+ *
+ * The union is additive: a console may be a cached shell built against an
+ * older taxonomy, so a client ignores a `type` it does not know rather than
+ * treating it as a protocol error. Every frame describes one transition and
+ * is emitted only after that transition commits — emitting before a write
+ * that then throws publishes a state the daemon is not in.
+ */
 export type ConsoleEvent =
 	| { type: "message"; message: RoomMessage }
 	| {
@@ -72,7 +80,27 @@ export type ConsoleEvent =
 			messageId: number;
 			actor: string;
 			emoji: string;
-	  };
+			/** `true` when the reaction was added, `false` when it was removed. */
+			reacted: boolean;
+	  }
+	/** A peer appeared, or its worker changed run state. */
+	| { type: "agent"; agent: string; state: AgentStatus["state"] }
+	/** A definition was rewritten; `rebuildRequired` is policy vs membership. */
+	| { type: "definition"; agent: string; rebuildRequired: boolean }
+	/** A peer's live room set, as the supervisor applied it. */
+	| { type: "membership"; agent: string; rooms: string[] }
+	/** A room the daemon now knows about. */
+	| { type: "channel"; channel: RoomInfo }
+	/** An account's quota position moved. */
+	| {
+			type: "budget";
+			account: string;
+			state: "parked" | "resumed" | "bumped" | "warned";
+			/** The new ceiling, on a bump. */
+			budgetUsd?: number;
+	  }
+	/** A peer's schedule armed or fired. */
+	| { type: "schedule"; agent: string; phase: "armed" | "fired" };
 
 export interface StartConsoleApiOptions {
 	rooms: RoomStore;
@@ -102,6 +130,39 @@ export interface ConsoleApi {
 	url: string;
 	hostname: string;
 	port: number;
+	/**
+	 * Push one frame to every connected console.
+	 *
+	 * A method on the handle rather than a start option because of ordering:
+	 * the daemon builds the supervisor — the thing with transitions worth
+	 * publishing — before this server exists, so the destination can only be
+	 * named once `startConsoleApi` has returned (ADR-015).
+	 *
+	 * This is the route-driven path, and the one the routes and the live-feed
+	 * poller call by name: an HTTP handler that committed a write publishes it
+	 * here, unconditionally. Redirecting those would take the frames away from
+	 * consoles connected right now, so `publish` has no sink between it and
+	 * the sockets.
+	 */
+	publish(event: ConsoleEvent): void;
+	/**
+	 * Publish one supervisor transition, through whatever sink is installed.
+	 *
+	 * The daemon's `SupervisorDeps.emit` hook calls this. It reads the sink
+	 * at call time, so the destination set by `setPublishSink` applies to
+	 * every later emission — including ones from a hook closure captured
+	 * before the sink existed.
+	 */
+	emit(event: ConsoleEvent): void;
+	/**
+	 * Redirect `emit` at a sink of the daemon's choosing.
+	 *
+	 * Replaces the destination rather than adding an observer beside it: the
+	 * default already broadcasts to the sockets, so a caller that only wanted
+	 * consoles fed never has to call this. Setting again replaces the sink;
+	 * `publish` is unaffected either way.
+	 */
+	setPublishSink(sink: (event: ConsoleEvent) => void): void;
 	close(): Promise<void>;
 }
 
@@ -110,12 +171,33 @@ interface SocketData {
 	id: number;
 }
 
+/** One reaction as the cursor holds it, with the message it sits on. */
+interface SeenReaction extends MessageReaction {
+	messageId: number;
+}
+
 /** What one room looked like at the last tick. */
 interface RoomCursor {
 	/** Highest message id already broadcast. */
 	lastMessageId: number;
-	/** `${messageId}:${actor}:${emoji}` already broadcast, within the window. */
-	reactions: Set<string>;
+	/**
+	 * Reactions already broadcast, within the window, keyed by
+	 * `reactionKey`. The value carries the parts back out, so a removal names
+	 * its actor and emoji without parsing them back out of the key.
+	 */
+	reactions: Map<string, SeenReaction>;
+}
+
+/**
+ * Identity of one reaction, as a key.
+ *
+ * A JSON tuple rather than a delimited string: an actor and an emoji are both
+ * caller-supplied text, so `${id}:${actor}:${emoji}` collides — actor `a:b`
+ * with emoji `c` and actor `a` with emoji `b:c` produce the same key, and one
+ * of the two reactions then never emits its removal.
+ */
+function reactionKey(messageId: number, actor: string, emoji: string): string {
+	return JSON.stringify([messageId, actor, emoji]);
 }
 
 /**
@@ -176,9 +258,42 @@ export async function startConsoleApi(
 	let tickInFlight: Promise<void> | undefined;
 	let nextSocketId = 1;
 
-	const broadcast = (event: ConsoleEvent): void => {
+	/**
+	 * Push one frame to every connected console. The handle exposes this as
+	 * `publish`; routes and the poller call it directly.
+	 */
+	const publish = (event: ConsoleEvent): void => {
 		const frame = JSON.stringify(event);
 		for (const socket of sockets) socket.send(frame);
+	};
+
+	/**
+	 * Where supervisor transitions go, defaulting to the sockets.
+	 *
+	 * A default rather than `undefined` so consoles are fed with no wiring at
+	 * all: a daemon that never reaches `setPublishSink` still shows every
+	 * transition. `setPublishSink` replaces this, which is what makes the
+	 * setter load-bearing rather than a second observer beside `publish`.
+	 */
+	let publishSink: (event: ConsoleEvent) => void = publish;
+
+	/**
+	 * The supervisor-facing path. Reads `publishSink` at call time, never
+	 * capturing it: the daemon hands this method to the supervisor before it
+	 * installs a sink, so a captured reference would pin the default forever
+	 * and every later `setPublishSink` would be a no-op.
+	 */
+	const emit = (event: ConsoleEvent): void => {
+		// Contained: the frame describes something that already happened, and
+		// this runs inside the supervisor's post-commit emitters. A sink
+		// throwing here would otherwise fail a park that already parked.
+		try {
+			publishSink(event);
+		} catch (error) {
+			process.stderr.write(
+				`console: publish sink threw: ${error instanceof Error ? error.message : String(error)}\n`,
+			);
+		}
 	};
 
 	/**
@@ -202,24 +317,45 @@ export async function startConsoleApi(
 			return;
 		}
 
-		const seen = new Set<string>();
+		// Each key maps to its parts, so a removal can name the actor and
+		// emoji it is for without taking them back out of the key.
+		const seen = new Map<string, SeenReaction>();
 		for (const message of messages) {
 			if (message.id > cursor.lastMessageId) {
 				cursor.lastMessageId = message.id;
-				broadcast({ type: "message", message });
+				publish({ type: "message", message });
 			}
 			for (const reaction of message.reactions) {
-				const key = `${message.id}:${reaction.actor}:${reaction.emoji}`;
-				seen.add(key);
+				const key = reactionKey(message.id, reaction.actor, reaction.emoji);
+				seen.set(key, { messageId: message.id, ...reaction });
 				if (cursor.reactions.has(key)) continue;
-				broadcast({
+				publish({
 					type: "reaction",
 					room: roomId,
 					messageId: message.id,
 					actor: reaction.actor,
 					emoji: reaction.emoji,
+					reacted: true,
 				});
 			}
+		}
+		// The reverse diff: a key the last tick held and this read did not is
+		// a reaction somebody took back, and without this a console shows it
+		// forever. Bounded by the same `floor` this tick read from — a key
+		// below it was never looked at, so its absence is the window moving,
+		// not a removal, and emitting there would have every long-lived
+		// console erase chips that are still in the store.
+		for (const [key, reaction] of cursor.reactions) {
+			if (reaction.messageId <= floor) continue;
+			if (seen.has(key)) continue;
+			publish({
+				type: "reaction",
+				room: roomId,
+				messageId: reaction.messageId,
+				actor: reaction.actor,
+				emoji: reaction.emoji,
+				reacted: false,
+			});
 		}
 		// Keep only keys still inside the window, so a long-lived console does
 		// not accumulate a key per reaction ever made.
@@ -232,7 +368,7 @@ export async function startConsoleApi(
 			if (!cursor) {
 				// A room that appeared after the feed started is new, so its
 				// messages are new too: start at zero rather than at its head.
-				cursor = { lastMessageId: 0, reactions: new Set() };
+				cursor = { lastMessageId: 0, reactions: new Map() };
 				cursors.set(roomId, cursor);
 			}
 			await pollRoom(roomId, cursor);
@@ -246,7 +382,7 @@ export async function startConsoleApi(
 	const primeCursors = async (): Promise<void> => {
 		cursors.clear();
 		for (const roomId of knownRooms.keys()) {
-			const cursor: RoomCursor = { lastMessageId: 0, reactions: new Set() };
+			const cursor: RoomCursor = { lastMessageId: 0, reactions: new Map() };
 			try {
 				const messages = await rooms.listMessages(roomId, {});
 				cursor.lastMessageId = messages.at(-1)?.id ?? 0;
@@ -254,8 +390,13 @@ export async function startConsoleApi(
 				for (const message of messages) {
 					if (message.id <= floor) continue;
 					for (const reaction of message.reactions) {
-						cursor.reactions.add(
-							`${message.id}:${reaction.actor}:${reaction.emoji}`,
+						// Seeding the *current* state is what keeps the first
+						// tick silent in both directions: an addition it holds
+						// is not new, and a reaction removed while nothing was
+						// connected is not in here to be diffed against.
+						cursor.reactions.set(
+							reactionKey(message.id, reaction.actor, reaction.emoji),
+							{ messageId: message.id, ...reaction },
 						);
 					}
 				}
@@ -546,7 +687,20 @@ export async function startConsoleApi(
 
 				// A peer's declared rooms exist from the moment it does, exactly
 				// as `Supervisor.register` guarantees for a peer loaded at boot.
-				for (const room of created.rooms ?? []) await ensureRoom(room);
+				// Only rooms this call actually created are announced: a frame
+				// per declared room would also name rooms that already existed,
+				// and a `channel` frame means a new room, not a mention of one.
+				for (const room of created.rooms ?? []) {
+					const existed = knownRooms.has(room);
+					await ensureRoom(room);
+					const channel = knownRooms.get(room);
+					if (!existed && channel) publish({ type: "channel", channel });
+				}
+
+				// After the file landed and its rooms exist: the definition on
+				// disk is the commit, and a frame ahead of it would announce an
+				// agent a cold boot would not find.
+				publish({ type: "agent", agent: created.name, state: "stopped" });
 
 				return json(201, {
 					agent: {
@@ -673,6 +827,16 @@ export async function startConsoleApi(
 			// on the next delivered turn — nothing here touches the worker.
 			if (peers.has(peerName)) await applyMembership(peerName);
 
+			// After both the file and, where it applied, the live room set:
+			// `applyMembership` publishes its own membership frame through the
+			// supervisor, so this one carries only what that does not — that a
+			// definition changed, and whether a rebuild is owed.
+			publish({
+				type: "definition",
+				agent: result.definition.name,
+				rebuildRequired: result.rebuildRequired,
+			});
+
 			return json(200, {
 				agent: {
 					name: result.definition.name,
@@ -749,11 +913,18 @@ export async function startConsoleApi(
 				if (id.length === 0) {
 					return fail(400, "invalid_request", "Channel id is required");
 				}
+				// `ensureRoom` is idempotent, so a repeated create is not a
+				// transition: a frame for it would have every console repaint
+				// a channel list that did not change.
+				const existed = knownRooms.has(id);
 				await ensureRoom(id);
 				const channel = knownRooms.get(id);
 				if (!channel) {
 					return fail(500, "internal", `Channel ${id} was not indexed`);
 				}
+				// After the room exists and is indexed, so a console acting on
+				// the frame finds it on the very next read.
+				if (!existed) publish({ type: "channel", channel });
 				return json(201, { channel });
 			}
 			return fail(405, "method_not_allowed", `${request.method} not allowed`);
@@ -1009,6 +1180,11 @@ export async function startConsoleApi(
 		url: `http://${boundHost}:${boundPort}`,
 		hostname: boundHost,
 		port: boundPort,
+		publish,
+		emit,
+		setPublishSink: (sink) => {
+			publishSink = sink;
+		},
 		close: async () => {
 			if (closed) return;
 			closed = true;
