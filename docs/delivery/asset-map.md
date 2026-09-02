@@ -66,7 +66,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/` | yes | [T-704](tasks/T-704-deflake-intermittent-test.md) | — |
 | `tests/account-registry.test.ts` | yes | [T-404](tasks/T-404-account-registry.md) | — |
 | `tests/agent-definition.test.ts` | yes | [T-101](tasks/T-101-peer-definition-parser.md) | — |
-| `tests/build-hygiene.test.ts` | not yet | [T-1613](tasks/T-1613-build-hygiene-test.md) | — |
+| `tests/build-hygiene.test.ts` | yes | [T-1613](tasks/T-1613-build-hygiene-test.md) | — |
 | `tests/console-api.test.ts` | yes | [T-602](tasks/T-602-console-api.md), [T-1601](tasks/T-1601-console-thread-parentage.md), [T-1602](tasks/T-1602-reaction-removal-frames.md), [T-1603](tasks/T-1603-attribution-enforcement.md), [T-1604](tasks/T-1604-typed-daemon-events.md), [T-1605](tasks/T-1605-console-ops-panel.md) | — |
 | `tests/console-client.test.ts` | yes | [T-603](tasks/T-603-console-client.md), [T-1101](tasks/T-1101-console-visual-system.md), [T-1102](tasks/T-1102-console-accessibility.md), [T-1104](tasks/T-1104-console-focus-stability.md), [T-1105](tasks/T-1105-unread-reconcile-on-open.md), [T-1203](tasks/T-1203-remote-console-auth.md), [T-1601](tasks/T-1601-console-thread-parentage.md), [T-1602](tasks/T-1602-reaction-removal-frames.md), [T-1604](tasks/T-1604-typed-daemon-events.md), [T-1605](tasks/T-1605-console-ops-panel.md), [T-1607](tasks/T-1607-authoring-parity.md), [T-1608](tasks/T-1608-mentions-fidelity.md), [T-1614](tasks/T-1614-test-timing-hygiene.md), [T-1615](tasks/T-1615-repaint-focus-stability.md) | — |
 | `tests/consumer-install.test.ts` | not yet | [T-1306](tasks/T-1306-consumer-install-smoke.md) | — |
@@ -79,7 +79,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/daemon-cli.test.ts` | yes | [T-1103](tasks/T-1103-cli-management-surface.md), [T-1606](tasks/T-1606-daemon-lifecycle-verbs.md), [T-1607](tasks/T-1607-authoring-parity.md), [T-1611](tasks/T-1611-cli-json-everywhere.md) | — |
 | `tests/daemon-console-mount.test.ts` | yes | [T-1001](tasks/T-1001-console-mounted-at-boot.md) | — |
 | `tests/daemon-hierarchy.test.ts` | yes | [T-802](tasks/T-802-daemon-hierarchy.md) | — |
-| `tests/daemon-main.test.ts` | yes | [T-502](tasks/T-502-daemon-entry-point.md), [T-511](tasks/T-511-operator-steering.md), [T-512](tasks/T-512-sandboxed-on-the-wire.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1610](tasks/T-1610-unreact-contract.md), [T-1614](tasks/T-1614-test-timing-hygiene.md) | — |
+| `tests/daemon-main.test.ts` | yes | [T-502](tasks/T-502-daemon-entry-point.md), [T-511](tasks/T-511-operator-steering.md), [T-512](tasks/T-512-sandboxed-on-the-wire.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1606](tasks/T-1606-daemon-lifecycle-verbs.md), [T-1610](tasks/T-1610-unreact-contract.md), [T-1614](tasks/T-1614-test-timing-hygiene.md) | — |
 | `tests/daemon-persistence.test.ts` | yes | [T-508](tasks/T-508-daemon-persistence.md) | — |
 | `tests/dogfood.test.ts` | not yet | [T-1402](tasks/T-1402-dogfood-harness.md), [T-1404](tasks/T-1404-live-session-safety-rails.md) | — |
 | `tests/end-to-end.test.ts` | yes | [T-405](tasks/T-405-supervisor.md) | — |
@@ -93,7 +93,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/materializer.test.ts` | yes | [T-201](tasks/T-201-materialization-engine.md), [T-205](tasks/T-205-worker-env-scrub.md), [T-1005](tasks/T-1005-worker-env-allowlist.md) | — |
 | `tests/pack.test.ts` | not yet | [T-1301](tasks/T-1301-packable-artifact.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
 | `tests/peer-store.test.ts` | yes | [T-501](tasks/T-501-peer-store.md) | — |
-| `tests/protocol.contract.test.ts` | yes | [T-507](tasks/T-507-control-socket-protocol.md), [T-511](tasks/T-511-operator-steering.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md), [T-801](tasks/T-801-hierarchy-protocol.md), [T-1608](tasks/T-1608-mentions-fidelity.md) | — |
+| `tests/protocol.contract.test.ts` | yes | [T-507](tasks/T-507-control-socket-protocol.md), [T-511](tasks/T-511-operator-steering.md), [T-513](tasks/T-513-reaction-methods-on-the-socket.md), [T-801](tasks/T-801-hierarchy-protocol.md), [T-1606](tasks/T-1606-daemon-lifecycle-verbs.md), [T-1608](tasks/T-1608-mentions-fidelity.md) | — |
 | `tests/remote-exposure.test.ts` | not yet | [T-1201](tasks/T-1201-exposure-policy.md), [T-1202](tasks/T-1202-tls-termination.md), [T-1204](tasks/T-1204-authoritative-hierarchy.md), [T-1206](tasks/T-1206-authenticated-connection-audit.md) | — |
 | `tests/rooms.test.ts` | yes | [T-402](tasks/T-402-room-store.md), [T-601](tasks/T-601-conversation-model.md) | — |
 | `tests/sandbox-gate.test.ts` | yes | [T-203](tasks/T-203-sandbox-launch-gate.md) | — |

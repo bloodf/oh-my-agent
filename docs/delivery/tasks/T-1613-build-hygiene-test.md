@@ -22,7 +22,7 @@ A machine-enforced manifest test preserves the dependency-free console by reject
 
 | Path | Role | Note |
 |---|---|---|
-| `tests/build-hygiene.test.ts` (to be created) | New | Asserts scripts.build is absent and runtime dependencies remain empty using manifest fixtures. |
+| [`tests/build-hygiene.test.ts`](../../../tests/build-hygiene.test.ts) | New | Asserts scripts.build is absent and runtime dependencies remain empty using manifest fixtures. |
 | [`package.json`](../../../package.json) | Read only, not edited by this task | The live manifest contract the test protects. |
 
 ## Steps

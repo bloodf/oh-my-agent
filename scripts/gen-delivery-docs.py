@@ -4281,7 +4281,8 @@ TASKS += [
         ],
         files=[
             "src/daemon/main.ts", "src/daemon/cli.ts", "src/daemon/socket.ts", "src/shared/protocol.ts",
-            "src/shared/protocol-schemas.ts", "tests/daemon-cli.test.ts",
+            "src/shared/protocol-schemas.ts", "tests/daemon-cli.test.ts", "tests/protocol.contract.test.ts",
+            "tests/daemon-main.test.ts",
         ],
         assets=[
             ("src/daemon/main.ts", "Edited", "Persists detached daemon stderr and performs graceful shutdown/restart lifecycle."),
@@ -4290,11 +4291,13 @@ TASKS += [
             ("src/shared/protocol.ts", "Edited", "Declares additive daemon_stop params and result."),
             ("src/shared/protocol-schemas.ts", "Edited", "Validates daemon_stop and logs source selection."),
             ("tests/daemon-cli.test.ts", "Edited", "Covers stale/live pidfiles, restarts, daemon logs, and protocol shapes."),
+            ("tests/protocol.contract.test.ts", "Edited", "VALID_PARAMS/VALID_RESULTS fixtures for daemon_stop — the Record is exhaustive over METHOD_NAMES, so a new method does not compile without them (the drift guard doing its job)."),
+            ("tests/daemon-main.test.ts", "Edited", "The ack-before-close anchor: daemon_stop returns a valid result before the socket disappears."),
         ],
         steps=[
             "Add operator-only daemon_stop to the protocol and socket; validate pidfile ownership before graceful stop and restart.",
             "Persist detached daemon stderr to its log file across restarts instead of discarding it.",
-            "Add worker-stderr-default and daemon source selection to logs, then cover protocol and real-daemon CLI behavior.",
+            "Add worker-stderr-default and daemon source selection to logs, then cover the contract explicitly in tests/protocol.contract.test.ts and real-daemon CLI behavior.",
         ],
         acceptance=[
             "Stop is refused for a stale pidfile, graceful for a live one, and verified gone.",
