@@ -1667,11 +1667,19 @@ describe("unread", () => {
 				(open) => open === true,
 			);
 
-			await h.supervisor.post({
-				room: "#ops",
-				author: "reviewer",
-				body: "Background chatter.",
-			});
+			// A burst rather than a single post. The OPEN observation above is a
+			// check against state that can change before the next line runs: if
+			// the socket drops in that window the client reconnects, and the one
+			// message posted in the gap is never delivered as a live frame. Three
+			// spread across the reconnect make the assertion "at least one landed
+			// while a socket was open", which a single dropped frame cannot fail.
+			for (const body of [
+				"Background chatter.",
+				"More chatter.",
+				"Still more.",
+			]) {
+				await h.supervisor.post({ room: "#ops", author: "reviewer", body });
+			}
 
 			const unread = await waitFor(
 				"unread affordance on #ops",

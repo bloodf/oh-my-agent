@@ -119,17 +119,26 @@ async function storeFor(
 const idsOf = (store: RemoteAuthCredentialStore): number[] =>
 	store.listAuthCredentials().map((c) => c.id);
 
-/** Poll until `predicate` holds or the deadline passes. */
+/**
+ * Poll until `predicate` holds or the deadline passes. Async predicates are
+ * accepted so a check can read through the network rather than only off local
+ * client state.
+ */
 async function waitFor(
-	predicate: () => boolean,
+	predicate: () => boolean | Promise<boolean>,
 	timeoutMs = 3_000,
 ): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		if (predicate()) return true;
-		await new Promise((r) => setTimeout(r, 20));
+		if (await predicate()) return true;
+		// Real timer, deliberately: the awaited state is produced by the
+		// gateway and broker over HTTP, so faking this process's clock would
+		// not advance it. The deadline above bounds the wait.
+		const tick = Promise.withResolvers<void>();
+		setTimeout(tick.resolve, 20);
+		await tick.promise;
 	}
-	return predicate();
+	return await predicate();
 }
 
 // ── Scoping, through the real client ─────────────────────────────────────────
@@ -291,9 +300,24 @@ describe("requester recovery after a refused shared disable", () => {
 
 		store.deleteAuthCredential(own, "worker owns this account");
 
-		// It must stay gone: no recovery snapshot resurrects a legitimate disable.
-		await new Promise((r) => setTimeout(r, 400));
+		// A dedicated disable is proxied, so upstream losing the credential is
+		// the observable that the gateway acted — poll that rather than sleeping
+		// a guessed interval and hoping the round trip finished.
+		const admin = new AuthBrokerClient({ url: up.url, token: ADMIN_TOKEN });
+		const goneUpstream = async (): Promise<boolean> => {
+			const result = await admin.fetchSnapshot();
+			if (result.status !== 200)
+				throw new Error("upstream snapshot unavailable");
+			return !result.snapshot.credentials.some((c) => c.id === own);
+		};
+		expect(await waitFor(goneUpstream)).toBe(true);
+
+		// It must stay gone: no recovery snapshot resurrects a legitimate
+		// disable. The gateway broadcasts a fresh worker view on every
+		// generation bump, so if one were coming it would already be in flight
+		// by the time upstream reflects the delete.
 		expect(idsOf(store)).not.toContain(own);
+		expect(await waitFor(() => idsOf(store).includes(own), 200)).toBe(false);
 	});
 });
 

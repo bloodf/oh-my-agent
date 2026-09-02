@@ -772,32 +772,43 @@ describe("bootDaemon — composition and the control socket", () => {
 
 	test("chat_wait returns when a message lands after the call started", async () => {
 		const { handle } = await boot();
-		await call<ChatSendResult>(handle.socketPath, "rooms_post", {
-			room: "#reviews",
-			body: "first",
-		});
-		const first = await call<ChatReadResult>(handle.socketPath, "chat_read", {
-			room: "#reviews",
-		});
-		const sinceId = first.messages[0]?.id ?? 0;
 
+		// A room that does not exist until this wait creates it. `chat_wait`
+		// calls `ensureRoom` before it starts polling, so the room turning up in
+		// `rooms_list` is this exact request reporting that it reached its
+		// handler — not a proxy for some other call that happened to park.
+		const room = "#wait-barrier";
 		const waiting = call<ChatWaitResult>(handle.socketPath, "chat_wait", {
-			room: "#reviews",
-			sinceId,
+			room,
+			// Pinned rather than left to default. A bare wait derives its
+			// baseline from the room's last id *after* creating the room, so a
+			// post landing in that window would be counted as backlog and
+			// skipped. The room is new, so `0` and "now" name the same cursor
+			// without the race.
+			sinceId: 0,
 			timeoutMs: 5000,
 		});
 
-		// A genuine wait: the state being awaited is a request parked inside the
-		// server's own event loop, which this process cannot observe. Fake timers
-		// cannot drive it — the poll is real I/O over a real socket.
-		await Bun.sleep(60);
+		await until(async () => {
+			const listed = await call<RoomsListResult>(
+				handle.socketPath,
+				"rooms_list",
+				{},
+				3,
+			);
+			return listed.rooms.some((entry) => entry.id === room) ? true : undefined;
+		}, `${room} to be created by the parked chat_wait`);
+
 		await call<ChatSendResult>(
 			handle.socketPath,
 			"rooms_post",
-			{ room: "#reviews", body: "second" },
+			{ room, body: "second" },
 			2,
 		);
 
+		// The room was empty when the wait parked, so this is the only message
+		// it can return: a wait that never woke would fail the suite timeout,
+		// and one that answered without the post would come back empty.
 		const result = await waiting;
 		expect(result.messages.map((message) => message.body)).toEqual(["second"]);
 	});
@@ -1383,14 +1394,36 @@ describe("bootDaemon — shutdown", () => {
 			timeoutMs: 30_000,
 		}).catch(() => undefined);
 
-		// Real wait: the poll must reach the server, and "parked inside the
-		// server's loop" is not observable from this process.
-		await Bun.sleep(200);
+		// The parked loop is inside the server's request handler and is not
+		// observable from here — but every pass through it reads the store, so
+		// the first read is the poll reporting that it started.
+		await until(
+			async () => (reads > 0 ? true : undefined),
+			"the parked chat_wait to start polling",
+		);
+
 		await socket.close();
 		const readsAtClose = reads;
 
-		await Bun.sleep(400);
-		// A loop that ignored the close would have polled several more times.
+		// A loop that ignored the close keeps reading a closed store, so watch
+		// for that directly and fail the moment it happens rather than sleeping
+		// out the window first. The deadline bounds how long "quiet" is
+		// observed; the throw inside it is what makes the check fail fast.
+		const quietUntil = Date.now() + 400;
+		while (Date.now() < quietUntil) {
+			if (reads > readsAtClose + 1) {
+				throw new Error(
+					`Parked chat_wait kept polling after close: ${reads - readsAtClose} reads since`,
+				);
+			}
+			// Real timer, deliberately: the behavior under test is a served
+			// request's poll loop, reached over a unix socket and advancing on
+			// the server's schedule rather than this suite's clock.
+			// `quietUntil` bounds the observation.
+			const tick = Promise.withResolvers<void>();
+			setTimeout(tick.resolve, 20);
+			await tick.promise;
+		}
 		expect(reads).toBeLessThanOrEqual(readsAtClose + 1);
 		await parked;
 	});

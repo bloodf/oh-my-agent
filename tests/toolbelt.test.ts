@@ -55,6 +55,8 @@ async function harness(): Promise<{
 	socketPath: string;
 	store: PeerStore;
 	projectAgentRoot: string;
+	/** The daemon's room index, written by `ensureRoom` as handlers run. */
+	knownRooms: DaemonContext["knownRooms"];
 }> {
 	const rootDir = await mkdtemp(join(tmpdir(), "oma-toolbelt-"));
 	const agentDir = join(
@@ -160,6 +162,7 @@ async function harness(): Promise<{
 		spawnCalls,
 		workerPrompts,
 		socketPath,
+		knownRooms: context.knownRooms,
 	};
 }
 
@@ -177,6 +180,31 @@ async function invoke(
 		undefined,
 		{} as never,
 	)) as ToolResult;
+}
+
+/**
+ * Poll `predicate` until it holds or the deadline passes, then report what was
+ * still unmet. Used where the awaited state lives inside the control socket's
+ * own request loop and is not observable from the caller directly.
+ */
+async function until(
+	predicate: () => boolean,
+	description: string,
+	timeoutMs = 5_000,
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!predicate()) {
+		if (Date.now() > deadline) {
+			throw new Error(`Timed out waiting for ${description}`);
+		}
+		// Real timer, deliberately: the awaited state is a served request's own
+		// poll loop, reached over a unix socket. It advances on the server's
+		// schedule, which faking this suite's clock does not drive. The
+		// deadline above bounds it.
+		const tick = Promise.withResolvers<void>();
+		setTimeout(tick.resolve, 10);
+		await tick.promise;
+	}
 }
 
 function text(result: ToolResult): string {
@@ -365,20 +393,32 @@ describe("worker toolbelt", () => {
 	});
 
 	test("chat_wait blocks until the daemon returns a new message", async () => {
-		const { tools } = await harness();
+		const { tools, knownRooms } = await harness();
+
+		// A room the harness has not indexed yet. The daemon's `ensureRoom`
+		// records it, and `chat_wait` calls that before it starts polling — so
+		// the index gaining this room is this wait reporting that it reached the
+		// handler and parked, rather than a guess at how long the hop takes.
+		const room = "#wait-barrier";
+		expect(knownRooms.has(room)).toBe(false);
+
 		let settled = false;
 		const waiting = invoke(tools, "chat_wait", {
-			room: "#general",
+			room,
 			sinceId: 0,
-			timeoutMs: 1_000,
+			timeoutMs: 5_000,
 		}).then((result) => {
 			settled = true;
 			return result;
 		});
-		await Bun.sleep(75);
+		await until(() => knownRooms.has(room), `${room} to be indexed`);
+
+		// Parked, not answered: the room is empty, so a wait that returned
+		// early would have nothing to return.
 		expect(settled).toBe(false);
+
 		await invoke(tools, "chat_send", {
-			room: "#general",
+			room,
 			author: "coordinator",
 			body: "wake",
 		});
