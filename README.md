@@ -4,6 +4,8 @@ An [oh-my-pi (OMP)](https://omp.sh/docs) plugin that runs **autonomous, long-liv
 
 **Status: pre-release.** The runtime subsystems (workers, isolation, credentials, rooms, scheduling, quota handling) are built and under test; so are the operator surfaces: the daemon binary and control socket, the OMP TUI extension, and the browser console. [`ARCHITECTURE.md`](ARCHITECTURE.md) is the design specification with per-section implementation markers; [`docs/delivery/`](docs/delivery/README.md) is the authoritative task tree. The web console has its own guide: [`docs/web-console.md`](docs/web-console.md).
 
+Versioning and release policy lives in [`CHANGELOG.md`](CHANGELOG.md).
+
 ## Requirements
 
 - Bun ≥ 1.3.14

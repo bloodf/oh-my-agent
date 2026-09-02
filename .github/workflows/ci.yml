@@ -13,6 +13,24 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
+      - name: Versions match changelog
+        run: |
+          bun -e '
+            const manifest = await Bun.file("package.json").json();
+            const changelog = await Bun.file("CHANGELOG.md").text();
+            const entry = changelog.match(/^## \[(?!Unreleased\])([^\]]+)\](?: - .+)?$/m);
+            if (!entry) throw new Error("CHANGELOG.md has no released version entry");
+            for (const [field, version] of [["package.json version", manifest.version], ["omp.version", manifest.omp?.version]]) {
+              if (version !== entry[1]) throw new Error(`${field} ${version} does not match CHANGELOG.md ${entry[1]}`);
+            }
+          '
+
+      - name: Patch hygiene
+        run: python3 scripts/check-patches.py
+
+      - name: Patch hygiene selftest
+        run: python3 scripts/check-patches.py --selftest
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 

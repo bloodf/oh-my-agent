@@ -24,8 +24,13 @@
 		"omp-agent": "src/daemon/main.ts"
 	},
 	"files": [
+		"package.json",
 		"src",
-		"skills"
+		"skills",
+		"patches",
+		"LICENSE",
+		"CHANGELOG.md",
+		"README.md"
 	],
 	"peerDependencies": {
 		"@oh-my-pi/pi-coding-agent": "^18.0.7"
@@ -41,6 +46,7 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
+		"prepack": "bun run typecheck && bun run test",
 		"test": "bun test --timeout 30000",
 		"lint": "biome check .",
 		"format": "biome check --write .",
