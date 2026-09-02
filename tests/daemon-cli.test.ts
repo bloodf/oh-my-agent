@@ -211,10 +211,16 @@ function alive(pid: number): boolean {
  */
 async function spawnDaemon(
 	agentDir: string,
-): Promise<{ pid: number; socketPath: string }> {
+	argv: readonly string[] = ["daemon"],
+): Promise<{
+	pid: number;
+	socketPath: string;
+	stdout: string;
+	stderr: string;
+}> {
 	const mainPath = join(import.meta.dir, "..", "src", "daemon", "main.ts");
 	const launcher = Bun.spawn({
-		cmd: [process.execPath, mainPath, "daemon"],
+		cmd: [process.execPath, mainPath, ...argv],
 		env: hermeticChildEnv({
 			PI_CODING_AGENT_DIR: agentDir,
 			OMP_AUTH_BROKER_URL: "",
@@ -255,7 +261,26 @@ async function spawnDaemon(
 	// rather than merely existing — and it throws here, at the harness, if the
 	// readiness contract above ever stops holding.
 	await call(socketPath, "status");
-	return { pid, socketPath };
+	return { pid, socketPath, stdout, stderr };
+}
+
+async function runBinaryCli(
+	agentDir: string,
+	argv: readonly string[],
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+	const mainPath = join(import.meta.dir, "..", "src", "daemon", "main.ts");
+	const proc = Bun.spawn({
+		cmd: [process.execPath, mainPath, ...argv],
+		env: hermeticChildEnv({ PI_CODING_AGENT_DIR: agentDir }),
+		cwd: agentDir,
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	const [exitCode, stdout, stderr] = await Promise.all([
+		proc.exited,
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+	]);
+	return { exitCode, stdout, stderr };
 }
 
 // ── Verb coverage ────────────────────────────────────────────────────────────
@@ -794,6 +819,94 @@ describe("omp-agent CLI — operator bearer", () => {
 		expect(result.io.stderr).toContain(
 			"oh-my-agent daemon not running — start it with `omp-agent daemon`.",
 		);
+	});
+});
+
+// ── Worker backend selector (T-1405) ────────────────────────────────────────
+
+test("bare binary invocation retains the RPC daemon default", async () => {
+	const agentDir = await tempAgentDir();
+	await writePeer(agentDir, "reviewer");
+	const { stdout, stderr } = await spawnDaemon(agentDir, []);
+	const agentsCli = await runBinaryCli(agentDir, ["--json", "agents"]);
+	const reviewer = (
+		JSON.parse(agentsCli.stdout) as AgentStatusResult
+	).agents.find((agent) => agent.name === "reviewer");
+
+	expect(agentsCli.exitCode).toBe(0);
+	expect(agentsCli.stderr).toBe("");
+	// `pid` is also absent for a parked or stopped peer, so the run state is
+	// pinned first: without it this asserts a lifecycle accident rather than
+	// the backend the daemon actually spawned.
+	expect(reviewer?.state).toBe("running");
+	expect(reviewer?.pid).toBeGreaterThan(0);
+
+	expect(stderr).toBe("");
+	expect(stdout).toContain("daemon.sock");
+});
+
+describe("omp-agent CLI — daemon worker backend selector", () => {
+	test.each([
+		{ label: "unset default", argv: ["--json", "daemon"], backend: "rpc" },
+		{
+			label: "explicit rpc",
+			argv: ["--json", "daemon", "--worker-backend", "rpc"],
+			backend: "rpc",
+		},
+		{
+			label: "explicit in-process",
+			argv: ["--json", "daemon", "--worker-backend", "in-process"],
+			backend: "in-process",
+		},
+	])("$label starts the selected worker backend", async ({ argv, backend }) => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		const { socketPath, stdout, stderr } = await spawnDaemon(agentDir, argv);
+		const agentsCli = await runBinaryCli(agentDir, ["--json", "agents"]);
+		const reviewer = (
+			JSON.parse(agentsCli.stdout) as AgentStatusResult
+		).agents.find((agent) => agent.name === "reviewer");
+
+		expect(agentsCli.exitCode).toBe(0);
+		expect(agentsCli.stderr).toBe("");
+		expect(reviewer).toBeDefined();
+		expect(reviewer?.state).toBe("running");
+		if (backend === "rpc") expect(reviewer?.pid).toBeGreaterThan(0);
+		else expect(reviewer).not.toHaveProperty("pid");
+
+		expect(stderr).toBe("");
+		expect(JSON.parse(stdout)).toEqual({
+			socket: socketPath,
+			consoleUrl: expect.stringMatching(/^http:\/\//),
+			workerBackend: backend,
+		});
+	});
+
+	test("unknown backend exits 2 without starting a daemon", async () => {
+		const agentDir = await tempAgentDir();
+		const mainPath = join(import.meta.dir, "..", "src", "daemon", "main.ts");
+		const proc = Bun.spawn({
+			cmd: [
+				process.execPath,
+				mainPath,
+				"--json",
+				"daemon",
+				"--worker-backend",
+				"threaded",
+			],
+			env: hermeticChildEnv({ PI_CODING_AGENT_DIR: agentDir }),
+			cwd: agentDir,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const exitCode = await proc.exited;
+		const stdout = await new Response(proc.stdout).text();
+		const stderr = await new Response(proc.stderr).text();
+
+		expect(exitCode).toBe(2);
+		expect(stdout).toBe("");
+		expect(stderr).toContain('unknown worker backend "threaded"');
+		expect(stderr).toContain("--worker-backend rpc|in-process");
+		expect(existsSync(join(agentDir, "oh-my-agent", "daemon.pid"))).toBe(false);
 	});
 });
 

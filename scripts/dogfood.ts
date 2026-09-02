@@ -26,6 +26,8 @@ interface ScheduleRow {
 	enabled: boolean;
 }
 
+export type WorkerBackend = "rpc" | "in-process";
+
 interface CommandResult {
 	code: number;
 	stdout: string;
@@ -62,6 +64,7 @@ export interface DogfoodReport {
 	commands: number;
 	spawnReadyMs: Record<string, number>;
 	maxConcurrentAgents: number;
+	workerBackends: WorkerBackend[];
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -280,6 +283,7 @@ export async function runDogfood(
 	const spawnReadyMs: Record<string, number> = {};
 	let report: DogfoodReport | undefined;
 	let maxConcurrentAgents = 0;
+	const workerBackends: WorkerBackend[] = [];
 	const spawnedAgents = new Set<string>();
 	const armedSchedules = new Set<string>();
 	let primaryFailure: unknown;
@@ -454,9 +458,9 @@ export async function runDogfood(
 		lastCommand = undefined;
 		lastCommandElapsedMs = undefined;
 		try {
-			if (number === 18) await phaseRss(number);
+			if (number === 19) await phaseRss(number);
 			await action();
-			if (number !== 18) await phaseRss(number);
+			if (number !== 19) await phaseRss(number);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			await writeLog({
@@ -761,13 +765,56 @@ export async function runDogfood(
 				armedSchedules.delete(scheduleId);
 			},
 		);
-		await step(18, "Begin unconditional cleanup", async () => {});
+		await step(18, "Exercise in-process worker backend", async () => {
+			await run(["daemon", "stop"]);
+			const launched = requireObject(
+				(await run(["daemon", "--worker-backend", "in-process"])).json,
+				"daemon start result must be an object",
+			);
+			if (launched.workerBackend !== "in-process") {
+				throw new Error(
+					`daemon reported worker backend ${JSON.stringify(launched.workerBackend)} instead of "in-process"`,
+				);
+			}
+			workerBackends.push(launched.workerBackend);
+			spawnedAgents.add(options.parent);
+			await run(["spawn", options.parent]);
+			await pollAgents(
+				(agents) =>
+					agents.find((agent) => agent.name === options.parent)?.state ===
+					"running",
+				`${options.parent} running in-process`,
+			);
+			spawnedAgents.add(options.child);
+			await run(["spawn", options.child, "--parent", options.parent]);
+			await pollAgents(
+				(agents) =>
+					agents.find((agent) => agent.name === options.child)?.state ===
+						"running" &&
+					agents.find((agent) => agent.name === options.child)?.parent ===
+						options.parent,
+				"parent/child hierarchy running in-process",
+			);
+			await run(["inject", options.child, options.injectText]);
+			await run(["kill", options.parent]);
+			await pollAgents(
+				(agents) =>
+					!agents.some(
+						(agent) =>
+							(agent.name === options.parent || agent.name === options.child) &&
+							agent.state === "running",
+					),
+				"in-process parent and child stopped",
+			);
+		});
+		await step(19, "Begin unconditional cleanup", async () => {});
 		await log.sync();
 		report = {
 			logPath,
 			commands: commandCount,
 			spawnReadyMs,
 			maxConcurrentAgents,
+			workerBackends,
 		};
 	} catch (error) {
 		primaryFailure = error;

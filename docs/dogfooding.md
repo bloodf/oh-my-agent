@@ -1,6 +1,6 @@
 # Dogfooding runbook
 
-Human operator procedure for one live-account dogfood session. [T-1402](delivery/tasks/T-1402-dogfood-harness.md) will automate only the numbered JSON scenario in §4. Daemon start, console URL retrieval, console/TUI observations, and the in-process backend boundary remain outside that mapping.
+Human operator procedure for one live-account dogfood session. [T-1402](delivery/tasks/T-1402-dogfood-harness.md) automates the numbered JSON scenario in §4. Console URL retrieval and console/TUI observations remain outside that mapping; the scenario covers both worker backends.
 
 **This session touches real accounts and can spend real money.** Complete every approval and preflight check before starting.
 
@@ -8,8 +8,8 @@ Human operator procedure for one live-account dogfood session. [T-1402](delivery
 
 - [`README.md`](../README.md) describes the project, requirements, and checkout development commands. It does **not** document daemon environment controls or a released-artifact install path. Installation belongs to [T-1304](delivery/tasks/T-1304-install-docs.md).
 - [`src/daemon/main.ts`](../src/daemon/main.ts) honors `PI_CODING_AGENT_DIR`, disables the console when `OMA_CONSOLE=0`, and accepts a decimal `OMA_CONSOLE_PORT` from `0` through `65535`. These are the controls this runbook uses, not an exhaustive list of daemon environment variables.
-- `src/daemon/main.ts` defaults `inProcessWorkers` to `false`; its shipped `runDaemon()` path does not select it. [`src/daemon/cli.ts`](../src/daemon/cli.ts) exposes no worker-backend selector.
-- `src/daemon/cli.ts` defines all command forms used below. `--json` precedes each JSON-capable verb. Bare `omp-agent daemon` starts the daemon and `omp-agent console` returns a plain-text URL, so both remain manual preconditions; `daemon stop` and `daemon restart` are JSON-capable.
+- [`src/daemon/cli.ts`](../src/daemon/cli.ts) exposes `daemon --worker-backend rpc|in-process`; RPC remains the default when the selector is omitted, and `--json` reports the selected backend as `workerBackend` in the launcher envelope.
+- `src/daemon/cli.ts` defines all command forms used below. `--json` precedes each JSON-capable verb. `omp-agent console` returns a plain-text URL and remains a manual precondition; daemon start, stop, and restart are JSON-capable.
 
 ## 1. Operator-approved variables
 
@@ -104,13 +104,13 @@ Keep session log mode `0600` for its lifetime.
 
 ## 3. Manual preconditions outside T-1402
 
-These actions have no JSON result. Run them by hand and record named evidence, but do not include them in T-1402's 1:1 scenario mapping.
+These actions prepare the live surfaces. The RPC daemon start supplies the first backend leg before T-1402's 1:1 scenario mapping; record its JSON envelope and require `workerBackend: "rpc"`.
 
-1. **Manual: daemon start.** Start selected profile:
+1. **Manual: RPC daemon start.** Start selected profile through the explicit selector:
    ```sh
-   omp-agent daemon
+   omp-agent --json daemon --worker-backend rpc
    ```
-   Record exit status, elapsed time, and a redacted indication that startup returned. Never record emitted token material.
+   Require exit status `0` and `workerBackend: "rpc"`. Record elapsed time and the redacted envelope; never record token material.
 2. **Manual: console URL.** Retrieve URL:
    ```sh
    omp-agent console
@@ -120,7 +120,7 @@ These actions have no JSON result. Run them by hand and record named evidence, b
 
 ## 4. JSON-capable management scenario
 
-Only this numbered section maps 1:1 to T-1402. Run in order. Every command uses a JSON-capable form from `src/daemon/cli.ts`. Any failure stops progression and enters §7.
+This section maps 1:1 to T-1402 after §3 starts the RPC leg. Run in order. Every command uses a JSON-capable form from `src/daemon/cli.ts`. Any failure stops progression and enters §7; no backend leg may be skipped and counted as success.
 
 1. **Confirm daemon status.**
    ```sh
@@ -218,7 +218,17 @@ Only this numbered section maps 1:1 to T-1402. Run in order. Every command uses 
     omp-agent --json schedule
     ```
     After restart, find the `schedules[]` entry whose `id` exactly equals `$DOGFOOD_SCHEDULE_ID`; confirm its `cron` and `action` match the authored entry. After `on`, confirm that same entry has `enabled: true`; after `off`, confirm it has `enabled: false`. `nextFireAt` is also present in each runtime entry.
-18. **Enter unconditional cleanup.** Harness leaves scenario work and, in its `finally` cleanup, cascade-kills every agent it attempted to spawn, disarms every schedule it may have armed, then stops daemon. Cleanup continues through individual command failures; earlier scenario failure remains reported error.
+18. **Switch to and exercise the in-process backend.**
+    ```sh
+    omp-agent --json daemon stop
+    omp-agent --json daemon --worker-backend in-process
+    omp-agent --json spawn "$DOGFOOD_PARENT"
+    omp-agent --json spawn "$DOGFOOD_CHILD" --parent "$DOGFOOD_PARENT"
+    omp-agent --json inject "$DOGFOOD_CHILD" "$DOGFOOD_INJECT_TEXT"
+    omp-agent --json kill "$DOGFOOD_PARENT"
+    ```
+    Require the launcher envelope to report `workerBackend: "in-process"`. Poll and confirm the parent/child hierarchy reaches running before injection, then confirm the cascade kill leaves neither running. Any failed command, mismatched selector report, or failed state check fails the session; never record this leg as skipped-success.
+19. **Enter unconditional cleanup.** Harness leaves scenario work and, in its `finally` cleanup, cascade-kills every agent it attempted to spawn, disarms every schedule it may have armed, then stops daemon. Cleanup continues through individual command failures; earlier scenario failure remains reported error.
 
 ## 5. Manual console and TUI checks
 
@@ -228,11 +238,11 @@ Begin after §3 and finish after scenario step 16. Record each named result as `
 - [ ] **Manual: console updates live.** Keep `$DOGFOOD_ROOM` visible during steps 8 and 11. Record message IDs, whether post and any agent response appeared without refresh, observed delay, and missing update.
 - [ ] **Manual: TUI transitions.** Observe spawn, parent/child hierarchy, injected work, keep-children result, explicit child kill, and cascade result. Record exact displayed states, hierarchy before/after each kill, UTC times, and mismatches.
 
-## 6. Worker-backend coverage boundary
+## 6. Worker-backend coverage
 
-The shipped CLI starts the default RPC worker backend. Record RPC coverage only from completed spawn/interaction/kill scenario evidence.
+The §3 explicit RPC selector plus §4 steps 1-17 form the RPC leg. Require its daemon launcher envelope to report `workerBackend: "rpc"`.
 
-The in-process backend is **not selectable through shipped CLI today**. Its operator-facing selector and dogfood coverage arrive with [T-1405](delivery/tasks/T-1405-daemon-backend-selector.md). Do not invent syntax. Do not record in-process as exercised, passed, or skipped-but-successful; omit it from current session success counts and mark coverage `deferred to T-1405` only.
+Step 18 stops that daemon, starts `omp-agent --json daemon --worker-backend in-process`, consumes the launcher envelope, and requires `workerBackend: "in-process"` before driving spawn, hierarchy, injection, and cascade kill. Both completed legs are required for session success; a missing or failed leg is `finding` or `not run: session stopped`, never skipped-but-successful.
 
 ## 7. Incident, timebox stop, and OS abort
 
@@ -275,7 +285,7 @@ Record daemon PID, recursively captured worker PIDs, signals sent, bounded-wait 
 
 ## 8. Triage and closure
 
-Session record must enumerate scenario steps 1-18, three Manual preconditions, three Manual console/TUI checks, and RPC backend evidence. Every entry is `pass`, `finding`, or `not run` with reason. Silence never means pass. In-process coverage is a T-1405 deferral, not a session result.
+Session record must enumerate scenario steps 1-19, three Manual preconditions, three Manual console/TUI checks, and separate RPC and in-process backend evidence. Every entry is `pass`, `finding`, or `not run` with reason. Silence never means pass; neither backend may be skipped and counted as success.
 
 Every finding receives exactly one disposition before closure:
 

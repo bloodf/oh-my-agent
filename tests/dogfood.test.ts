@@ -54,6 +54,7 @@ interface Fixture {
 	hangMethod?: string;
 	cleanupFailMethod?: string;
 	failMethodOccurrence?: number;
+	reportedWorkerBackend?: string;
 }
 
 function rpcSuccess(id: number | string, result: unknown): Response {
@@ -303,6 +304,14 @@ async function fixture(): Promise<Fixture> {
 					state.restarted = true;
 					state.scheduleEnabled = true;
 					return rpcSuccess(frame.id, { restarted: true });
+				case "fixture_start":
+					state.stopped = false;
+					return rpcSuccess(frame.id, {
+						socket: socketPath,
+						consoleUrl: null,
+						workerBackend:
+							harness.reportedWorkerBackend ?? params.workerBackend,
+					});
 				case "fixture_stop":
 					state.stopped = true;
 					return rpcSuccess(frame.id, { stopping: true });
@@ -377,6 +386,7 @@ else if (verb === "inject") { method = "inject"; params = { name: rest[0], text:
 else if (verb === "bump") { method = "bump"; params = { account: rest[0], budgetUsd: Number(rest[1]) }; }
 else if (verb === "kill") { method = "kill"; params = { name: rest[0], keep_children: rest[1] === "--keep-children" }; }
 else if (verb === "daemon" && rest[0] === "restart") method = "fixture_restart";
+else if (verb === "daemon" && rest[0] === "--worker-backend") { method = "fixture_start"; params = { workerBackend: rest[1] }; }
 else if (verb === "daemon" && rest[0] === "stop") method = "fixture_stop";
 else process.exit(4);
 const response = await fetch("http://localhost/rpc", { unix: process.env.DOGFOOD_FIXTURE_SOCKET, method: "POST", headers: { Authorization: "Bearer " + process.env.DOGFOOD_FIXTURE_TOKEN, "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
@@ -487,6 +497,15 @@ describe("dogfood JSON scenario driver", () => {
 			["schedule"],
 			["schedule", "parent:schedule:0", "off"],
 			["schedule"],
+			["daemon", "stop"],
+			["daemon", "--worker-backend", "in-process"],
+			["spawn", "parent"],
+			poll,
+			["spawn", "child", "--parent", "parent"],
+			poll,
+			["inject", "child", "inspect fixture"],
+			["kill", "parent"],
+			poll,
 			["kill", "child"],
 			["kill", "parent"],
 			["daemon", "stop"],
@@ -507,12 +526,15 @@ describe("dogfood JSON scenario driver", () => {
 		expect(report.spawnReadyMs.parent).toBeGreaterThan(0);
 		expect(report.spawnReadyMs.child).toBeGreaterThan(0);
 		expect(report.maxConcurrentAgents).toBe(2);
+		expect(report.workerBackends).toEqual(["in-process"]);
 		expect(log).toContain('"type":"daemon-rss"');
 		expect(log).toContain('"daemonRssKb":12345');
 		expect(log).toContain('"type":"spawn-ready"');
 		expect(log).toContain('"type":"concurrent-agents"');
 		expect(log).toContain("<redacted>");
 		expect(log).not.toContain("fixture-secret");
+		expect(log).toContain('"workerBackend":"in-process"');
+		expect(log).not.toContain('"status":"skipped"');
 		expect((await stat(report.logPath)).mode & 0o777).toBe(0o600);
 	}, 20_000);
 
@@ -527,6 +549,7 @@ describe("dogfood JSON scenario driver", () => {
 		expect(harness.state.methods).toEqual([]);
 
 		harness.options.accountAllowlist = ["approved-account"];
+
 		error = await captureError(() => runDogfood(harness.options));
 		expect(error.message).toContain(
 			'DOGFOOD_ACCOUNT "stub-account" is not allowlisted',
@@ -555,6 +578,18 @@ describe("dogfood JSON scenario driver", () => {
 		);
 		expect(harness.state.methods).toEqual([]);
 	});
+	test("fails when daemon reports a different worker backend", async () => {
+		const harness = await fixture();
+		harness.options.command = harness.fastCommand;
+		harness.reportedWorkerBackend = "rpc";
+
+		const error = await captureError(() => runDogfood(harness.options));
+		expect(error.message).toContain(
+			"Step 18: Exercise in-process worker backend failed",
+		);
+		expect(error.message).toContain('instead of "in-process"');
+		expect(harness.state.methods.at(-1)).toBe("fixture_stop");
+	}, 20_000);
 
 	test("cleans running workers after a reached phase fails", async () => {
 		const harness = await fixture();
