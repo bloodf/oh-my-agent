@@ -452,6 +452,24 @@
 		if (element.classList.contains("channel")) {
 			return { kind: "channel", id: element.dataset.id ?? "" };
 		}
+		// Operations controls repeat once per agent, so the row's agent name
+		// is the identity — `kind` alone would restore focus onto whichever
+		// "Stop" button happened to render first, which is a different agent.
+		for (const kind of ["ops-kill", "ops-logs", "ops-inject-input"]) {
+			if (!element.classList.contains(kind)) continue;
+			const row = element.closest(".ops-agent");
+			return {
+				kind,
+				id: row instanceof HTMLElement ? (row.dataset.name ?? "") : "",
+			};
+		}
+		if (element.classList.contains("ops-bump-input")) {
+			const row = element.closest(".ops-account");
+			return {
+				kind: "ops-bump-input",
+				id: row instanceof HTMLElement ? (row.dataset.account ?? "") : "",
+			};
+		}
 		return null;
 	};
 
@@ -689,6 +707,345 @@
 		}
 	};
 
+	// ── Operations (T-1605) ──────────────────────────────────────────────────
+
+	const opsAgentsEl = el("ops-agents");
+	const opsAccountsEl = el("ops-accounts");
+	const agentTemplate = /** @type {HTMLTemplateElement} */ (
+		el("ops-agent-template")
+	);
+	const accountTemplate = /** @type {HTMLTemplateElement} */ (
+		el("ops-account-template")
+	);
+	const opsErrorEl = el("ops-error");
+	const opsLogsEl = el("ops-logs-output");
+	const killDialog = /** @type {HTMLDialogElement} */ (el("ops-kill-dialog"));
+	const killDetailEl = el("ops-kill-detail");
+	const killKeepEl = /** @type {HTMLInputElement} */ (el("ops-kill-keep"));
+
+	/**
+	 * Ceilings by account, as the daemon last reported them.
+	 *
+	 * Repainted from the `budget` frame rather than re-read: the bump's own
+	 * response and the frame carry the same number, and polling for it would
+	 * miss a bump made from the CLI while this console was open.
+	 * @type {Map<string, number>}
+	 */
+	const budgets = new Map();
+
+	/** @type {{ name: string, state: string, account?: string, parent?: string }[]} */
+	let lastAgents = [];
+
+	/** Which agent the open kill dialog is about; `null` when closed. */
+	let killTarget = /** @type {string | null} */ (null);
+
+	/**
+	 * Where focus was when the dialog opened, as a T-1615 identity key.
+	 *
+	 * A key rather than the element itself: the agents panel repaints on
+	 * every frame the daemon sends, so the button that opened the dialog is
+	 * very likely a *different node* by the time the dialog closes. Holding
+	 * the node would restore focus onto something detached, which is a silent
+	 * no-op that drops the keyboard back to `<body>`.
+	 */
+	let killOpenerKey = /** @type {FocusKey | null} */ (null);
+
+	/**
+	 * Every agent beneath `name`, transitively, by the parentage the daemon
+	 * reports.
+	 *
+	 * The whole subtree, not just the direct children: the daemon's cascade
+	 * walks the tree to its leaves, so a confirmation that named one level
+	 * would understate the blast radius of an irreversible operation — the
+	 * grandchildren die unannounced. `visited` bounds the walk, because the
+	 * console renders whatever edges it is sent and a cycle in them must not
+	 * hang the dialog that is supposed to be preventing an accident.
+	 * @param {string} name
+	 */
+	const descendantsOf = (name) => {
+		const found = /** @type {string[]} */ ([]);
+		const visited = new Set([name]);
+		const frontier = [name];
+		while (frontier.length > 0) {
+			const current = /** @type {string} */ (frontier.pop());
+			for (const agent of lastAgents) {
+				if (agent.parent !== current || visited.has(agent.name)) continue;
+				visited.add(agent.name);
+				found.push(agent.name);
+				frontier.push(agent.name);
+			}
+		}
+		return found;
+	};
+
+	/** @param {unknown} error */
+	const showOpsError = (error) => {
+		opsErrorEl.textContent =
+			error instanceof Error ? error.message : String(error);
+	};
+
+	/**
+	 * One element inside a cloned row, by class.
+	 * @template {HTMLElement} T
+	 * @param {DocumentFragment | HTMLElement} root
+	 * @param {string} selector
+	 * @returns {T}
+	 */
+	const within = (root, selector) => {
+		const node = root.querySelector(selector);
+		// The templates in index.html are fixed, so a miss is a broken build,
+		// not a runtime condition worth degrading around.
+		if (node === null) throw new Error(`Missing ${selector} in template`);
+		return /** @type {T} */ (node);
+	};
+
+	/**
+	 * One agent's operations row: stop, inject, and a logs tail.
+	 *
+	 * Cloned from the template in index.html rather than assembled here: the
+	 * controls are markup, and this only fills in the parts that vary per
+	 * agent — the name, the accessible labels, and the handlers.
+	 * @param {{ name: string, state: string }} agent
+	 */
+	const renderOpsAgent = (agent) => {
+		const fragment = /** @type {DocumentFragment} */ (
+			agentTemplate.content.cloneNode(true)
+		);
+		const item = within(fragment, ".ops-agent");
+		item.dataset.name = agent.name;
+		within(fragment, ".ops-name").textContent =
+			`${agent.name} (${agent.state})`;
+
+		const kill = within(fragment, ".ops-kill");
+		// The name rides in the accessible name: a rail of identical "Stop"
+		// buttons tells a screen-reader user nothing about which agent dies.
+		kill.setAttribute("aria-label", `Stop ${agent.name}`);
+		kill.addEventListener("click", () => {
+			openKillDialog(agent.name);
+		});
+
+		const logs = within(fragment, ".ops-logs");
+		logs.setAttribute("aria-label", `Show recent logs for ${agent.name}`);
+		logs.addEventListener("click", () => {
+			void showLogs(agent.name);
+		});
+
+		// A <form>, so Enter in the field submits with no pointer and no
+		// bespoke keydown handler.
+		const injectInput = /** @type {HTMLInputElement} */ (
+			within(fragment, ".ops-inject-input")
+		);
+		injectInput.setAttribute("aria-label", `Message ${agent.name}`);
+		within(fragment, ".ops-inject").addEventListener("submit", (event) => {
+			event.preventDefault();
+			const message = injectInput.value.trim();
+			if (message.length === 0) return;
+			injectInput.value = "";
+			void injectInto(agent.name, message);
+		});
+
+		return item;
+	};
+
+	/**
+	 * One account's budget row: the ceiling the daemon last reported, and a
+	 * field to raise it. Cloned from index.html, like the agent row.
+	 * @param {string} account
+	 */
+	const renderOpsAccount = (account) => {
+		const fragment = /** @type {DocumentFragment} */ (
+			accountTemplate.content.cloneNode(true)
+		);
+		const item = within(fragment, ".ops-account");
+		item.dataset.account = account;
+		within(fragment, ".ops-name").textContent = account;
+
+		const known = budgets.get(account);
+		// Absent is said plainly rather than shown as `$0`, which reads as a
+		// spent account rather than an unmetered one.
+		within(fragment, ".ops-budget").textContent =
+			known === undefined ? "no ceiling" : `$${known}`;
+
+		const bumpInput = /** @type {HTMLInputElement} */ (
+			within(fragment, ".ops-bump-input")
+		);
+		bumpInput.setAttribute("aria-label", `New ceiling for ${account}`);
+		within(fragment, ".ops-bump").addEventListener("submit", (event) => {
+			event.preventDefault();
+			const budgetUsd = Number(bumpInput.value);
+			if (!Number.isFinite(budgetUsd) || budgetUsd <= 0) return;
+			bumpInput.value = "";
+			void bumpAccount(account, budgetUsd);
+		});
+
+		return item;
+	};
+
+	/** @param {{ name: string, state: string, account?: string, parent?: string }[]} agents */
+	const renderOps = (agents) => {
+		lastAgents = agents;
+		const focusKey = captureFocus(opsAgentsEl);
+		opsAgentsEl.replaceChildren(...agents.map(renderOpsAgent));
+		restoreFocus(opsAgentsEl, focusKey);
+
+		const accounts = [
+			...new Set(
+				agents
+					.map((agent) => agent.account)
+					.filter(
+						/** @returns {value is string} */
+						(value) => typeof value === "string" && value.length > 0,
+					),
+			),
+		].sort();
+		const accountKey = captureFocus(opsAccountsEl);
+		opsAccountsEl.replaceChildren(...accounts.map(renderOpsAccount));
+		restoreFocus(opsAccountsEl, accountKey);
+	};
+
+	/**
+	 * Open the kill confirmation for one agent.
+	 *
+	 * Confirmation is required because the operation is irreversible and its
+	 * default cascades: the dialog names the children it will take, so the
+	 * operator can check the blast radius before it happens rather than read
+	 * about it afterwards.
+	 * @param {string} name
+	 */
+	const openKillDialog = (name) => {
+		killTarget = name;
+		// Captured through the shared helper, so the restore below survives
+		// the repaints that happen while the dialog is open (T-1615).
+		killOpenerKey = captureFocus(opsAgentsEl);
+		// Unchecked every time: the destructive default must not be inherited
+		// from whatever the operator chose for a different agent.
+		killKeepEl.checked = false;
+		// The whole subtree, named, because that is what the default takes:
+		// the daemon's cascade walks to the leaves. Checking "keep children"
+		// spares every one of these — the direct children are reparented to
+		// root and keep their own descendants running — so this list is the
+		// blast radius of confirming as-is.
+		const doomed = descendantsOf(name);
+		killDetailEl.textContent =
+			doomed.length === 0
+				? `Stop ${name}. It has no children.`
+				: `Stop ${name} and everything under it: ${doomed.join(", ")}.`;
+		killDialog.showModal();
+		// `showModal` focuses the first tabbable node, which is the checkbox
+		// that opts out of the cascade — landing the keyboard on the
+		// destructive default's escape hatch, not on "Stop".
+		killKeepEl.focus();
+	};
+
+	/** Close the dialog and hand focus back to the control that opened it. */
+	const closeKillDialog = () => {
+		killTarget = null;
+		if (killDialog.open) killDialog.close();
+		const key = killOpenerKey;
+		killOpenerKey = null;
+		// Through the shared restore, which re-resolves the control by
+		// identity: a keyboard operator who dismissed a confirmation must not
+		// be dropped to `<body>` and have to tab in from the top again.
+		restoreFocus(opsAgentsEl, key);
+	};
+
+	/**
+	 * Stop an agent, cascading unless the operator opted out.
+	 * @param {string} name
+	 * @param {boolean} keepChildren
+	 */
+	const killAgent = async (name, keepChildren) => {
+		opsErrorEl.textContent = "";
+		try {
+			const result = await api(`/api/agents/${encodeURIComponent(name)}/kill`, {
+				method: "POST",
+				body: { keepChildren },
+			});
+			// What actually happened, from the daemon: the fallback stops only
+			// the named worker, so a console that restated the request would
+			// tell an operator a subtree died when one process did.
+			noticeEl.textContent = result.cascaded
+				? `Stopped ${result.name} and everything under it.`
+				: `Stopped ${result.name}. Its children are still running.`;
+		} catch (error) {
+			showOpsError(error);
+		}
+		await refreshAgents();
+	};
+
+	/**
+	 * @param {string} name
+	 * @param {string} message
+	 */
+	const injectInto = async (name, message) => {
+		opsErrorEl.textContent = "";
+		try {
+			const result = await api(
+				`/api/agents/${encodeURIComponent(name)}/inject`,
+				{ method: "POST", body: { message } },
+			);
+			// Queued and prompted are different outcomes: a parked peer reads
+			// the message on its next turn, and saying "sent" would imply it
+			// is being worked on right now.
+			noticeEl.textContent = result.queued
+				? `Queued for ${result.name}; it reads this when it resumes.`
+				: `Sent to ${result.name}.`;
+		} catch (error) {
+			showOpsError(error);
+		}
+	};
+
+	/** @param {string} name */
+	const showLogs = async (name) => {
+		opsErrorEl.textContent = "";
+		try {
+			const result = await api(`/api/agents/${encodeURIComponent(name)}/logs`);
+			const lines = /** @type {string[]} */ (result.lines);
+			// Said plainly rather than left blank: an empty <pre> is
+			// indistinguishable from a request that never came back.
+			opsLogsEl.textContent =
+				lines.length === 0 ? `No logs for ${name}.` : lines.join("\n");
+		} catch (error) {
+			showOpsError(error);
+		}
+	};
+
+	/**
+	 * @param {string} account
+	 * @param {number} budgetUsd
+	 */
+	const bumpAccount = async (account, budgetUsd) => {
+		opsErrorEl.textContent = "";
+		try {
+			const result = await api(
+				`/api/accounts/${encodeURIComponent(account)}/bump`,
+				{ method: "POST", body: { budgetUsd } },
+			);
+			noticeEl.textContent =
+				result.resumed.length === 0
+					? `Raised ${account} to $${result.budgetUsd}.`
+					: `Raised ${account} to $${result.budgetUsd}; resumed ${result.resumed.join(", ")}.`;
+		} catch (error) {
+			showOpsError(error);
+		}
+	};
+
+	el("ops-kill-cancel").addEventListener("click", () => {
+		closeKillDialog();
+	});
+
+	// `method="dialog"` closes the dialog for us; this decides whether the
+	// close was a confirmation. `returnValue` is the submitter's own value,
+	// so Escape and Cancel — which set nothing — cannot kill anything.
+	killDialog.addEventListener("close", () => {
+		const target = killTarget;
+		const confirmed = killDialog.returnValue === "confirm";
+		const keepChildren = killKeepEl.checked;
+		killDialog.returnValue = "";
+		closeKillDialog();
+		if (confirmed && target !== null) void killAgent(target, keepChildren);
+	});
+
 	// ── First-class states ───────────────────────────────────────────────────
 
 	const stateTitleEl = /** @type {HTMLElement} */ (
@@ -774,14 +1131,18 @@
 		}
 	};
 
-	/** Refetch the agent list, so membership renders for the open channel. */
+	/**
+	 * Refetch the agent list, so membership and the operations panel both
+	 * render from one read rather than two racing ones.
+	 */
 	const refreshAgents = async () => {
 		const { agents } = await api("/api/agents");
-		renderAgents(
-			/** @type {{ name: string, state: string, rooms?: string[] }[]} */ (
+		const list =
+			/** @type {{ name: string, state: string, account?: string, parent?: string, rooms?: string[] }[]} */ (
 				agents
-			),
-		);
+			);
+		renderAgents(list);
+		renderOps(list);
 	};
 
 	/** Refetch the channel list. */
@@ -1150,6 +1511,15 @@
 				frame.type === "budget" ||
 				frame.type === "schedule"
 			) {
+				// A budget frame carries the ceiling itself, so it is applied
+				// before the refetch rather than read back from one: the bump
+				// route answers no ceiling on `/api/agents`, and a console
+				// that polled for it would also miss a bump made from the CLI
+				// while this page was open (ADR-015).
+				if (frame.type === "budget" && frame.budgetUsd !== undefined) {
+					budgets.set(frame.account, frame.budgetUsd);
+					renderOps(lastAgents);
+				}
 				// All five render in the agents panel: run state, the rebuild
 				// a definition owes, membership for the open channel, and the
 				// account state a peer is parked by.

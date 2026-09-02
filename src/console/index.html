@@ -13,6 +13,85 @@
 			<!-- biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: app.js renders role="option" children with a roving tabindex; the listbox+option pattern is asserted by tests -->
 			<ul id="channels" role="listbox" aria-label="Channels"></ul>
 		</nav>
+		<!--
+			Operations (T-1605). Every control here is markup, not built by
+			app.js: the kill confirmation is a <dialog>, whose modality,
+			Escape handling, and focus trapping are the platform's behavior,
+			and a destructive control that only exists once a script has run
+			is one that silently vanishes when the script breaks. The two
+			<template> blocks are the per-agent and per-account rows; app.js
+			clones them and fills in names and handlers, so the shape of the
+			panel is readable here rather than assembled from createElement
+			calls elsewhere.
+		-->
+		<section id="ops" aria-label="Operations">
+			<h1>Operations</h1>
+			<ul id="ops-agents"></ul>
+			<template id="ops-agent-template">
+				<li class="ops-agent">
+					<span class="ops-name"></span>
+					<button type="button" class="ops-kill">Stop</button>
+					<button type="button" class="ops-logs">Logs</button>
+					<form class="ops-inject">
+						<input
+							class="ops-inject-input"
+							type="text"
+							autocomplete="off"
+							placeholder="Message this agent"
+						/>
+					</form>
+				</li>
+			</template>
+			<h2>Accounts</h2>
+			<ul id="ops-accounts"></ul>
+			<template id="ops-account-template">
+				<li class="ops-account">
+					<span class="ops-name"></span>
+					<span class="ops-budget"></span>
+					<form class="ops-bump">
+						<input
+							class="ops-bump-input"
+							type="number"
+							min="0"
+							step="any"
+							placeholder="New ceiling"
+						/>
+					</form>
+				</li>
+			</template>
+			<p id="ops-error" role="status"></p>
+			<h2 id="ops-logs-title">Logs</h2>
+			<!-- biome-ignore-start lint/a11y/noNoninteractiveTabindex: the scrollable log tail must be keyboard-focusable (WCAG 2.1.1), matching #messages -->
+			<pre
+				id="ops-logs-output"
+				role="log"
+				aria-live="polite"
+				aria-labelledby="ops-logs-title"
+				tabindex="0"
+			></pre>
+			<!-- biome-ignore-end lint/a11y/noNoninteractiveTabindex: log tail focusability -->
+		</section>
+		<dialog id="ops-kill-dialog" aria-labelledby="ops-kill-heading">
+			<form method="dialog" id="ops-kill-form">
+				<h2 id="ops-kill-heading">Stop an agent</h2>
+				<!--
+					The children are named, never counted: "and 3 children" is
+					not something an operator can check before an irreversible
+					cascade, and the default here is the cascade.
+				-->
+				<p id="ops-kill-detail"></p>
+				<label id="ops-kill-keep-label" for="ops-kill-keep">
+					<input type="checkbox" id="ops-kill-keep" />
+					Keep children running (reparent them to root)
+				</label>
+				<div class="ops-dialog-actions">
+					<button type="submit" id="ops-kill-confirm" value="confirm">
+						Stop
+					</button>
+					<button type="button" id="ops-kill-cancel">Cancel</button>
+				</div>
+			</form>
+		</dialog>
 		<main id="main">
 			<!-- biome-ignore lint/a11y/noInteractiveElementToNoninteractiveRole: explicit banner role is asserted by tests; header nested in main has no implicit banner semantics -->
 			<header id="current-channel" role="banner"></header>

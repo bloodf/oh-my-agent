@@ -460,6 +460,168 @@ button {
 	color: var(--accent);
 }
 
+/* ── Operations panel (T-1605) ─────────────────────────────────────────── */
+
+#ops {
+	width: 17rem;
+	border-right: 1px solid var(--border);
+	background: var(--surface-1);
+	padding: var(--space-1);
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+#ops h1,
+#ops h2 {
+	font-size: var(--font-size-0);
+	line-height: var(--line-tight);
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text-muted);
+	margin: var(--space-1) var(--space-1) var(--space-0);
+}
+
+#ops-agents,
+#ops-accounts {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+.ops-agent,
+.ops-account {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-1);
+	color: var(--text-muted);
+	padding: var(--space-0) var(--space-1);
+}
+
+.ops-name {
+	flex-basis: 100%;
+	color: var(--text-primary);
+	font-size: var(--font-size-0);
+}
+
+.ops-kill,
+.ops-logs {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-1);
+	background: none;
+	color: var(--text-muted);
+	padding: 0 var(--space-1);
+	cursor: pointer;
+	font-size: var(--font-size-0);
+}
+
+/* The destructive control reads as destructive before it is pressed. */
+.ops-kill:hover {
+	border-color: var(--danger);
+	color: var(--danger);
+}
+
+.ops-logs:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+.ops-inject,
+.ops-bump {
+	flex-basis: 100%;
+	display: flex;
+}
+
+.ops-inject-input,
+.ops-bump-input {
+	width: 100%;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-1);
+	background: var(--surface-0);
+	color: var(--text-primary);
+	padding: var(--space-0) var(--space-1);
+	font: inherit;
+	font-size: var(--font-size-0);
+}
+
+.ops-budget {
+	color: var(--text-muted);
+	font-size: var(--font-size-0);
+}
+
+#ops-error {
+	color: var(--danger);
+	font-size: var(--font-size-0);
+	margin: 0 var(--space-1);
+}
+
+#ops-logs-output {
+	margin: 0;
+	max-height: 12rem;
+	overflow: auto;
+	background: var(--surface-0);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-1);
+	padding: var(--space-1);
+	color: var(--text-muted);
+	font-size: var(--font-size-0);
+	/* `<pre>` already preserves newlines; long lines scroll rather than wrap,
+	   because a wrapped log line reads as two log lines. */
+}
+
+#ops-kill-dialog {
+	border: 1px solid var(--danger);
+	border-radius: var(--radius-2);
+	background: var(--surface-1);
+	color: var(--text-primary);
+	padding: var(--space-3);
+	max-width: 28rem;
+}
+
+#ops-kill-dialog::backdrop {
+	background: var(--surface-0);
+	opacity: 0.7;
+}
+
+#ops-kill-detail {
+	color: var(--text-primary);
+	margin: var(--space-1) 0;
+}
+
+#ops-kill-keep-label {
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+	color: var(--text-muted);
+	font-size: var(--font-size-0);
+}
+
+.ops-dialog-actions {
+	display: flex;
+	gap: var(--space-1);
+	margin-top: var(--space-3);
+}
+
+#ops-kill-confirm,
+#ops-kill-cancel {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-1);
+	background: none;
+	color: var(--text-muted);
+	padding: var(--space-0) var(--space-2);
+	cursor: pointer;
+}
+
+#ops-kill-confirm {
+	border-color: var(--danger);
+	color: var(--danger);
+}
+
 /* ── Reduced motion ────────────────────────────────────────────────────── */
 
 /* Hover fades and any future animation are decoration, not meaning. */

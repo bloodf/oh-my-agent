@@ -5,11 +5,14 @@
  * database directly.
  *
  * Public API: `startControlSocket(options): Promise<ControlSocket>`, identity
- * types, the `DaemonContext`, and `InvalidParamsError`.
+ * types, the `DaemonContext`, and — re-exported from `./operations`, which
+ * owns them — `HUMAN_AUTHOR` and `InvalidParamsError`.
  *
  * Upstream deps: `../shared/protocol` (frames, error builders, version),
  * `../shared/protocol-schemas` (`METHODS`), `../rooms/store`,
- * `../worker/lifecycle` (sandbox state), and `./supervisor`.
+ * `../worker/lifecycle` (sandbox state), `./supervisor`, and `./operations`
+ * (the shared kill, inject, logs-tail, and bump the four matching handlers
+ * delegate to, plus the two values above).
  *
  * Downstream consumers: `./main`, which owns composition and lifetime; every
  * operator client speaks to this socket rather than to those objects.
@@ -90,11 +93,14 @@ import {
 } from "../shared/protocol";
 import { METHODS } from "../shared/protocol-schemas";
 import type { WorkerHandle } from "../worker/lifecycle";
+import type { Operations } from "./operations";
+import {
+	createOperations,
+	HUMAN_AUTHOR,
+	InvalidParamsError,
+} from "./operations";
 import type { PeerDefinitionFields, PeerStore } from "./peer-store";
 import type { SupervisedWorker, Supervisor } from "./supervisor";
-
-/** Default line count for one log-tail response. */
-const DEFAULT_LOG_LINES = 50;
 
 /** Default ceiling for a parked `chat_wait`, per T-507's payload contract. */
 const DEFAULT_WAIT_MS = 30_000;
@@ -135,9 +141,6 @@ const WIRE_DEFINITION_KEYS = [
 	"automations",
 	"sha256",
 ] as const;
-
-/** Author recorded for a post that names none: the human at the keyboard. */
-export const HUMAN_AUTHOR = "@you";
 
 /** A peer the daemon has registered with the supervisor. */
 export interface PeerRecord {
@@ -264,6 +267,16 @@ export interface DaemonContext {
 	 * logged".
 	 */
 	daemonLog?(): Promise<string>;
+	/**
+	 * Kill, inject, logs-tail, and bump, shared with the console API.
+	 *
+	 * Optional so a context assembled for one narrow surface still works: this
+	 * module derives an equivalent one from the fields above when it is
+	 * absent. What it is *not* is a second implementation — `./main` composes
+	 * exactly one and hands it to both surfaces, so the destructive paths
+	 * cannot drift apart between the socket and the browser (T-1605).
+	 */
+	operations?: Operations;
 }
 
 export interface ControlSocket {
@@ -282,19 +295,11 @@ export interface StartControlSocketOptions {
 }
 
 /**
- * A params failure raised from inside a handler. Carries the offending field so
- * the dispatcher answers the declared `invalidParams` shape rather than a
- * generic internal error.
+ * Re-exported from `./operations`, which owns both because the operations and
+ * the protocol handlers raise them and this module imports that one. Keeping
+ * the definitions here would make the pair a value-level import cycle.
  */
-export class InvalidParamsError extends Error {
-	constructor(
-		readonly field: string,
-		message: string,
-	) {
-		super(message);
-		this.name = "InvalidParamsError";
-	}
-}
+export { HUMAN_AUTHOR, InvalidParamsError };
 
 /** Params each method's handler receives, already validated by `METHODS`. */
 interface ParamsByMethod {
@@ -414,6 +419,29 @@ export async function startControlSocket(
 	options: StartControlSocketOptions,
 ): Promise<ControlSocket> {
 	const { socketPath, context, identities = new Map() } = options;
+
+	/**
+	 * The shared operations, or an equivalent derived from this context.
+	 *
+	 * The daemon composes one and passes it in, so the socket and the console
+	 * drive the very same kill; a context assembled for a narrower surface
+	 * (a test harness, the toolbelt) gets one built over its own fields
+	 * instead of losing four methods.
+	 */
+	const operations: Operations =
+		context.operations ??
+		createOperations({
+			rooms: context.rooms,
+			supervisor: context.supervisor,
+			peers: context.peers,
+			...(context.killPeer === undefined
+				? {}
+				: { killPeer: context.killPeer.bind(context) }),
+			bumpAccount: context.bumpAccount.bind(context),
+			...(context.daemonLog === undefined
+				? {}
+				: { daemonLog: context.daemonLog.bind(context) }),
+		});
 
 	let closing = false;
 
@@ -651,64 +679,15 @@ export async function startControlSocket(
 		 * peer may legitimately be called "daemon" and a name-sniffing shortcut
 		 * would hijack its logs the moment someone defined one.
 		 */
-		logs_tail: async (params): Promise<LogsTailResult> => {
-			let text: string;
-			if (params.source === "daemon") {
-				if (!context.daemonLog) {
-					throw new InvalidParamsError(
-						"source",
-						"Daemon logs are not available on this daemon",
-					);
-				}
-				text = await context.daemonLog();
-			} else {
-				const record = context.peers.get(params.name);
-				if (!record) {
-					throw new InvalidParamsError("name", `Unknown agent: ${params.name}`);
-				}
-				text = record.worker.stderr?.() ?? "";
-			}
-			const lines = text
-				.replace(/\r\n/g, "\n")
-				.replace(/\n$/, "")
-				.split("\n")
-				.slice(-(params.lines ?? DEFAULT_LOG_LINES));
-			return {
+		logs_tail: async (params): Promise<LogsTailResult> =>
+			await operations.logsTail({
 				name: params.name,
-				lines: lines.length === 1 && lines[0] === "" ? [] : lines,
-			};
-		},
+				...(params.lines === undefined ? {} : { lines: params.lines }),
+				...(params.source === undefined ? {} : { source: params.source }),
+			}),
 
-		inject: async (params): Promise<InjectResult> => {
-			const record = context.peers.get(params.name);
-			if (!record) {
-				throw new InvalidParamsError("name", `Unknown agent: ${params.name}`);
-			}
-			if (record.worker.state === "running") {
-				await record.worker.prompt(params.message);
-				return { name: params.name, queued: false };
-			}
-			if (record.worker.state !== "parked") {
-				throw new InvalidParamsError(
-					"name",
-					`Agent ${params.name} is ${record.worker.state}`,
-				);
-			}
-			const room = record.rooms[0];
-			if (room === undefined) {
-				throw new InvalidParamsError(
-					"name",
-					`Agent ${params.name} subscribes to no room for queued injection`,
-				);
-			}
-			await context.rooms.post({
-				room,
-				author: HUMAN_AUTHOR,
-				body: params.message,
-			});
-			await context.supervisor.deliver(params.name);
-			return { name: params.name, queued: true };
-		},
+		inject: async (params): Promise<InjectResult> =>
+			await operations.inject(params.name, params.message),
 
 		agent_spawn: async (params): Promise<AgentSpawnResult> =>
 			await context.spawnPeer(params.name, { parent: params.parent }),
@@ -872,11 +851,6 @@ export async function startControlSocket(
 		 * children the caller asked to spare.
 		 */
 		kill: async (params): Promise<KillResult> => {
-			const record = context.peers.get(params.name);
-			if (!record) {
-				throw new InvalidParamsError("name", `Unknown agent: ${params.name}`);
-			}
-
 			const keepChildren =
 				"keep_children" in params ? params.keep_children : undefined;
 			if (keepChildren !== undefined && typeof keepChildren !== "boolean") {
@@ -886,29 +860,18 @@ export async function startControlSocket(
 				);
 			}
 
-			if (context.killPeer) {
-				await context.killPeer(params.name, {
-					keepChildren: keepChildren === true,
-				});
-			} else {
-				// No tree wired into this context: there is no subtree to cascade
-				// through, so stopping the named worker is the whole operation.
-				await record.worker.stop();
-			}
-			return { name: params.name, state: "stopped" };
+			// The wire result is narrower than the operation's outcome on
+			// purpose: `keptChildren`/`cascaded` are what the console renders,
+			// and `KillResult` is a published protocol shape this task does not
+			// get to widen.
+			const { name, state } = await operations.kill(params.name, {
+				keepChildren: keepChildren === true,
+			});
+			return { name, state };
 		},
 
-		bump: async (params): Promise<BumpResult> => {
-			const resumed = await context.bumpAccount(
-				params.account,
-				params.budgetUsd,
-			);
-			return {
-				account: params.account,
-				budgetUsd: params.budgetUsd,
-				resumed,
-			};
-		},
+		bump: async (params): Promise<BumpResult> =>
+			await operations.bump(params.account, params.budgetUsd),
 
 		/**
 		 * Stop the daemon, acknowledging first and closing after.

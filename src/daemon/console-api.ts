@@ -1,19 +1,24 @@
 /**
  * Purpose: The browser-facing half of the operator surface (§4.6). Serves the
- * console client itself from `src/console/`, plus the reads (agents, channels,
- * messages) and writes (create an agent or channel, edit a definition, change
- * membership, post a message, toggle a reaction) behind it over loopback HTTP,
- * and pushes new messages and reactions over a WebSocket so an open console
- * does not poll.
+ * console client itself from `src/console/`, plus — over loopback HTTP — the
+ * reads (agents, channels, messages), the writes (create an agent or channel,
+ * edit a definition, change membership, post a message, toggle a reaction),
+ * and the operator operations (stop an agent, inject a message, tail its
+ * logs, raise an account's ceiling). New messages, reactions, and daemon
+ * transitions are pushed over a WebSocket so an open console does not poll.
  *
  * Public API: `startConsoleApi`, `ConsoleApi`, `StartConsoleApiOptions`,
  * `ConsoleEvent`.
  *
  * Upstream deps: `../rooms/store` (durable rooms, threads, reactions),
  * `./supervisor` (the seam that wakes peers, and the sole writer of a live
- * peer's cached room set), `./peer-store` (definitions on disk), `./socket`
- * (`HUMAN_AUTHOR`, `PeerRecord`), `../shared/protocol` (`RoomInfo`,
- * `AgentStatus`), `../shared/agent-definition` (`fingerprintPeerDefinition`).
+ * peer's cached room set), `./peer-store` (definitions on disk),
+ * `./operations` (`HUMAN_AUTHOR`, `InvalidParamsError`, and the shared kill,
+ * inject, logs-tail, and bump the ops routes delegate to — the same object
+ * the control socket drives, so the destructive paths have one
+ * implementation), a type-only `PeerRecord` from `./socket`,
+ * `../shared/protocol` (`RoomInfo`, `AgentStatus`),
+ * `../shared/agent-definition` (`fingerprintPeerDefinition`).
  *
  * Downstream consumers: the daemon entry point, which owns the operator token
  * and this server's lifetime, and the browser client (T-603, T-605).
@@ -28,7 +33,11 @@
  * client-supplied value is ignored and logged (ADR-014): the console acts as
  * the human, and a forgeable identity makes a transcript worthless. A
  * definition the parser refuses is answered 400 with the parser's own message
- * and no file is written. Errors are `{error: {code, message}}` throughout.
+ * and no file is written. An operation's `InvalidParamsError` becomes a 400,
+ * or a 404 when it names an agent that does not resolve; a kill answers what
+ * actually happened (`cascaded`, `keptChildren`) rather than restating the
+ * request, because the no-tree fallback stops the named worker alone. Errors
+ * are `{error: {code, message}}` throughout.
  *
  * Performance: reads are one store query each. A definition write is one
  * render, one parse, and one atomic rename. The live feed polls only while at
@@ -46,8 +55,10 @@ import {
 	type PeerDefinition,
 } from "../shared/agent-definition";
 import type { AgentStatus, RoomInfo } from "../shared/protocol";
+import type { Operations } from "./operations";
+import { HUMAN_AUTHOR, InvalidParamsError } from "./operations";
 import type { PeerDefinitionFields, PeerStore } from "./peer-store";
-import { HUMAN_AUTHOR, type PeerRecord } from "./socket";
+import type { PeerRecord } from "./socket";
 import type { Supervisor } from "./supervisor";
 
 /** Loopback: a console reachable from the network is a rooms leak. */
@@ -118,6 +129,19 @@ export interface StartConsoleApiOptions {
 	peerStore: PeerStore;
 	/** Create the room if it does not exist yet, and index it. */
 	ensureRoom(id: string): Promise<void>;
+	/**
+	 * Kill, inject, logs-tail, and budget-bump, shared with the control
+	 * socket (T-1605).
+	 *
+	 * The same object `./socket` is handed, composed once in `./main`: the
+	 * console does not re-implement the destructive paths, it drives them.
+	 * Required rather than optional — the operations panel is part of this
+	 * surface, not a capability a console may be missing, and a degraded mode
+	 * nobody asked for is a mode nobody tests. A context that genuinely wires
+	 * no tree passes an `Operations` built without `killPeer`, which is the
+	 * documented fallback.
+	 */
+	operations: Operations;
 	/** Operator token. Generation and storage are the daemon's concern. */
 	token: string;
 	hostname?: string;
@@ -214,8 +238,16 @@ function tokenMatches(presented: string, expected: string): boolean {
 export async function startConsoleApi(
 	options: StartConsoleApiOptions,
 ): Promise<ConsoleApi> {
-	const { rooms, supervisor, peers, peerStore, knownRooms, ensureRoom, token } =
-		options;
+	const {
+		rooms,
+		supervisor,
+		peers,
+		peerStore,
+		knownRooms,
+		ensureRoom,
+		operations,
+		token,
+	} = options;
 	const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 	const hostname = options.hostname ?? DEFAULT_HOSTNAME;
 
@@ -611,6 +643,31 @@ export async function startConsoleApi(
 		return applied;
 	};
 
+	/**
+	 * Run one shared operation, mapping its refusals to HTTP.
+	 *
+	 * `operations.ts` raises `InvalidParamsError` for everything the caller
+	 * got wrong, because that is what the control socket's dispatcher answers
+	 * `invalidParams` with. Here the same failure is a 400 — except an unknown
+	 * name, which is a 404, matching how every other agent route answers a
+	 * name that does not resolve. Anything else is a genuine fault and is left
+	 * to the outer handler, which is the difference between "you asked for
+	 * something impossible" and "this daemon is broken".
+	 */
+	const runOperation = async (
+		run: () => Promise<Response>,
+	): Promise<Response> => {
+		try {
+			return await run();
+		} catch (error) {
+			if (!(error instanceof InvalidParamsError)) throw error;
+			if (error.message.startsWith("Unknown agent:")) {
+				return fail(404, "not_found", error.message);
+			}
+			return fail(400, "invalid_request", error.message);
+		}
+	};
+
 	// ── Routes ────────────────────────────────────────────────────────────────
 
 	const handle = async (request: Request, url: URL): Promise<Response> => {
@@ -624,6 +681,11 @@ export async function startConsoleApi(
 						state: record.worker.state,
 						account: record.accountId,
 						...(record.model === undefined ? {} : { model: record.model }),
+						// Parentage rides along because the kill confirmation has
+						// to name the children a cascade will take: counting them
+						// ("and 3 children") is not something an operator can
+						// check before an irreversible operation.
+						...(record.parent === undefined ? {} : { parent: record.parent }),
 						// Membership rides along with status so the console's
 						// per-channel toggle renders from one read.
 						rooms: [...record.rooms],
@@ -715,6 +777,126 @@ export async function startConsoleApi(
 			}
 
 			return fail(405, "method_not_allowed", `${request.method} not allowed`);
+		}
+
+		// ── Operations (T-1605) ───────────────────────────────────────────────
+		//
+		// Four thin handlers over the shared `operations.ts`: the console runs
+		// the very same kill, inject, logs tail, and bump the control socket
+		// runs. Nothing below re-implements one, and nothing below adds a
+		// second auth model — reaching here already means the operator token
+		// checked out.
+
+		const opsRoute = /^\/api\/agents\/([^/]+)\/(kill|inject|logs)$/.exec(path);
+		if (opsRoute?.[1] !== undefined && opsRoute[2] !== undefined) {
+			const peerName = decodeURIComponent(opsRoute[1]);
+			const action = opsRoute[2];
+			// Unknown before anything is parsed, so a typo'd name is answered
+			// 404 rather than 400 for a body nobody was going to act on.
+			if (!peers.has(peerName)) {
+				return fail(404, "not_found", `Unknown agent: ${peerName}`);
+			}
+			const wanted = action === "logs" ? "GET" : "POST";
+			if (request.method !== wanted) {
+				return fail(405, "method_not_allowed", `${request.method} not allowed`);
+			}
+
+			if (action === "logs") {
+				const rawLines = url.searchParams.get("lines");
+				let lines: number | undefined;
+				if (rawLines !== null) {
+					// Refused rather than defaulted: an operator who asked for a
+					// specific depth and silently got 50 reads the wrong tail
+					// and never learns the parameter was ignored.
+					if (!/^\d+$/.test(rawLines) || Number(rawLines) === 0) {
+						return fail(
+							400,
+							"invalid_request",
+							"lines must be a positive integer",
+						);
+					}
+					lines = Number(rawLines);
+				}
+				return await runOperation(async () =>
+					json(
+						200,
+						await operations.logsTail({
+							name: peerName,
+							...(lines === undefined ? {} : { lines }),
+						}),
+					),
+				);
+			}
+
+			const payload = await readBody(request);
+			if (!payload) {
+				return fail(400, "invalid_request", "Body is not valid JSON");
+			}
+
+			if (action === "inject") {
+				const message =
+					typeof payload.message === "string" ? payload.message.trim() : "";
+				if (message.length === 0) {
+					return fail(400, "invalid_request", "A message is required");
+				}
+				return await runOperation(async () =>
+					json(200, await operations.inject(peerName, message)),
+				);
+			}
+
+			// Kill. `keepChildren` is narrowed here rather than defaulted,
+			// because the default is the destructive one: a value this handler
+			// cannot read must be refused, never treated as absent. Coercing
+			// `"true"` to "not true" would answer success while killing the
+			// exact children the operator asked to spare.
+			const keepChildren =
+				"keepChildren" in payload ? payload.keepChildren : undefined;
+			if (keepChildren !== undefined && typeof keepChildren !== "boolean") {
+				return fail(
+					400,
+					"invalid_request",
+					"keepChildren must be a boolean when present",
+				);
+			}
+			return await runOperation(async () =>
+				json(
+					200,
+					// The whole outcome, `keptChildren` and `cascaded` included:
+					// the fallback stops only the named worker, and a response
+					// that restated the request would tell an operator a subtree
+					// died when one worker did.
+					await operations.kill(peerName, {
+						keepChildren: keepChildren === true,
+					}),
+				),
+			);
+		}
+
+		const bumpRoute = /^\/api\/accounts\/([^/]+)\/bump$/.exec(path);
+		if (bumpRoute?.[1] !== undefined) {
+			if (request.method !== "POST") {
+				return fail(405, "method_not_allowed", `${request.method} not allowed`);
+			}
+			const accountId = decodeURIComponent(bumpRoute[1]);
+			const payload = await readBody(request);
+			if (!payload) {
+				return fail(400, "invalid_request", "Body is not valid JSON");
+			}
+			const budgetUsd = payload.budgetUsd;
+			if (
+				typeof budgetUsd !== "number" ||
+				!Number.isFinite(budgetUsd) ||
+				budgetUsd <= 0
+			) {
+				return fail(
+					400,
+					"invalid_request",
+					"budgetUsd must be a positive number",
+				);
+			}
+			return await runOperation(async () =>
+				json(200, await operations.bump(accountId, budgetUsd)),
+			);
 		}
 
 		const membershipRoute =

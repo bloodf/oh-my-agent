@@ -2,17 +2,19 @@
 /**
  * Purpose: The daemon's composition root (§4.1). `omp-agent daemon` boots every
  * subsystem in dependency order, registers the peers the store lists, serves the
- * T-507 control socket, and keeps running after the launching terminal closes.
- * Shutdown reverses that order so a stop never strands a parked watcher or a
- * half-stopped worker.
+ * T-507 control socket and the operator console, and keeps running after the
+ * launching terminal closes. Shutdown reverses that order so a stop never
+ * strands a parked watcher or a half-stopped worker.
  *
  * Public API: `bootDaemon(options): Promise<DaemonHandle>` and, when run as a
  * program, the `daemon` CLI verb that re-spawns itself detached.
  *
  * Upstream deps: `./boot` (broker hosting), `./credential-gateway`,
  * `../rooms/store`, `./scheduler`, `./supervisor`, `./peer-store`, `./socket`,
- * and — through the default worker factory — `./materializer` plus
- * `../worker/lifecycle`.
+ * `./console-api`, `./operations` (composed once here and handed to both the
+ * socket and the console, so kill, inject, logs-tail, and bump have one
+ * implementation), and — through the default worker factory — `./materializer`
+ * plus `../worker/lifecycle`.
  *
  * Downstream consumers: the CLI entry point below, plus T-508's persistence and
  * T-504's TUI, which reach this process only through the socket.
@@ -64,6 +66,7 @@ import { startCredentialGateway } from "./credential-gateway";
 import type { RunTrigger } from "./db";
 import { DaemonDb } from "./db";
 import { materializeWorker } from "./materializer";
+import { createOperations } from "./operations";
 import type { PeerDefinitionFields } from "./peer-store";
 import { createPeerStore, resolvePeerStoreRoots } from "./peer-store";
 import { nextCronTime, Scheduler } from "./scheduler";
@@ -481,11 +484,34 @@ export async function bootDaemon(
 			if (row) db.upsertAgent({ ...row, status, workerPid });
 		};
 
+		/**
+		 * The console, once it exists.
+		 *
+		 * Declared before the supervisor purely for ordering: the supervisor
+		 * publishes transitions and the console is what they are published to,
+		 * but the console cannot be built until this boot is much further
+		 * along. The `emit` hook below closes over this binding and reads it
+		 * at call time, so transitions before the console is up are dropped
+		 * (nobody is connected) and every one after it reaches the sockets.
+		 */
+		let consoleApi: ConsoleApi | undefined;
+
 		const supervisor = new Supervisor({
 			rooms,
 			scheduler,
 			now,
 			onError: (error, peerName) => log(`peer ${peerName}: ${String(error)}`),
+			// The supervisor's own transitions — park, resume, membership, and
+			// the budget moves behind them — reach every connected console
+			// through here (ADR-015). Spawn, kill, and schedule are the
+			// daemon's, not the supervisor's, and publish from their own call
+			// sites below.
+			//
+			// The closure is the whole wiring: `consoleApi` is `undefined`
+			// while this is being constructed and is resolved on every later
+			// call, so a hook captured now still finds the console built
+			// hundreds of lines below.
+			emit: (event) => consoleApi?.emit(event),
 			// T-505: definitions re-read per delivery; a fingerprint mismatch
 			// rebuilds through this seam rather than reusing stale policy.
 			peers: store,
@@ -915,6 +941,10 @@ export async function bootDaemon(
 				startedAt: now(),
 				parent: parent ?? null,
 			});
+			// After the live map and the persisted row both name this peer: a
+			// frame published earlier would describe an agent that a status
+			// read taken in the same tick would not find.
+			consoleApi?.emit({ type: "agent", agent: name, state: worker.state });
 			return { name, state: worker.state };
 		};
 
@@ -946,6 +976,15 @@ export async function bootDaemon(
 				}
 				revokeControlToken(peerName);
 				markAgentRuntime(peerName, "stopped", null);
+				// After the stop and the persisted row, per peer rather than
+				// once for the subtree: a cascade stops several agents and the
+				// console has to learn about each of them, not just the one
+				// the operator named.
+				consoleApi?.emit({
+					type: "agent",
+					agent: peerName,
+					state: "stopped",
+				});
 				if (peerName === name) continue;
 				// A cascaded child keeps its edge: the subtree is stopped, not
 				// rearranged, so a later restart rebuilds the same shape.
@@ -991,7 +1030,18 @@ export async function bootDaemon(
 				handler: async () => {
 					record.nextFireAt = nextCronTime(schedule.cron, now());
 					db.setScheduleNextFire(id, record.nextFireAt);
-					if (room === undefined) return;
+					// A schedule with no room has already done everything it is
+					// going to do — the next-fire row is its whole commit — so
+					// the frame is owed here. Reporting it is the point: a
+					// silent no-op looks identical to a timer that never ran.
+					if (room === undefined) {
+						consoleApi?.emit({
+							type: "schedule",
+							agent: peer.name,
+							phase: "fired",
+						});
+						return;
+					}
 					await ensureRoom(room);
 					// Posting through the supervisor is what wakes the peer; writing
 					// to the store directly would fire into an empty room. The
@@ -1004,8 +1054,20 @@ export async function bootDaemon(
 							body: schedule.prompt,
 						});
 					});
+					// After the post commits, never before: a frame published
+					// ahead of a post that then throws announces a firing the
+					// peer never saw.
+					consoleApi?.emit({
+						type: "schedule",
+						agent: peer.name,
+						phase: "fired",
+					});
 				},
 			});
+			// After the timer exists and the row is persisted: an "armed" frame
+			// published ahead of either would name a schedule a restart would
+			// not find.
+			consoleApi?.emit({ type: "schedule", agent: peer.name, phase: "armed" });
 		};
 
 		/**
@@ -1301,6 +1363,37 @@ export async function bootDaemon(
 			return { stopping: true, pid: process.pid };
 		};
 
+		/**
+		 * Read the daemon's own stderr at call time, never cached: this process
+		 * appends to that file through its own stderr, so anything held would
+		 * be stale by the line that made someone ask for it.
+		 */
+		const daemonLog = async (): Promise<string> => {
+			try {
+				return await readFile(logPath, "utf8");
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+				throw error;
+			}
+		};
+
+		/**
+		 * Kill, inject, logs-tail, and bump — composed once, here.
+		 *
+		 * This is the single construction site the extraction exists for: the
+		 * control socket and the console API are both handed *this* object, so
+		 * a kill from the browser and a kill from the CLI are the same code
+		 * path with the same cascade semantics (T-1605).
+		 */
+		const operations = createOperations({
+			rooms,
+			supervisor,
+			peers,
+			killPeer,
+			bumpAccount,
+			daemonLog,
+		});
+
 		const context: DaemonContext = {
 			rooms,
 			supervisor,
@@ -1318,17 +1411,8 @@ export async function bootDaemon(
 			armSchedule,
 			bumpAccount,
 			requestDaemonStop,
-			daemonLog: async () => {
-				// Read at call time, never cached: this process appends to that
-				// file through its own stderr, so anything held would be stale
-				// by the line that made someone ask for it.
-				try {
-					return await readFile(logPath, "utf8");
-				} catch (error) {
-					if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
-					throw error;
-				}
-			},
+			daemonLog,
+			operations,
 		};
 
 		const socket = await startControlSocket({
@@ -1339,14 +1423,19 @@ export async function bootDaemon(
 		started.push(() => socket.close());
 
 		/**
-		 * The console, unless the operator asked for a headless daemon.
+		 * Serve the console, unless the operator asked for a headless daemon.
 		 *
 		 * Serving it is the point of the surface, so it is on by default; the
 		 * kill switch exists for a daemon nobody is meant to look at. The URL
 		 * carries the token, so it is announced once and never written to disk
 		 * beside the token file it would duplicate.
+		 *
+		 * Assigning `consoleApi` here — declared beside the supervisor — is
+		 * what completes the transition feed: the supervisor's `emit` hook and
+		 * the daemon's own `spawnPeer`, `killPeer`, and schedule emitters all
+		 * read that binding on every call, so from this line on every one of
+		 * those transitions reaches connected consoles.
 		 */
-		let consoleApi: ConsoleApi | undefined;
 		let consoleUrl: string | undefined;
 		if (env.OMA_CONSOLE !== "0") {
 			const token = operatorToken;
@@ -1373,6 +1462,8 @@ export async function bootDaemon(
 				knownRooms,
 				peerStore: store,
 				ensureRoom,
+				// The same object the control socket got, not a second copy.
+				operations,
 				token,
 				// Loopback only. Binding wider is T-1004's decision, not a
 				// default this task gets to make.

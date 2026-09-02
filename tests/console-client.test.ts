@@ -79,11 +79,11 @@ import {
 	type ConsoleEvent,
 	startConsoleApi,
 } from "../src/daemon/console-api";
+import { createOperations } from "../src/daemon/operations";
 import type { PeerStoreRoots } from "../src/daemon/peer-store";
 import { createPeerStore } from "../src/daemon/peer-store";
 import { Scheduler } from "../src/daemon/scheduler";
 import type { PeerRecord } from "../src/daemon/socket";
-import type { SupervisedWorker } from "../src/daemon/supervisor";
 import { Supervisor } from "../src/daemon/supervisor";
 import type { RoomMessage, RoomStore } from "../src/rooms/store";
 import { RoomStore as Store } from "../src/rooms/store";
@@ -272,13 +272,20 @@ const TOKEN = "operator-token";
 function stubWorker(name = "reviewer", fingerprint?: string) {
 	const prompts: string[] = [];
 	let state: "running" | "parked" | "stopped" = "running";
+	/**
+	 * The stderr the logs tail reads. Without a source here the logs test
+	 * asserts an empty tail against an empty worker and passes whether or not
+	 * the route works at all.
+	 */
+	const stderr: string[] = [];
 
-	const worker: SupervisedWorker = {
+	const worker: PeerRecord["worker"] = {
 		name,
 		fingerprint,
 		get state() {
 			return state;
 		},
+		stderr: () => stderr.join("\n"),
 		prompt: async (message) => {
 			prompts.push(message);
 		},
@@ -293,7 +300,7 @@ function stubWorker(name = "reviewer", fingerprint?: string) {
 		},
 	};
 
-	return { worker, prompts };
+	return { worker, prompts, stderr };
 }
 
 const MIME: Record<string, string> = {
@@ -362,6 +369,52 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		knownRooms.set(id, { id, kind, name: id });
 	};
 
+	/**
+	 * The same ops seam `./main` composes, so the browser drives the real
+	 * kill/inject/logs/bump rather than a console-local imitation. Without it
+	 * every ops route 500s and the panel tests fail for the wrong reason.
+	 */
+	const operations = createOperations({
+		rooms,
+		supervisor,
+		peers,
+		killPeer: async (name, killOptions) => {
+			// The daemon's cascade, in miniature: the named peer plus its whole
+			// subtree — transitively, as `main.ts`'s `descendantsOf` walks it —
+			// deepest first, unless the caller asked to keep the children. A
+			// direct-children-only stub would pass a grandchild assertion that
+			// production would fail.
+			const doomed = [name];
+			if (!killOptions.keepChildren) {
+				for (let cursor = 0; cursor < doomed.length; cursor += 1) {
+					const current = doomed[cursor];
+					for (const [child, record] of peers) {
+						if (record.parent !== current || doomed.includes(child)) continue;
+						doomed.push(child);
+					}
+				}
+			}
+			for (const peerName of doomed.reverse()) {
+				await peers.get(peerName)?.worker.stop();
+			}
+		},
+		bumpAccount: async (accountId, budgetUsd) => {
+			// Parked-before, as `main.ts` computes it: "resumed" names peers
+			// the bump restarted, not every peer on the account.
+			const parkedBefore = [...peers]
+				.filter(
+					([, record]) =>
+						record.accountId === accountId && record.worker.state === "parked",
+				)
+				.map(([name]) => name);
+			supervisor.bumpBudget(accountId, budgetUsd);
+			await supervisor.settled();
+			return parkedBefore.filter(
+				(name) => peers.get(name)?.worker.state === "running",
+			);
+		},
+	});
+
 	const api: ConsoleApi = await startConsoleApi({
 		rooms,
 		supervisor,
@@ -369,6 +422,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		peerStore,
 		knownRooms,
 		ensureRoom,
+		operations,
 		token: TOKEN,
 		pollIntervalMs: options.pollIntervalMs ?? 25,
 	});
@@ -379,7 +433,17 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 	const registerPeer = async (
 		name: string,
 		roomIds: string[],
-	): Promise<{ prompts: string[] }> => {
+		peerOptions: {
+			parent?: string;
+			accountId?: string;
+			mode?: "subscription" | "metered";
+			budgetUsd?: number;
+		} = {},
+	): Promise<{
+		prompts: string[];
+		stderr: string[];
+		state: () => string;
+	}> => {
 		const path = join(roots.project, `${name}.md`);
 		const document = [
 			"---",
@@ -394,19 +458,30 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		await writeFile(path, document, "utf8");
 		const definition = parsePeerDefinition(path, document);
 		const stub = stubWorker(name, fingerprintPeerDefinition(definition));
+		const accountId = peerOptions.accountId ?? "acct-1";
 		for (const room of roomIds) await ensureRoom(room);
 		await supervisor.register({
 			worker: stub.worker,
-			accountId: "acct-1",
-			mode: "subscription",
+			accountId,
+			mode: peerOptions.mode ?? "subscription",
 			rooms: roomIds,
+			...(peerOptions.budgetUsd === undefined
+				? {}
+				: { budgetUsd: peerOptions.budgetUsd }),
 		});
 		peers.set(name, {
 			worker: stub.worker,
-			accountId: "acct-1",
+			accountId,
 			rooms: roomIds,
+			...(peerOptions.parent === undefined
+				? {}
+				: { parent: peerOptions.parent }),
 		});
-		return stub;
+		return {
+			prompts: stub.prompts,
+			stderr: stub.stderr,
+			state: () => stub.worker.state,
+		};
 	};
 
 	/** Definitions as a cold daemon boot would read them. */
@@ -1254,6 +1329,288 @@ describe("membership controls", () => {
 			expect(errors).toEqual([]);
 		},
 	);
+});
+
+// ── Operations panel (T-1605) ────────────────────────────────────────────────
+
+/**
+ * Kill, inject, logs tail, and budget bump, driven from the browser.
+ *
+ * Every one of these runs keyboard-only — Tab to reach the control, Enter to
+ * activate it — because an operator surface that needs a pointer is one an
+ * operator on a screen reader cannot use at all. Kill additionally requires
+ * an explicit confirmation that *names the children it will take*: the
+ * default is the cascade, so an operator who misreads the dialog loses a
+ * subtree, and there is no undo.
+ */
+describe("operations panel", () => {
+	browserTest(
+		"kill requires subtree confirmation and stops the worker",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const boss = await h.registerPeer("boss", ["#reviews"]);
+			const report = await h.registerPeer("report", ["#reviews"], {
+				parent: "boss",
+			});
+			// A grandchild: the daemon's cascade walks to the leaves, so a
+			// confirmation naming only the direct children would let an
+			// operator approve killing an agent it never mentioned.
+			const intern = await h.registerPeer("intern", ["#reviews"], {
+				parent: "report",
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector('#ops .ops-agent[data-name="boss"]');
+
+			// Reach the kill control by keyboard and open the confirmation.
+			await focusInPage(page, '#ops .ops-agent[data-name="boss"] .ops-kill');
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#ops-kill-dialog[open]");
+
+			// The dialog names the whole subtree the cascade will take, and
+			// defaults to cascading, because that is what the daemon does.
+			const dialogText = await page.$eval(
+				"#ops-kill-dialog",
+				(node) => node.textContent ?? "",
+			);
+			expect(dialogText).toContain("boss");
+			expect(dialogText).toContain("report");
+			expect(dialogText).toContain("intern");
+			expect(
+				await page.$eval(
+					"#ops-kill-keep",
+					(node) => (node as unknown as { checked: boolean }).checked,
+				),
+			).toBe(false);
+
+			// Focus moved into the dialog when it opened (T-1615's helpers).
+			const inDialog = await waitFor(
+				"focus inside the kill dialog",
+				() =>
+					page.evaluate(
+						() => document.activeElement?.closest("#ops-kill-dialog") !== null,
+					),
+				(inside) => inside === true,
+			);
+			expect(inDialog).toBe(true);
+
+			// Confirm by keyboard.
+			await focusInPage(page, "#ops-kill-confirm");
+			await page.keyboard.press("Enter");
+
+			await waitFor(
+				"the worker to stop",
+				() => Promise.resolve(boss.state()),
+				(state) => state === "stopped",
+			);
+			// The cascade is real, and transitive: the grandchild went too.
+			expect(report.state()).toBe("stopped");
+			expect(intern.state()).toBe("stopped");
+			await page.waitForSelector("#ops-kill-dialog:not([open])");
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest("dismissing the kill confirmation kills nothing", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const boss = await h.registerPeer("boss", ["#reviews"]);
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector('#ops .ops-agent[data-name="boss"]');
+
+		await focusInPage(page, '#ops .ops-agent[data-name="boss"] .ops-kill');
+		await page.keyboard.press("Enter");
+		await page.waitForSelector("#ops-kill-dialog[open]");
+
+		// Escape is the standard dismissal for a <dialog>, and dismissing a
+		// destructive confirmation must be inert, not "the default happened".
+		await page.keyboard.press("Escape");
+		await page.waitForSelector("#ops-kill-dialog:not([open])");
+		expect(boss.state()).toBe("running");
+
+		// Focus came back to the control that opened it.
+		const returned = await waitFor(
+			"focus returned to the kill opener",
+			() => focusProbe(page),
+			(probe) => (probe?.className ?? "").includes("ops-kill"),
+		);
+		expect(returned?.className).toContain("ops-kill");
+		expect(errors).toEqual([]);
+	});
+
+	browserTest("keeping children spares the subtree", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const boss = await h.registerPeer("boss", ["#reviews"]);
+		const report = await h.registerPeer("report", ["#reviews"], {
+			parent: "boss",
+		});
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector('#ops .ops-agent[data-name="boss"]');
+
+		await focusInPage(page, '#ops .ops-agent[data-name="boss"] .ops-kill');
+		await page.keyboard.press("Enter");
+		await page.waitForSelector("#ops-kill-dialog[open]");
+
+		// Opt out of the cascade by keyboard: Space toggles a checkbox.
+		await focusInPage(page, "#ops-kill-keep");
+		await page.keyboard.press("Space");
+		await focusInPage(page, "#ops-kill-confirm");
+		await page.keyboard.press("Enter");
+
+		await waitFor(
+			"the parent to stop",
+			() => Promise.resolve(boss.state()),
+			(state) => state === "stopped",
+		);
+		expect(report.state()).toBe("running");
+		expect(errors).toEqual([]);
+	});
+
+	browserTest("inject reaches the worker by keyboard alone", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector('#ops .ops-agent[data-name="reviewer"]');
+
+		await focusInPage(
+			page,
+			'#ops .ops-agent[data-name="reviewer"] .ops-inject-input',
+		);
+		await page.keyboard.type("Check the failing build.");
+		await page.keyboard.press("Enter");
+
+		const prompts = await h.promptsContaining(
+			peer.prompts,
+			"Check the failing build.",
+		);
+		expect(prompts).toContain("Check the failing build.");
+		expect(errors).toEqual([]);
+	});
+
+	browserTest("the logs tail renders the worker's stderr", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+		peer.stderr.push(
+			"boot: materialized",
+			"turn 1: prompted",
+			"turn 1: answered",
+		);
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector('#ops .ops-agent[data-name="reviewer"]');
+
+		await focusInPage(page, '#ops .ops-agent[data-name="reviewer"] .ops-logs');
+		await page.keyboard.press("Enter");
+
+		const tail = await waitFor(
+			"the logs tail",
+			() =>
+				page
+					.$eval("#ops-logs-output", (node) => node.textContent ?? "")
+					.catch(() => ""),
+			(text) => text.includes("turn 1: answered"),
+		);
+		// Newest last, and the whole tail — not one line, not reversed.
+		expect(tail).toContain("boot: materialized");
+		expect(tail.indexOf("boot: materialized")).toBeLessThan(
+			tail.indexOf("turn 1: answered"),
+		);
+		expect(await page.$eval("#ops-logs-output", (n) => n.tagName)).toBe("PRE");
+		expect(errors).toEqual([]);
+	});
+
+	browserTest("a bump renders the new ceiling", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		await h.registerPeer("spender", ["#reviews"], {
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 5,
+		});
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector(
+			'#ops .ops-account[data-account="acct-metered"]',
+		);
+
+		await focusInPage(
+			page,
+			'#ops .ops-account[data-account="acct-metered"] .ops-bump-input',
+		);
+		await page.keyboard.type("42");
+		await page.keyboard.press("Enter");
+
+		// The ceiling repaints from the budget frame (T-1604), not a poll.
+		const ceiling = await waitFor(
+			"the new ceiling",
+			() =>
+				page
+					.$eval(
+						'#ops .ops-account[data-account="acct-metered"] .ops-budget',
+						(node) => node.textContent ?? "",
+					)
+					.catch(() => ""),
+			(text) => text.includes("42"),
+		);
+		expect(ceiling).toContain("42");
+		expect(errors).toEqual([]);
+	});
+
+	browserTest("the panel exposes accessible names and roles", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		await h.registerPeer("reviewer", ["#reviews"]);
+
+		const { page, errors } = await openPage();
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await page.waitForSelector('#ops .ops-agent[data-name="reviewer"]');
+
+		// The panel is a named region, so a screen reader can jump to it.
+		const region = await page.$eval("#ops", (node) => ({
+			tag: node.tagName,
+			label: node.getAttribute("aria-label") ?? "",
+		}));
+		expect(region.label.length).toBeGreaterThan(0);
+
+		// Every control carries a name, and the destructive one says so.
+		for (const selector of [
+			'#ops .ops-agent[data-name="reviewer"] .ops-kill',
+			'#ops .ops-agent[data-name="reviewer"] .ops-logs',
+			'#ops .ops-agent[data-name="reviewer"] .ops-inject-input',
+		]) {
+			const named = await page.$eval(selector, (node) => {
+				const label = node.getAttribute("aria-label") ?? "";
+				return label.length > 0 ? label : (node.textContent ?? "").trim();
+			});
+			expect(named.length).toBeGreaterThan(0);
+		}
+
+		// The logs output is a live region: it fills in after a round trip,
+		// and a sighted operator sees that without being told.
+		expect(
+			await page.$eval("#ops-logs-output", (n) => n.getAttribute("aria-live")),
+		).toBe("polite");
+
+		// The confirmation is a real <dialog>, not a div pretending: modality,
+		// Escape, and focus trapping are the platform's, not ours to rebuild.
+		expect(await page.$eval("#ops-kill-dialog", (n) => n.tagName)).toBe(
+			"DIALOG",
+		);
+		expect(errors).toEqual([]);
+	});
 });
 
 // ── Visual system (T-1101) ───────────────────────────────────────────────────

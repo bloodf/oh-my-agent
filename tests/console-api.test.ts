@@ -23,15 +23,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { ConsoleApi, ConsoleEvent } from "../src/daemon/console-api";
 import { startConsoleApi } from "../src/daemon/console-api";
+import { bootDaemon } from "../src/daemon/main";
+import { createOperations } from "../src/daemon/operations";
 import type { PeerStoreRoots } from "../src/daemon/peer-store";
 import { createPeerStore } from "../src/daemon/peer-store";
 import { Scheduler } from "../src/daemon/scheduler";
 import type { PeerRecord } from "../src/daemon/socket";
-import type { SupervisedWorker } from "../src/daemon/supervisor";
 import { Supervisor } from "../src/daemon/supervisor";
 import { RoomStore } from "../src/rooms/store";
 import {
@@ -39,6 +40,7 @@ import {
 	parsePeerDefinition,
 } from "../src/shared/agent-definition";
 import type { RoomInfo } from "../src/shared/protocol";
+import { controlCall, operatorToken } from "./fixtures/control-client";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -54,13 +56,20 @@ const TOKEN = "operator-token";
 function stubWorker(name = "reviewer", fingerprint?: string) {
 	const prompts: string[] = [];
 	let state: "running" | "parked" | "stopped" = "running";
+	/**
+	 * Stderr the log tail reads. A worker with no `stderr()` answers an empty
+	 * tail, which a logs assertion cannot tell apart from a working route
+	 * reading a quiet worker — so the stub carries real lines.
+	 */
+	const stderr: string[] = [];
 
-	const worker: SupervisedWorker = {
+	const worker: PeerRecord["worker"] = {
 		name,
 		fingerprint,
 		get state() {
 			return state;
 		},
+		stderr: () => stderr.join("\n"),
 		prompt: async (message) => {
 			prompts.push(message);
 		},
@@ -75,7 +84,7 @@ function stubWorker(name = "reviewer", fingerprint?: string) {
 		},
 	};
 
-	return { worker, prompts };
+	return { worker, prompts, stderr };
 }
 
 /** A definition file the production parser accepts, as the console writes it. */
@@ -155,6 +164,63 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		knownRooms.set(id, { id, kind, name: id });
 	};
 
+	/**
+	 * Kills the wired tree performed, so a test can tell a real cascade from
+	 * the fallback that stops the named worker alone.
+	 */
+	const kills: { name: string; keepChildren: boolean }[] = [];
+	/** Bumps the daemon's account layer was asked for, and what it resumed. */
+	const bumps: { accountId: string; budgetUsd: number }[] = [];
+
+	/**
+	 * The very seam `./main` composes, over this harness's own peer index:
+	 * the routes under test drive `operations.ts` rather than a console-local
+	 * copy of kill/inject/logs/bump.
+	 */
+	const operations = createOperations({
+		rooms,
+		supervisor,
+		peers,
+		killPeer: async (name, killOptions) => {
+			kills.push({ name, keepChildren: killOptions.keepChildren });
+			// Cascade as the daemon does: the named peer plus its whole
+			// subtree, transitively, unless the caller asked to keep the
+			// children. Stopping only the direct children would make this
+			// harness disagree with `main.ts` about what a cascade reaches.
+			const doomed = [name];
+			if (!killOptions.keepChildren) {
+				for (let cursor = 0; cursor < doomed.length; cursor += 1) {
+					const current = doomed[cursor];
+					for (const [child, record] of peers) {
+						if (record.parent !== current || doomed.includes(child)) continue;
+						doomed.push(child);
+					}
+				}
+			}
+			for (const peerName of doomed.reverse()) {
+				await peers.get(peerName)?.worker.stop();
+			}
+		},
+		bumpAccount: async (accountId, budgetUsd) => {
+			bumps.push({ accountId, budgetUsd });
+			// Snapshot first, exactly as `main.ts` does: "resumed" means a peer
+			// the bump actually restarted. Reporting every running peer on the
+			// account would claim credit for ones that were never parked.
+			const parkedBefore = [...peers]
+				.filter(
+					([, record]) =>
+						record.accountId === accountId && record.worker.state === "parked",
+				)
+				.map(([name]) => name);
+			supervisor.bumpBudget(accountId, budgetUsd);
+			await supervisor.settled();
+			return parkedBefore.filter(
+				(name) => peers.get(name)?.worker.state === "running",
+			);
+		},
+		daemonLog: async () => "daemon line one\ndaemon line two\n",
+	});
+
 	const api: ConsoleApi = await startConsoleApi({
 		rooms,
 		supervisor,
@@ -162,6 +228,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		peerStore,
 		knownRooms,
 		ensureRoom,
+		operations,
 		token: TOKEN,
 		...(options.pollIntervalMs === undefined
 			? {}
@@ -182,7 +249,13 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 	const registerPeer = async (
 		name: string,
 		roomIds: string[],
-	): Promise<{ prompts: string[]; state: () => string }> => {
+		peerOptions: { parent?: string } = {},
+	): Promise<{
+		prompts: string[];
+		state: () => string;
+		stderr: string[];
+		park: () => Promise<void>;
+	}> => {
 		const path = join(roots.project, `${name}.md`);
 		await writeFile(path, peerDocument(name, roomIds), "utf8");
 		const definition = parsePeerDefinition(path, await readFile(path, "utf8"));
@@ -198,8 +271,16 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 			worker: stub.worker,
 			accountId: "acct-1",
 			rooms: roomIds,
+			...(peerOptions.parent === undefined
+				? {}
+				: { parent: peerOptions.parent }),
 		});
-		return { prompts: stub.prompts, state: () => stub.worker.state };
+		return {
+			prompts: stub.prompts,
+			state: () => stub.worker.state,
+			stderr: stub.stderr,
+			park: () => stub.worker.park(),
+		};
 	};
 
 	/**
@@ -210,7 +291,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		name: string,
 		accountId: string,
 		budgetUsd: number,
-	): Promise<void> => {
+	): Promise<{ state: () => string }> => {
 		await writeFile(
 			join(roots.project, `${name}.md`),
 			peerDocument(name, []),
@@ -225,6 +306,11 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 			rooms: [],
 		});
 		peers.set(name, { worker: stub.worker, accountId, rooms: [] });
+		// Only the state: a quota park is the supervisor's own transition over
+		// its account registry, so moving this worker's state by hand would
+		// stage a park the supervisor does not know about and could not
+		// resume.
+		return { state: () => stub.worker.state };
 	};
 
 	const call = (
@@ -256,6 +342,11 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		registerMeteredPeer,
 		reload,
 		call,
+		operations,
+		/** What the wired tree was asked to kill, and whether it cascaded. */
+		kills,
+		/** What the account layer was asked to bump. */
+		bumps,
 		/**
 		 * Emit as the supervisor does, through the same seam: this is what
 		 * `SupervisorDeps.emit` reaches, so a test drives the daemon-side
@@ -1466,6 +1557,534 @@ describe("typed frames", () => {
 			agent: "reviewer",
 			rooms: ["#reviews"],
 		});
+	});
+
+	/**
+	 * The production wiring, not the harness's.
+	 *
+	 * Every test above points the supervisor at the console by hand, which
+	 * proves the seam and says nothing about whether the daemon uses it. This
+	 * one boots a real daemon, connects to the console it serves, and spawns a
+	 * peer over the control socket: the frame can only arrive if `main.ts`
+	 * actually passed `emit` into the supervisor and resolved it to the
+	 * console handle built afterwards.
+	 */
+	test("a real daemon's spawn reaches a connected console", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "oh-my-agent-console-boot-"));
+		const projectDir = await mkdtemp(
+			join(tmpdir(), "oh-my-agent-console-proj-"),
+		);
+		cleanups.push(() => rm(agentDir, { recursive: true, force: true }));
+		cleanups.push(() => rm(projectDir, { recursive: true, force: true }));
+
+		const taskAgents = join(agentDir, "agents");
+		await mkdir(taskAgents, { recursive: true });
+		await writeFile(
+			join(taskAgents, "scout.md"),
+			'---\nname: "scout"\ndescription: "Reads code."\n---\nYou are a scout.\n',
+			"utf8",
+		);
+		// No peer definition on disk: boot starts everything it finds, so a
+		// pre-existing one would already be running and the spawn below would
+		// hit `agent_spawn`'s idempotent early return. The peer under test is
+		// created after the console socket is open, so its spawn is a genuine
+		// first transition.
+		await mkdir(join(agentDir, "oh-my-agent", "agents"), { recursive: true });
+
+		// `env: {}` keeps broker discovery off the real profile, exactly as
+		// the other boot suites do.
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir,
+			workerFactory: async ({ peer }) => stubWorker(peer.name).worker,
+		});
+		cleanups.push(() => handle.close());
+
+		const consoleUrl = handle.consoleUrl;
+		if (consoleUrl === undefined) throw new Error("daemon served no console");
+		const url = new URL(consoleUrl);
+		const bootToken = url.searchParams.get("token") ?? "";
+		expect(bootToken.length).toBeGreaterThan(0);
+
+		const socket = new WebSocket(
+			`ws://${url.host}/api/events?token=${encodeURIComponent(bootToken)}`,
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		const token = await operatorToken(dirname(handle.socketPath));
+
+		// Create, then spawn: creation only writes a definition, so the
+		// running worker — and the frame it owes — comes from the spawn alone.
+		const created = await controlCall(
+			handle.socketPath,
+			"agent_create",
+			{
+				name: "reviewer",
+				description: "Reviewer peer for daemon wiring tests.",
+				spawns: ["scout"],
+				rooms: ["#reviews"],
+				body: "You are reviewer.",
+			},
+			token,
+			1,
+		);
+		expect(created).not.toHaveProperty("error");
+
+		// Spawning over the control socket is a daemon transition, and nothing
+		// in the console's own routes is involved: the only path from here to
+		// this socket is the `emit` hook `main.ts` wires at construction.
+		const spawned = await controlCall(
+			handle.socketPath,
+			"agent_spawn",
+			{ name: "reviewer" },
+			token,
+			2,
+		);
+		expect(spawned).not.toHaveProperty("error");
+
+		await until("an agent frame from a real daemon spawn", () =>
+			frames.some(
+				(frame) => frame.type === "agent" && frame.agent === "reviewer",
+			),
+		);
+		expect(
+			frames.find(
+				(frame) => frame.type === "agent" && frame.agent === "reviewer",
+			),
+		).toEqual({ type: "agent", agent: "reviewer", state: "running" });
+	}, 20_000);
+
+	/**
+	 * The other half of the production feed: a schedule's own transitions.
+	 *
+	 * `armed` and `fired` are the two the supervisor never sees — they come
+	 * from the daemon's cron layer — so a console fed only through the
+	 * supervisor would show a schedule that silently never reports anything.
+	 */
+	test("a real daemon's schedule arming reaches a connected console", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "oh-my-agent-console-cron-"));
+		const projectDir = await mkdtemp(
+			join(tmpdir(), "oh-my-agent-console-cronp-"),
+		);
+		cleanups.push(() => rm(agentDir, { recursive: true, force: true }));
+		cleanups.push(() => rm(projectDir, { recursive: true, force: true }));
+
+		await mkdir(join(agentDir, "agents"), { recursive: true });
+		await writeFile(
+			join(agentDir, "agents", "scout.md"),
+			'---\nname: "scout"\ndescription: "Reads code."\n---\nYou are a scout.\n',
+			"utf8",
+		);
+		const peerRoot = join(agentDir, "oh-my-agent", "agents");
+		await mkdir(peerRoot, { recursive: true });
+		await writeFile(
+			join(peerRoot, "reviewer.md"),
+			[
+				"---",
+				"name: reviewer",
+				"description: Reviewer peer for schedule frame tests.",
+				'spawns: ["scout"]',
+				'rooms: ["#reviews"]',
+				'schedules: [{"cron": "0 9 * * *", "prompt": "daily sweep", "room": "#reviews"}]',
+				"---",
+				"You are reviewer.",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir,
+			workerFactory: async ({ peer }) => stubWorker(peer.name).worker,
+		});
+		cleanups.push(() => handle.close());
+
+		const consoleUrl = handle.consoleUrl;
+		if (consoleUrl === undefined) throw new Error("daemon served no console");
+		const url = new URL(consoleUrl);
+		const bootToken = url.searchParams.get("token") ?? "";
+
+		const socket = new WebSocket(
+			`ws://${url.host}/api/events?token=${encodeURIComponent(bootToken)}`,
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		const token = await operatorToken(dirname(handle.socketPath));
+		const id = "reviewer:schedule:0";
+		// Boot armed this one before the console existed; disarm and re-arm so
+		// the transition happens with a console connected.
+		const disarmed = await controlCall(
+			handle.socketPath,
+			"schedules_arm",
+			{ scheduleId: id, enabled: false },
+			token,
+			1,
+		);
+		expect(disarmed).not.toHaveProperty("error");
+		const rearmed = await controlCall(
+			handle.socketPath,
+			"schedules_arm",
+			{ scheduleId: id, enabled: true },
+			token,
+			2,
+		);
+		expect(rearmed).not.toHaveProperty("error");
+
+		await until("a schedule frame from a real daemon", () =>
+			frames.some((frame) => frame.type === "schedule"),
+		);
+		expect(frames.find((frame) => frame.type === "schedule")).toEqual({
+			type: "schedule",
+			agent: "reviewer",
+			phase: "armed",
+		});
+	}, 20_000);
+});
+
+// ── Operations (T-1605) ─────────────────────────────────────────────────────
+
+/**
+ * The four operator capabilities, on the console's existing token gate.
+ *
+ * These routes add no second auth model and no second implementation: they
+ * delegate to the same `operations.ts` the control socket drives, so a kill
+ * from the browser and a kill from the CLI are the same kill. What is tested
+ * here is the HTTP surface over that seam — the parsing, the status mapping,
+ * and the honesty of the kill response about what actually died.
+ */
+describe("operations", () => {
+	test("kill stops the worker and reports the subtree it really took", async () => {
+		const h = await harness();
+		const boss = await h.registerPeer("boss", ["#reviews"]);
+		const report = await h.registerPeer("report", ["#reviews"], {
+			parent: "boss",
+		});
+		const intern = await h.registerPeer("intern", ["#reviews"], {
+			parent: "report",
+		});
+
+		const res = await h.call("/api/agents/boss/kill", {
+			method: "POST",
+			body: JSON.stringify({ keepChildren: false }),
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			name: "boss",
+			state: "stopped",
+			keptChildren: false,
+			cascaded: true,
+		});
+		expect(boss.state()).toBe("stopped");
+		// The cascade is the daemon's, driven through the shared seam, and it
+		// reaches the leaves rather than stopping one level down.
+		expect(report.state()).toBe("stopped");
+		expect(intern.state()).toBe("stopped");
+		expect(h.kills).toEqual([{ name: "boss", keepChildren: false }]);
+	});
+
+	test("keepChildren spares the subtree and the response says so", async () => {
+		const h = await harness();
+		const boss = await h.registerPeer("boss", ["#reviews"]);
+		const report = await h.registerPeer("report", ["#reviews"], {
+			parent: "boss",
+		});
+		const intern = await h.registerPeer("intern", ["#reviews"], {
+			parent: "report",
+		});
+
+		const res = await h.call("/api/agents/boss/kill", {
+			method: "POST",
+			body: JSON.stringify({ keepChildren: true }),
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			name: "boss",
+			state: "stopped",
+			keptChildren: true,
+			cascaded: false,
+		});
+		expect(boss.state()).toBe("stopped");
+		// Sparing the children spares their own descendants with them: a
+		// reparented child keeps the subtree hanging off it.
+		expect(report.state()).toBe("running");
+		expect(intern.state()).toBe("running");
+	});
+
+	test("with no tree wired, kill stops one worker and refuses to claim a cascade", async () => {
+		const h = await harness();
+		const boss = await h.registerPeer("boss", ["#reviews"]);
+		const report = await h.registerPeer("report", ["#reviews"], {
+			parent: "boss",
+		});
+
+		// A console over a context that wires no tree — the toolbelt's shape,
+		// and `DaemonContext.killPeer`'s documented absence. The fallback
+		// stops the named worker alone, and the response has to say so:
+		// reporting `cascaded: true` here would tell an operator a subtree
+		// died while its children kept running unsupervised.
+		const unwired = await startConsoleApi({
+			rooms: h.rooms,
+			supervisor: h.supervisor,
+			peers: h.peers,
+			peerStore: h.peerStore,
+			knownRooms: h.knownRooms,
+			ensureRoom: h.ensureRoom,
+			operations: createOperations({
+				rooms: h.rooms,
+				supervisor: h.supervisor,
+				peers: h.peers,
+				// No tree and no account layer: `killPeer` is the optional one
+				// under test, and this context has no metered accounts, so a
+				// bump reaching here is a wiring bug rather than a request to
+				// answer quietly.
+				bumpAccount: async (accountId) => {
+					throw new Error(`No account layer is wired: ${accountId}`);
+				},
+			}),
+			token: TOKEN,
+		});
+		cleanups.push(() => unwired.close());
+
+		const res = await fetch(`${unwired.url}/api/agents/boss/kill`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${TOKEN}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ keepChildren: false }),
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			name: "boss",
+			state: "stopped",
+			// No tree, so nothing below `boss` was ever reachable: the
+			// children are kept because they could not be taken.
+			keptChildren: true,
+			cascaded: false,
+		});
+		expect(boss.state()).toBe("stopped");
+		expect(report.state()).toBe("running");
+	});
+
+	test("a non-boolean keepChildren is refused, never read as absent", async () => {
+		const h = await harness();
+		const boss = await h.registerPeer("boss", ["#reviews"]);
+
+		// The default is the cascade, so a value the daemon cannot read must
+		// be refused: coercing `"false"` to "not true" turns "spare my
+		// children" into "kill the subtree", which is unrecoverable.
+		const res = await h.call("/api/agents/boss/kill", {
+			method: "POST",
+			body: JSON.stringify({ keepChildren: "false" }),
+		});
+		expect(res.status).toBe(400);
+		expect(boss.state()).toBe("running");
+		expect(h.kills).toEqual([]);
+	});
+
+	test("killing an unknown agent is a 404", async () => {
+		const h = await harness();
+		const res = await h.call("/api/agents/ghost/kill", {
+			method: "POST",
+			body: JSON.stringify({ keepChildren: false }),
+		});
+		expect(res.status).toBe(404);
+	});
+
+	test("inject prompts a running peer", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+
+		const res = await h.call("/api/agents/reviewer/inject", {
+			method: "POST",
+			body: JSON.stringify({ message: "Look at the build." }),
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ name: "reviewer", queued: false });
+		expect(peer.prompts).toEqual(["Look at the build."]);
+	});
+
+	test("inject on a parked peer queues into its room and delivers", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+		await peer.park();
+
+		const res = await h.call("/api/agents/reviewer/inject", {
+			method: "POST",
+			body: JSON.stringify({ message: "Queued for later." }),
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ name: "reviewer", queued: true });
+		// The message is in the room the peer subscribes to, posted as the
+		// human — the console never forges an agent author.
+		const posted = await h.rooms.listMessages("#reviews", {});
+		expect(posted.map((message) => message.body)).toContain(
+			"Queued for later.",
+		);
+		expect(posted.at(-1)?.author).toBe("@you");
+	});
+
+	test("inject on a parked peer with no rooms is a 400, not a 500", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("hermit", []);
+		await peer.park();
+
+		// There is nowhere to queue the message, which is a fact about the
+		// request the caller made and not an internal fault.
+		const res = await h.call("/api/agents/hermit/inject", {
+			method: "POST",
+			body: JSON.stringify({ message: "Nowhere to put this." }),
+		});
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: { message: string } };
+		expect(body.error.message).toContain("no room");
+	});
+
+	test("inject requires a message", async () => {
+		const h = await harness();
+		await h.registerPeer("reviewer", ["#reviews"]);
+		const res = await h.call("/api/agents/reviewer/inject", {
+			method: "POST",
+			body: JSON.stringify({ message: "   " }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	test("the logs route tails the worker's stderr, newest last", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+		peer.stderr.push("first line", "second line", "third line");
+
+		const res = await h.call("/api/agents/reviewer/logs");
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			name: "reviewer",
+			lines: ["first line", "second line", "third line"],
+		});
+	});
+
+	test("lines bounds the tail to the most recent lines", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+		peer.stderr.push("one", "two", "three", "four");
+
+		const res = await h.call("/api/agents/reviewer/logs?lines=2");
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			name: "reviewer",
+			lines: ["three", "four"],
+		});
+	});
+
+	test("a malformed lines is refused rather than silently defaulted", async () => {
+		const h = await harness();
+		await h.registerPeer("reviewer", ["#reviews"]);
+		const res = await h.call("/api/agents/reviewer/logs?lines=all");
+		expect(res.status).toBe(400);
+	});
+
+	test("logs for an unknown agent is a 404", async () => {
+		const h = await harness();
+		const res = await h.call("/api/agents/ghost/logs");
+		expect(res.status).toBe(404);
+	});
+
+	test("bump raises the ceiling and reports what it resumed", async () => {
+		const h = await harness();
+		const spender = await h.registerMeteredPeer("spender", "acct-metered", 5);
+
+		// Nothing was parked, so nothing was resumed. That empty list is the
+		// contract: `resumed` names peers the bump actually restarted, and
+		// listing every running peer on the account instead would tell an
+		// operator the bump revived work that was never stopped. A real
+		// quota park is the supervisor's own transition (tests/supervisor
+		// covers it) and cannot be staged from here by moving worker state,
+		// which leaves the account registry untouched.
+		const res = await h.call("/api/accounts/acct-metered/bump", {
+			method: "POST",
+			body: JSON.stringify({ budgetUsd: 25 }),
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			account: "acct-metered",
+			budgetUsd: 25,
+			resumed: [],
+		});
+		expect(spender.state()).toBe("running");
+		expect(h.bumps).toEqual([{ accountId: "acct-metered", budgetUsd: 25 }]);
+	});
+
+	test("a bump emits the budget frame carrying the new ceiling", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+		await h.registerMeteredPeer("spender", "acct-metered", 5);
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		const res = await h.call("/api/accounts/acct-metered/bump", {
+			method: "POST",
+			body: JSON.stringify({ budgetUsd: 42 }),
+		});
+		expect(res.status).toBe(200);
+
+		// The console repaints its budget state from this frame rather than
+		// from a poll, so the new ceiling has to ride on it.
+		await until("a budget frame", () =>
+			frames.some((frame) => frame.type === "budget"),
+		);
+		expect(frames.find((frame) => frame.type === "budget")).toEqual({
+			type: "budget",
+			account: "acct-metered",
+			state: "bumped",
+			budgetUsd: 42,
+		});
+	});
+
+	test("a non-numeric budgetUsd is refused", async () => {
+		const h = await harness();
+		await h.registerMeteredPeer("spender", "acct-metered", 5);
+		const res = await h.call("/api/accounts/acct-metered/bump", {
+			method: "POST",
+			body: JSON.stringify({ budgetUsd: "lots" }),
+		});
+		expect(res.status).toBe(400);
+		expect(h.bumps).toEqual([]);
+	});
+
+	test("the ops routes are behind the same token gate as everything else", async () => {
+		const h = await harness();
+		const peer = await h.registerPeer("reviewer", ["#reviews"]);
+
+		for (const [path, init] of [
+			["/api/agents/reviewer/kill", { method: "POST", body: "{}" }],
+			[
+				"/api/agents/reviewer/inject",
+				{ method: "POST", body: JSON.stringify({ message: "hi" }) },
+			],
+			["/api/agents/reviewer/logs", {}],
+			[
+				"/api/accounts/acct-1/bump",
+				{ method: "POST", body: JSON.stringify({ budgetUsd: 1 }) },
+			],
+		] as [string, RequestInit][]) {
+			const res = await h.call(path, { ...init, token: null });
+			expect(res.status).toBe(401);
+		}
+		// Refused means nothing ran, not "ran unauthenticated".
+		expect(peer.state()).toBe("running");
+		expect(peer.prompts).toEqual([]);
 	});
 });
 
