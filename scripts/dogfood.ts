@@ -4,8 +4,8 @@
  * Public API: runDogfood(options), DogfoodOptions, DogfoodReport.
  * Upstream deps: Bun subprocesses, DOGFOOD_* environment, daemon pidfile, host `ps`.
  * Downstream consumers: direct script invocation and tests/dogfood.test.ts.
- * Failure modes: stops on first failed/timed-out check, names its scenario step,
- * and preserves daemon state plus a redacted mode-0600 log for triage.
+ * Failure modes: refuses unsafe account/bump inputs before CLI use, stops on the
+ * first failed/timed-out check, and always cleans workers, schedules, and daemon.
  * Performance: sequential CLI calls; bounded per call and poll deadline.
  */
 import { chmod, mkdir, open, readFile } from "node:fs/promises";
@@ -43,6 +43,8 @@ export interface DogfoodOptions {
 	editDocument: string;
 	scheduleIndex: number;
 	bumpUsd: number;
+	accountAllowlist: readonly string[];
+	maxBumpUsd: number;
 	room: string;
 	injectText: string;
 	sessionId: string;
@@ -194,16 +196,39 @@ export async function runDogfood(
 	const env = { ...process.env, ...options.env };
 	const scheduleId = `${options.parent}:schedule:${options.scheduleIndex}`;
 	if (command.length === 0) throw new Error("command must not be empty");
-	if (!Number.isFinite(options.bumpUsd))
-		throw new Error("DOGFOOD_BUMP_USD must be finite");
+	if (options.accountAllowlist.length === 0)
+		throw new Error("DOGFOOD_ACCOUNT_ALLOWLIST must not be empty");
+	if (
+		options.accountAllowlist.some(
+			(account) => typeof account !== "string" || account.trim().length === 0,
+		)
+	) {
+		throw new Error("DOGFOOD_ACCOUNT_ALLOWLIST contains an empty account");
+	}
+	if (options.account.trim().length === 0)
+		throw new Error("DOGFOOD_ACCOUNT must not be empty");
+	if (!options.accountAllowlist.includes(options.account)) {
+		throw new Error(
+			`DOGFOOD_ACCOUNT ${JSON.stringify(options.account)} is not allowlisted`,
+		);
+	}
+	if (!Number.isFinite(options.maxBumpUsd) || options.maxBumpUsd < 0)
+		throw new Error(
+			"DOGFOOD_MAX_BUMP_USD must be a finite non-negative number",
+		);
+	if (!Number.isFinite(options.bumpUsd) || options.bumpUsd < 0)
+		throw new Error("DOGFOOD_BUMP_USD must be a finite non-negative number");
+	if (options.bumpUsd > options.maxBumpUsd) {
+		throw new Error(
+			`DOGFOOD_BUMP_USD ${options.bumpUsd} exceeds DOGFOOD_MAX_BUMP_USD ${options.maxBumpUsd}`,
+		);
+	}
 	if (!Number.isInteger(options.scheduleIndex) || options.scheduleIndex < 0) {
 		throw new Error("DOGFOOD_SCHEDULE_INDEX must be a non-negative integer");
 	}
 	if (!options.room.startsWith("#") && !options.room.startsWith("@")) {
 		throw new Error("DOGFOOD_ROOM must start with # or @");
 	}
-	if (options.account.trim().length === 0)
-		throw new Error("DOGFOOD_ACCOUNT must not be empty");
 
 	const edit = requireObject(
 		JSON.parse(await readFile(options.editDocument, "utf8")),
@@ -253,7 +278,11 @@ export async function runDogfood(
 	let commandCount = 0;
 	let currentStep = "preflight";
 	const spawnReadyMs: Record<string, number> = {};
+	let report: DogfoodReport | undefined;
 	let maxConcurrentAgents = 0;
+	const spawnedAgents = new Set<string>();
+	const armedSchedules = new Set<string>();
+	let primaryFailure: unknown;
 	const sampleRss =
 		options.rssSampler ??
 		((signal: AbortSignal) => defaultRssSampler(cwd, env, signal));
@@ -512,6 +541,7 @@ export async function runDogfood(
 		});
 		await step(6, "Spawn parent", async () => {
 			const started = performance.now();
+			spawnedAgents.add(options.parent);
 			await run(["spawn", options.parent]);
 			await pollAgents(
 				(agents) =>
@@ -534,6 +564,7 @@ export async function runDogfood(
 			"Spawn child under parent and confirm hierarchy",
 			async () => {
 				const started = performance.now();
+				spawnedAgents.add(options.child);
 				await run(["spawn", options.child, "--parent", options.parent]);
 				const agents = await pollAgents((rows) => {
 					const parent = rows.find((agent) => agent.name === options.parent);
@@ -630,6 +661,7 @@ export async function runDogfood(
 		});
 		await step(15, "Recreate hierarchy", async () => {
 			const parentStarted = performance.now();
+			spawnedAgents.add(options.parent);
 			await run(["spawn", options.parent]);
 			await pollAgents(
 				(agents) =>
@@ -639,6 +671,7 @@ export async function runDogfood(
 			);
 			const parentLatency = Math.round(performance.now() - parentStarted);
 			const childStarted = performance.now();
+			spawnedAgents.add(options.child);
 			await run(["spawn", options.child, "--parent", options.parent]);
 			const agents = await pollAgents(
 				(rows) =>
@@ -692,8 +725,16 @@ export async function runDogfood(
 			"Restart daemon and exercise schedule controls",
 			async () => {
 				await run(["daemon", "restart"]);
+				armedSchedules.add(scheduleId);
 				await run(["status"]);
-				requireSchedule(schedulesFrom(await run(["schedule"])));
+				const restartedSchedule = requireSchedule(
+					schedulesFrom(await run(["schedule"])),
+				);
+				if (restartedSchedule.enabled !== true) {
+					throw new Error(
+						`runtime schedule ${scheduleId} is not enabled after restart`,
+					);
+				}
 				const enabled = requireObject(
 					(await run(["schedule", scheduleId, "on"])).json,
 					"schedule on result must be an object",
@@ -714,23 +755,92 @@ export async function runDogfood(
 						.enabled !== false
 				)
 					throw new Error("schedule off did not disable schedule");
-				if (requireSchedule(schedulesFrom(await run(["schedule"]))).enabled)
+				if (requireSchedule(schedulesFrom(await run(["schedule"]))).enabled) {
 					throw new Error("listed schedule is not disabled");
+				}
 			},
 		);
-		await step(18, "Stop daemon", async () => {
-			await run(["daemon", "stop"]);
-		});
+		currentStep = "Step 18: Begin unconditional cleanup";
 		await log.sync();
-		return {
+		report = {
 			logPath,
 			commands: commandCount,
 			spawnReadyMs,
 			maxConcurrentAgents,
 		};
+	} catch (error) {
+		primaryFailure = error;
 	} finally {
-		await log.close();
+		currentStep = "Cleanup";
+		const cleanupErrors: string[] = [];
+		const logCleanupFailure = async (message: string): Promise<void> => {
+			cleanupErrors.push(message);
+			try {
+				await writeLog({
+					step: currentStep,
+					type: "cleanup-failure",
+					result: message,
+				});
+			} catch {
+				// Logging the failure itself failed; the message still surfaces
+				// via cleanupErrors and the thrown primaryFailure below.
+			}
+		};
+		let agentsToKill = [...spawnedAgents].reverse();
+		try {
+			const liveNames = new Set(
+				agentsFrom(await run(["agents"]))
+					.filter((agent) => agent.state === "running")
+					.map((agent) => agent.name),
+			);
+			agentsToKill = agentsToKill.filter((agent) => liveNames.has(agent));
+		} catch (error) {
+			await logCleanupFailure(
+				`list live agents: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+		for (const agent of agentsToKill) {
+			try {
+				await run(["kill", agent]);
+			} catch (error) {
+				await logCleanupFailure(
+					`kill ${agent}: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}
+		for (const schedule of armedSchedules) {
+			try {
+				await run(["schedule", schedule, "off"]);
+			} catch (error) {
+				await logCleanupFailure(
+					`schedule ${schedule} off: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}
+		try {
+			await run(["daemon", "stop"]);
+		} catch (error) {
+			await logCleanupFailure(
+				`daemon stop: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+		try {
+			await log.close();
+		} catch (error) {
+			await logCleanupFailure(
+				`log close: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+		if (primaryFailure === undefined && cleanupErrors.length > 0) {
+			primaryFailure = new Error(
+				`dogfood cleanup failed: ${cleanupErrors.join("; ")}`,
+			);
+		}
 	}
+	if (primaryFailure !== undefined) throw primaryFailure;
+	if (!report) throw new Error("dogfood completed without a report");
+	report.commands = commandCount;
+	return report;
 }
 
 function requiredEnv(name: string): string {
@@ -745,6 +855,10 @@ if (import.meta.main) {
 		const bumpUsd = Number(requiredEnv("DOGFOOD_BUMP_USD"));
 		const report = await runDogfood({
 			account: requiredEnv("DOGFOOD_ACCOUNT"),
+			accountAllowlist: requiredEnv("DOGFOOD_ACCOUNT_ALLOWLIST")
+				.split(",")
+				.map((account) => account.trim()),
+			maxBumpUsd: Number(requiredEnv("DOGFOOD_MAX_BUMP_USD")),
 			parent: requiredEnv("DOGFOOD_PARENT"),
 			child: requiredEnv("DOGFOOD_CHILD"),
 			parentDefinition: requiredEnv("DOGFOOD_PARENT_DEFINITION"),

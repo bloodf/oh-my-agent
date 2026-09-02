@@ -17,6 +17,7 @@ Fill every value. Values are operator inputs, never defaults. Quote values conta
 
 ```sh
 export DOGFOOD_ACCOUNT='<approved-account-id>'
+export DOGFOOD_ACCOUNT_ALLOWLIST='<approved-account-id,other-approved-account-id>'
 export DOGFOOD_PARENT='<approved-parent-name>'
 export DOGFOOD_CHILD='<approved-child-name>'
 export DOGFOOD_PARENT_DEFINITION='<approved-parent-definition-md-path>'
@@ -25,6 +26,7 @@ export DOGFOOD_EDIT_DOC='<approved-definition-update-json-path>'
 export DOGFOOD_SCHEDULE_INDEX='<approved-zero-based-schedule-index>'
 export DOGFOOD_SCHEDULE_ID="${DOGFOOD_PARENT}:schedule:${DOGFOOD_SCHEDULE_INDEX}"
 export DOGFOOD_BUMP_USD='<approved-bump-usd>'
+export DOGFOOD_MAX_BUMP_USD='<approved-maximum-bump-usd>'
 export DOGFOOD_TIMEBOX_MINUTES='<approved-timebox-minutes>'
 export DOGFOOD_ROOM='<#channel-or-@peer>'
 export DOGFOOD_INJECT_TEXT='<approved-steering-text>'
@@ -46,13 +48,12 @@ Definition inputs have different formats:
 Complete every check before daemon start.
 
 - [ ] **Real accounts acknowledged.** Operator understands live model calls can spend real funds.
-- [ ] **Account approved.** Budget owner approved exact `$DOGFOOD_ACCOUNT`; both definitions and edit document resolve to it through their model selectors.
+- [ ] **Account allowlist approved.** Budget owner approved every comma-separated account in `$DOGFOOD_ACCOUNT_ALLOWLIST`, and exact `$DOGFOOD_ACCOUNT` appears in it. The harness refuses an empty allowlist or non-member account before issuing any CLI verb.
 - [ ] **Inputs approved.** Owner approved names, both Markdown definitions, edit JSON, room, schedule entry index, derived schedule ID, and steering text.
-- [ ] **Bump approved and valid.** Budget owner approved exact `$DOGFOOD_BUMP_USD`. `src/daemon/cli.ts` converts it with `Number(...)`; proceed only when that result is finite, matching `Number.isFinite(...)`. Approval is not an enforced ceiling.
+- [ ] **Bump approved and bounded.** Budget owner approved exact `$DOGFOOD_BUMP_USD` and `$DOGFOOD_MAX_BUMP_USD`. Both must be finite and non-negative, and harness refuses a bump above maximum before issuing any CLI verb.
 - [ ] **Timebox approved.** Record `$DOGFOOD_TIMEBOX_MINUTES` and wall-clock stop time. Reaching either stops new scenario work and enters §7.
 - [ ] **Paths validated.** `PI_CODING_AGENT_DIR` selects intended profile; both Markdown definitions and edit JSON exist and are readable; edit document is a JSON object.
 - [ ] **Room validated.** `$DOGFOOD_ROOM` starts with `#` or `@`.
-- [ ] **T-1404 gap acknowledged.** No harness-enforced account allowlist, bump ceiling, abort, or unconditional cleanup exists yet.
 
 Check clean daemon state:
 
@@ -179,7 +180,7 @@ Only this numbered section maps 1:1 to T-1402. Run in order. Every command uses 
     ```sh
     omp-agent --json inject "$DOGFOOD_CHILD" "$DOGFOOD_INJECT_TEXT"
     ```
-12. **Apply approved account bump.** Recheck account, approved amount, and finite-number rule immediately before execution.
+12. **Apply approved account bump.** Recheck account, approved amount, and finite non-negative bump rule immediately before execution.
     ```sh
     omp-agent --json bump "$DOGFOOD_ACCOUNT" "$DOGFOOD_BUMP_USD"
     ```
@@ -217,10 +218,7 @@ Only this numbered section maps 1:1 to T-1402. Run in order. Every command uses 
     omp-agent --json schedule
     ```
     After restart, find the `schedules[]` entry whose `id` exactly equals `$DOGFOOD_SCHEDULE_ID`; confirm its `cron` and `action` match the authored entry. After `on`, confirm that same entry has `enabled: true`; after `off`, confirm it has `enabled: false`. `nextFireAt` is also present in each runtime entry.
-18. **Stop daemon.**
-    ```sh
-    omp-agent --json daemon stop
-    ```
+18. **Enter unconditional cleanup.** Harness leaves scenario work and, in its `finally` cleanup, cascade-kills every agent it attempted to spawn, disarms every schedule it may have armed, then stops daemon. Cleanup continues through individual command failures; earlier scenario failure remains reported error.
 
 ## 5. Manual console and TUI checks
 
@@ -236,16 +234,43 @@ The shipped CLI starts the default RPC worker backend. Record RPC coverage only 
 
 The in-process backend is **not selectable through shipped CLI today**. Its operator-facing selector and dogfood coverage arrive with [T-1405](delivery/tasks/T-1405-daemon-backend-selector.md). Do not invent syntax. Do not record in-process as exercised, passed, or skipped-but-successful; omit it from current session success counts and mark coverage `deferred to T-1405` only.
 
-## 7. Incident and timebox stop
+## 7. Incident, timebox stop, and OS abort
 
-On any failed command, failed Manual check, incident, or timebox expiry:
+On any failed command, failed Manual check, incident, or timebox expiry, stop issuing new scenario work. Harness automatically enters its `finally` cleanup while daemon remains reachable: cascade-kill tracked workers, disarm tracked schedules, then stop daemon. Preserve `$DOGFOOD_SESSION_LOG` at mode `0600`; record last successful step, failure, UTC time, cleanup results, and last observed agent/schedule states. Enter §8 triage and mark every unrun scenario or Manual check `not run: session stopped` with reason.
 
-1. Stop issuing scenario, cleanup, schedule, worker, bump, and daemon commands.
-2. Preserve `$DOGFOOD_SESSION_LOG` at mode `0600`.
-3. Preserve daemon and worker state for evidence; record last successful step, failure, UTC time, and last observed agent/schedule states without changing them.
-4. Enter §8 triage. Mark every unrun scenario or Manual check `not run: session stopped` with reason. Never count it as pass.
+If harness hangs or CLI cleanup cannot reach daemon, use this OS-level fallback. Do not use `omp-agent daemon stop` in this fallback. Capture every current daemon descendant before killing daemon, send daemon `SIGTERM`, wait at most 10 seconds for captured workers to die, then send `SIGKILL` to surviving workers and daemon:
 
-Do not add an OS-level kill, PID polling, allowlist refusal, bump ceiling, or abort cleanup procedure here. [T-1404](delivery/tasks/T-1404-live-session-safety-rails.md) owns enforced abort and cleanup.
+```sh
+DAEMON_PID_FILE="$PI_CODING_AGENT_DIR/oh-my-agent/daemon.pid"
+DAEMON_PID="$(cat -- "$DAEMON_PID_FILE")"
+case "$DAEMON_PID" in (*[!0-9]*|''|0) printf '%s\n' "invalid daemon pid: $DAEMON_PID" >&2; exit 1;; esac
+WORKER_PIDS=""
+FRONTIER="$DAEMON_PID"
+while [ -n "$FRONTIER" ]; do
+  NEXT=""
+  for parent_pid in $FRONTIER; do
+    for pid in $(pgrep -P "$parent_pid" || true); do
+      WORKER_PIDS="$WORKER_PIDS $pid"
+      NEXT="$NEXT $pid"
+    done
+  done
+  FRONTIER="$NEXT"
+done
+kill -TERM "$DAEMON_PID"
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  ALIVE_WORKER_PIDS=""
+  for pid in $WORKER_PIDS; do [ -n "$(ps -p "$pid" -o pid= 2>/dev/null)" ] && ALIVE_WORKER_PIDS="$ALIVE_WORKER_PIDS $pid"; done
+  [ -z "$ALIVE_WORKER_PIDS" ] && break
+  sleep 1
+done
+for pid in $ALIVE_WORKER_PIDS; do kill -KILL "$pid" 2>/dev/null || true; done
+kill -KILL "$DAEMON_PID" 2>/dev/null || true
+for pid in $WORKER_PIDS; do
+  if [ -n "$(ps -p "$pid" -o pid= 2>/dev/null)" ]; then printf '%s\n' "worker still alive: $pid" >&2; exit 1; fi
+done
+```
+
+Record daemon PID, recursively captured worker PIDs, signals sent, bounded-wait result, and any survivor without recording credentials or tokens. OS abort cannot call schedule controls, so record every previously armed schedule as requiring verification before later daemon start. On next start, run `omp-agent --json schedule`, disarm any enabled dogfood schedule, and refuse further scenario work until none remain armed.
 
 ## 8. Triage and closure
 

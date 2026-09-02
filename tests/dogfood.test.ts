@@ -49,8 +49,11 @@ interface Fixture {
 	state: FixtureState;
 	options: DogfoodOptions;
 	fastCommand: string[];
+	stubStatePath: string;
 	failMethod?: string;
 	hangMethod?: string;
+	cleanupFailMethod?: string;
+	failMethodOccurrence?: number;
 }
 
 function rpcSuccess(id: number | string, result: unknown): Response {
@@ -123,6 +126,7 @@ async function fixture(): Promise<Fixture> {
 		dir,
 		state,
 		fastCommand: [],
+		stubStatePath: "",
 		options: undefined as unknown as DogfoodOptions,
 	};
 
@@ -141,10 +145,18 @@ async function fixture(): Promise<Fixture> {
 			// Real network latency is the fixture behavior under test; fake timers
 			// cannot advance time inside independently spawned real CLI processes.
 			await Bun.sleep(2);
-			if (harness.hangMethod === frame.method) await Bun.sleep(1_000);
 			if (harness.failMethod === frame.method) {
-				harness.failMethod = undefined;
-				return rpcError(frame.id, "injected fixture error frame");
+				const occurrence = state.methods.filter(
+					(method) => method === frame.method,
+				).length;
+				if (occurrence === (harness.failMethodOccurrence ?? 1)) {
+					harness.failMethod = undefined;
+					return rpcError(frame.id, "injected fixture error frame");
+				}
+			}
+			if (harness.cleanupFailMethod === frame.method) {
+				harness.cleanupFailMethod = undefined;
+				return rpcError(frame.id, "injected cleanup error frame");
 			}
 			const params = frame.params ?? {};
 			const agentRows = (): AgentState[] =>
@@ -286,18 +298,25 @@ async function fixture(): Promise<Fixture> {
 					}
 					return rpcSuccess(frame.id, { name, state: "stopped" });
 				}
-				case "daemon_stop": {
+				case "fixture_restart":
 					state.restarted = true;
 					state.scheduleEnabled = true;
+					return rpcSuccess(frame.id, { restarted: true });
+				case "fixture_stop":
+					state.stopped = true;
+					return rpcSuccess(frame.id, { stopping: true });
+				case "daemon_stop": {
 					const sleeper = Bun.spawn(
 						[process.execPath, "-e", "setTimeout(() => {}, 1000)"],
 						{ stdout: "ignore", stderr: "ignore" },
 					);
+					state.ownedDaemonPid = sleeper.pid;
 					await writeFile(join(stateDir, "daemon.pid"), String(sleeper.pid));
-					setTimeout(() => {
-						server.stop(true);
+					setTimeout(async () => {
+						await rm(join(stateDir, "daemon.pid"), { force: true });
 						sleeper.kill();
-						void rm(join(stateDir, "daemon.pid"), { force: true });
+						await sleeper.exited;
+						server.stop(false);
 					}, 0);
 					state.stopped = true;
 					return rpcSuccess(frame.id, { stopping: true, pid: sleeper.pid });
@@ -335,41 +354,37 @@ async function fixture(): Promise<Fixture> {
 		stubPath,
 		`const args = process.argv.slice(2);
 if (args.shift() !== "--json") process.exit(2);
-const key = args.join(" ");
-const stateFile = process.env.DOGFOOD_STUB_STATE;
-let state = await Bun.file(stateFile).text().catch(() => "empty");
-const save = async (value) => { state = value; await Bun.write(stateFile, value); };
-const schedule = (enabled) => ({ id: "parent:schedule:0", cron: "0 9 * * *", action: "morning", nextFireAt: 1, enabled });
-let result;
-if (key === "status") result = { protocolVersion: 1 };
-else if (key === "agents") {
-	if (state === "empty") result = { agents: [] };
-	else if (state === "parent") result = { agents: [{ name: "parent", state: "running" }] };
-	else if (state === "hierarchy") result = { agents: [{ name: "parent", state: "running", children: ["child"] }, { name: "child", state: "running", parent: "parent" }] };
-	else if (state === "retained") result = { agents: [{ name: "parent", state: "stopped" }, { name: "child", state: "running" }] };
-	else result = { agents: [{ name: "parent", state: "stopped" }, { name: "child", state: "stopped" }] };
-} else if (key.startsWith("agent create ")) result = {};
-else if (key.startsWith("agent edit ")) result = { rebuildRequired: true };
-else if (key.startsWith("agent show ")) result = { definition: { schedules: [{ cron: "0 9 * * *", prompt: "morning", room: "#reviews" }] } };
-else if (key === "spawn parent") { await save("parent"); result = {}; }
-else if (key === "spawn child --parent parent") { await save("hierarchy"); result = {}; }
-else if (key === "rooms") result = { rooms: [] };
-else if (key.startsWith("rooms read ")) result = { messages: [{ body: "dogfood session fixture-session" }] };
-else if (key.startsWith("rooms post ")) result = {};
-else if (key === "schedule") result = state === "restarted" || state === "enabled" || state === "disabled" ? { schedules: [schedule(state !== "disabled")] } : { schedules: [] };
-else if (key === "schedule parent:schedule:0 on") { await save("enabled"); result = { schedule: schedule(true) }; }
-else if (key === "schedule parent:schedule:0 off") { await save("disabled"); result = { schedule: schedule(false) }; }
-else if (key.startsWith("logs ")) result = { lines: ["Authorization: Bearer fixture-secret"] };
-else if (key.startsWith("inject ") || key.startsWith("bump ")) result = {};
-else if (key === "kill parent --keep-children") { await save("retained"); result = {}; }
-else if (key === "kill child" || key === "kill parent") { await save("stopped"); result = {}; }
-else if (key === "daemon restart") { await save("restarted"); result = {}; }
-else if (key === "daemon stop") result = {};
-else { console.error("unsupported", key); process.exit(4); }
-console.log(JSON.stringify(result));
+const [verb, ...rest] = args;
+let method;
+let params = {};
+if (verb === "status") method = "status";
+else if (verb === "agents") method = "agent_status";
+else if (verb === "agent" && rest[0] === "create") {
+	method = "agent_create";
+	const name = rest[1];
+	params = { name, description: name + " fixture", model: "openai/stub", spawns: [name === "parent" ? "child" : "parent"], body: name + "." };
+} else if (verb === "agent" && rest[0] === "show") { method = "definition_get"; params = { name: rest[1] }; }
+else if (verb === "agent" && rest[0] === "edit") { method = "definition_update"; params = { name: rest[1], changes: { schedules: [{ cron: "0 9 * * *", prompt: "morning", room: "#reviews" }] } }; }
+else if (verb === "spawn") { method = "agent_spawn"; params = { name: rest[0], ...(rest[1] === "--parent" ? { parent: rest[2] } : {}) }; }
+else if (verb === "rooms" && rest.length === 0) method = "rooms_list";
+else if (verb === "rooms" && rest[0] === "read") { method = "chat_read"; params = { room: rest[1] }; }
+else if (verb === "rooms" && rest[0] === "post") { method = "rooms_post"; params = { room: rest[1], body: rest.slice(2).join(" ") }; }
+else if (verb === "schedule" && rest.length === 0) method = "schedules_list";
+else if (verb === "schedule") { method = "schedules_arm"; params = { id: rest[0], enabled: rest[1] === "on" }; }
+else if (verb === "logs") { method = "logs_tail"; params = { name: rest[0], lines: Number(rest[1]) }; }
+else if (verb === "inject") { method = "inject"; params = { name: rest[0], text: rest.slice(1).join(" ") }; }
+else if (verb === "bump") { method = "bump"; params = { account: rest[0], budgetUsd: Number(rest[1]) }; }
+else if (verb === "kill") { method = "kill"; params = { name: rest[0], keep_children: rest[1] === "--keep-children" }; }
+else if (verb === "daemon" && rest[0] === "restart") method = "fixture_restart";
+else if (verb === "daemon" && rest[0] === "stop") method = "fixture_stop";
+else process.exit(4);
+const response = await fetch("http://localhost/rpc", { unix: process.env.DOGFOOD_FIXTURE_SOCKET, method: "POST", headers: { Authorization: "Bearer " + process.env.DOGFOOD_FIXTURE_TOKEN, "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+const payload = await response.json();
+console.log(JSON.stringify(payload.error ? { error: payload.error } : payload.result));
 `,
 	);
 	harness.fastCommand = [process.execPath, stubPath];
+	harness.stubStatePath = stubStatePath;
 	await mkdir(join(dir, ".dogfood"));
 	const mainPath = join(import.meta.dir, "..", "src", "daemon", "main.ts");
 	harness.options = {
@@ -381,6 +396,8 @@ console.log(JSON.stringify(result));
 		editDocument,
 		scheduleIndex: 0,
 		bumpUsd: 1,
+		accountAllowlist: ["stub-account"],
+		maxBumpUsd: 1,
 		room: "#reviews",
 		injectText: "inspect fixture",
 		sessionId: "fixture-session",
@@ -392,6 +409,8 @@ console.log(JSON.stringify(result));
 			OMP_AUTH_BROKER_TOKEN: "",
 			OMA_CONSOLE: "0",
 			DOGFOOD_STUB_STATE: stubStatePath,
+			DOGFOOD_FIXTURE_SOCKET: socketPath,
+			DOGFOOD_FIXTURE_TOKEN: token,
 		},
 		timeoutMs: 5_000,
 		pollIntervalMs: 1,
@@ -467,6 +486,8 @@ describe("dogfood JSON scenario driver", () => {
 			["schedule"],
 			["schedule", "parent:schedule:0", "off"],
 			["schedule"],
+			["agents"],
+			["schedule", "parent:schedule:0", "off"],
 			["daemon", "stop"],
 		];
 
@@ -494,8 +515,109 @@ describe("dogfood JSON scenario driver", () => {
 		expect((await stat(report.logPath)).mode & 0o777).toBe(0o600);
 	}, 20_000);
 
+	test("refuses unsafe account and bump inputs before any CLI verb", async () => {
+		const harness = await fixture();
+
+		harness.options.accountAllowlist = [];
+		let error = await captureError(() => runDogfood(harness.options));
+		expect(error.message).toContain(
+			"DOGFOOD_ACCOUNT_ALLOWLIST must not be empty",
+		);
+		expect(harness.state.methods).toEqual([]);
+
+		harness.options.accountAllowlist = ["approved-account"];
+		error = await captureError(() => runDogfood(harness.options));
+		expect(error.message).toContain(
+			'DOGFOOD_ACCOUNT "stub-account" is not allowlisted',
+		);
+		expect(harness.state.methods).toEqual([]);
+
+		harness.options.accountAllowlist = ["stub-account"];
+		harness.options.bumpUsd = 2;
+		error = await captureError(() => runDogfood(harness.options));
+		expect(error.message).toContain(
+			"DOGFOOD_BUMP_USD 2 exceeds DOGFOOD_MAX_BUMP_USD 1",
+		);
+		expect(harness.state.methods).toEqual([]);
+
+		harness.options.bumpUsd = -0.01;
+		error = await captureError(() => runDogfood(harness.options));
+		expect(error.message).toContain(
+			"DOGFOOD_BUMP_USD must be a finite non-negative number",
+		);
+		expect(harness.state.methods).toEqual([]);
+
+		harness.options.bumpUsd = Number.NaN;
+		error = await captureError(() => runDogfood(harness.options));
+		expect(error.message).toContain(
+			"DOGFOOD_BUMP_USD must be a finite non-negative number",
+		);
+		expect(harness.state.methods).toEqual([]);
+	});
+
+	test("cleans running workers after a reached phase fails", async () => {
+		const harness = await fixture();
+		harness.options.command = harness.fastCommand;
+		harness.failMethod = "rooms_list";
+
+		const error = await captureError(() => runDogfood(harness.options));
+		expect(error.message).toContain(
+			"Step 8: List, read, post, and re-read room failed",
+		);
+		expect(
+			Object.values(harness.state.agents).every(
+				(agent) => agent.state === "stopped",
+			),
+		).toBe(true);
+		expect(harness.state.scheduleEnabled).toBe(false);
+		expect(harness.state.methods.at(-1)).toBe("fixture_stop");
+	}, 5_000);
+
+	test("logs cleanup failures without replacing the primary failure", async () => {
+		const harness = await fixture();
+		harness.options.command = harness.fastCommand;
+		harness.failMethod = "rooms_list";
+		harness.cleanupFailMethod = "kill";
+		const logPath = join(harness.dir, ".dogfood", "cleanup-error.log");
+		harness.options.logPath = logPath;
+
+		const error = await captureError(() => runDogfood(harness.options));
+		expect(error.message).toContain(
+			"Step 8: List, read, post, and re-read room failed",
+		);
+		expect(error.message).not.toContain("injected cleanup error frame");
+		const failureLog = await readFile(logPath, "utf8");
+		expect(failureLog).toContain('"type":"cleanup-failure"');
+		expect(failureLog).toContain("injected cleanup error frame");
+	}, 5_000);
+
+	test("disarms schedules and stops workers when schedule control fails", async () => {
+		const harness = await fixture();
+		harness.options.command = harness.fastCommand;
+		harness.failMethod = "schedules_list";
+		harness.failMethodOccurrence = 3;
+
+		const error = await captureError(() => runDogfood(harness.options));
+		expect(error.message).toContain(
+			"Step 17: Restart daemon and exercise schedule controls failed",
+		);
+		expect(
+			Object.values(harness.state.agents).every(
+				(agent) => agent.state === "stopped",
+			),
+		).toBe(true);
+		expect(harness.state.scheduleEnabled).toBe(false);
+		expect(harness.state.methods.slice(-4)).toEqual([
+			"schedules_list",
+			"agent_status",
+			"schedules_arm",
+			"fixture_stop",
+		]);
+	}, 5_000);
+
 	test("names a daemon error-frame step and preserves its secure log", async () => {
 		const harness = await fixture();
+		harness.options.command = harness.fastCommand;
 		harness.failMethod = "status";
 		const logPath = join(harness.dir, ".dogfood", "error.log");
 		harness.options.logPath = logPath;
@@ -544,7 +666,7 @@ describe("dogfood JSON scenario driver", () => {
 
 		const started = performance.now();
 		const error = await captureError(() => runDogfood(harness.options));
-		expect(performance.now() - started).toBeLessThan(1_500);
+		expect(performance.now() - started).toBeLessThan(3_500);
 		expect(error.message).toContain("timed out after 1000ms");
 		await killObserved;
 		expect(await readFile(killMarker, "utf8")).toBe("killed");
