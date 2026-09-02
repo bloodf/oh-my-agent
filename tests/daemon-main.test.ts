@@ -670,7 +670,7 @@ describe("bootDaemon — composition and the control socket", () => {
 		expect(read.messages[0]?.reactions).toEqual([]);
 	});
 
-	test("missing reaction targets preserve react and unreact semantics", async () => {
+	test("missing reaction targets are rejected by react and unreact", async () => {
 		const { handle } = await boot();
 		const params = { messageId: 999, actor: "reviewer", emoji: "👀" };
 
@@ -680,16 +680,13 @@ describe("bootDaemon — composition and the control socket", () => {
 		expect(missingReact.error.code).toBe(ERROR_CODE.INVALID_PARAMS);
 		expect(missingReact.error.data.field).toBe("messageId");
 
-		const missingUnreact = await call<ChatUnreactResult & { reacted: false }>(
-			handle.socketPath,
-			"chat_unreact",
-			params,
+		// The store's unreact is idempotent by design, so only the handler can
+		// tell an unknown target apart from a reaction that was never added.
+		const missingUnreact = expectFailure(
+			await rpc(handle.socketPath, "chat_unreact", params),
 		);
-		expect(missingUnreact).toEqual({
-			...params,
-			removed: false,
-			reacted: false,
-		});
+		expect(missingUnreact.error.code).toBe(ERROR_CODE.INVALID_PARAMS);
+		expect(missingUnreact.error.data.field).toBe("messageId");
 	});
 
 	test("a peer's wake filter reaches the supervisor through registration", async () => {

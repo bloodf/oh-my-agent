@@ -414,20 +414,29 @@ export async function startControlSocket(
 		return collected.sort((left, right) => left.id - right.id);
 	};
 
-	const hasReaction = async (params: ChatReactionParams): Promise<boolean> => {
+	const findMessage = async (
+		messageId: number,
+	): Promise<StoredMessage | undefined> => {
 		for (const room of context.knownRooms.keys()) {
 			const message = (await context.rooms.listMessages(room, {})).find(
-				(candidate) => candidate.id === params.messageId,
+				(candidate) => candidate.id === messageId,
 			);
-			if (message) {
-				return message.reactions.some(
-					(reaction) =>
-						reaction.actor === params.actor && reaction.emoji === params.emoji,
-				);
-			}
+			if (message) return message;
 		}
-		return false;
+		return undefined;
 	};
+
+	const bears = (
+		message: StoredMessage | undefined,
+		params: ChatReactionParams,
+	): boolean =>
+		message?.reactions.some(
+			(reaction) =>
+				reaction.actor === params.actor && reaction.emoji === params.emoji,
+		) === true;
+
+	const hasReaction = async (params: ChatReactionParams): Promise<boolean> =>
+		bears(await findMessage(params.messageId), params);
 
 	let reactionQueue = Promise.resolve();
 	const serializeReaction = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -574,7 +583,16 @@ export async function startControlSocket(
 			params,
 		): Promise<ChatUnreactResult & { reacted: false }> =>
 			await serializeReaction(async () => {
-				const removed = await hasReaction(params);
+				// The store's unreact is idempotent and never throws, so the
+				// handler owns the existence check that react gets for free.
+				const message = await findMessage(params.messageId);
+				if (!message) {
+					throw new InvalidParamsError(
+						"messageId",
+						`Unknown message: ${params.messageId}`,
+					);
+				}
+				const removed = bears(message, params);
 				await context.rooms.unreact(
 					params.messageId,
 					params.actor,
