@@ -6,13 +6,14 @@
 
 ## Goal
 
-When a released pi-coding-agent fixes the resolution corruption, the node_modules walk in resolveOmpCli is deleted and the dependency floors rise to the fix version — one fix, one removal.
+When a released runtime or a released compat layer removes the re-entrant resolution, the node_modules walk in resolveOmpCli is deleted and the floor that made it removable rises to the fix version — one fix, one removal.
 
 ## Read first
 
 - [The walk](../../../src/worker/lifecycle.ts)
 - [Worker lifecycle suite](../../../tests/worker-lifecycle.test.ts)
-- [Dependency ranges](../../../package.json)
+- [Dependency ranges and the Bun engine floor](../../../package.json)
+- [The repro whose control names the defect](../../../repro/bun-plugin-memo/README.md)
 
 ## Files this task may change
 
@@ -25,22 +26,23 @@ When a released pi-coding-agent fixes the resolution corruption, the node_module
 | Path | Role | Note |
 |---|---|---|
 | [`src/worker/lifecycle.ts`](../../../src/worker/lifecycle.ts) | Edited | The walk collapses back to a direct import.meta.resolve. |
-| [`package.json`](../../../package.json) | Edited | The peer AND dev dependency floors rise to the released fix version. |
-| [`bun.lock`](../../../bun.lock) | Edited | Refreshed against the raised floors. |
+| [`package.json`](../../../package.json) | Edited | Whichever fix shipped sets the floor: engines.bun for the Bun path, or the pi-coding-agent peer AND dev floors for the compat-layer path. |
+| [`bun.lock`](../../../bun.lock) | Edited | Refreshed against the raised floor. |
 
 ## Steps
 
-1. Pick this up WHEN a released pi-coding-agent contains the resolution fix (T-1502's memo-corruption issue closed).
-2. Remove the walk, raise the peer and dev dependency floors to the released fix version, and refresh the lockfile.
-3. Regression coverage comes from the existing worker-lifecycle suite — real spawned workers with pid semantics — run green on the upgraded dependency.
+1. Pick this up WHEN EITHER a released Bun contains the resolver fix (oven-sh/bun#41201, the tracker T-1501's bare control selected), OR a released pi-coding-agent stops its compat hook resolving the specifier it just matched. T-1501's control — a hand-written onResolve hook overflowing with no OMP package on disk and no OMP code in the process — puts the defect in Bun; a compat-layer change does not fix Bun, but it does remove this app's trigger, so either release makes the walk removable.
+2. Remove the walk and raise only the floor that earned it: engines.bun for a Bun fix, the peer and dev pi-coding-agent floors for a compat-layer fix. Refresh the lockfile.
+3. Regression coverage comes from the existing worker-lifecycle suite — real spawned workers with pid semantics — run green on the upgraded runtime or dependency.
 
 ## Acceptance
 
-- [ ] No node_modules walk remains in resolveOmpCli; the worker-lifecycle suite is green on the upgraded dependency.
+- [ ] No node_modules walk remains in resolveOmpCli; the worker-lifecycle suite is green on the upgraded runtime or dependency.
+- [ ] The raised floor names the release that actually removed the re-entrancy: engines.bun for a Bun fix, or the pi-coding-agent floors for a compat-layer fix.
 
 ## Out of scope
 
-- Remaining blocker: wait for a released pi-coding-agent version containing the resolver fix tracked by T-1502; an upstream filing alone does not unblock removal.
+- Remaining blocker: wait for a released Bun containing the resolver fix (oven-sh/bun#41201), or a released pi-coding-agent whose compat hook no longer self-resolves. An upstream filing alone does not unblock removal, and a merged-but-unreleased fix does not either.
 
 ## Depends on
 

@@ -41,7 +41,7 @@ One page an operator reads before flipping remote mode: the threat model, the ch
 
 ## Out of scope
 
-- Remaining blocker: T-1202 still needs dated end-to-end evidence against each documented real proxy; T-1206 is Done and no longer blocks this runbook.
+- Remaining blocker: T-1202 needs a dated end-to-end run against each of its three usable HTTPS recipes, not just one; T-1206 is Done and no longer blocks this runbook. This task's own acceptance already passes.
 
 ## Depends on
 

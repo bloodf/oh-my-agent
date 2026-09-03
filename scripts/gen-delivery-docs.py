@@ -3590,7 +3590,7 @@ TASKS += [
             "Remote mode with the console enabled and no external origin configured fails before the pidfile or any listener opens; a headless remote daemon (OMA_CONSOLE=0) boots without one, and loopback mode is unaffected.",
         ],
         depends_on=["T-1201"],
-        out_of_scope=["The daemon terminating TLS (ADR-012 rejects it) and the login flow UX (T-1203). Remaining blocker: each documented HTTPS recipe still needs dated end-to-end evidence against a real proxy."],
+        out_of_scope=["The daemon terminating TLS (ADR-012 rejects it) and the login flow UX (T-1203). Remaining blocker: acceptance is per-recipe, so all three usable HTTPS recipes — Caddy, tailscale serve, and SSH tunnel paired with loopback Caddy — each need their own dated end-to-end run against a real proxy. Verifying one converts one row and does not unblock this task or T-1205; the tailnet and second-host recipes need infrastructure a single workstation does not have."],
     ),
     Task(
         id="T-1203", slug="remote-console-auth", title="Operator-token flow in the console client",
@@ -3700,7 +3700,7 @@ TASKS += [
             "The threat model exists in exactly one file; README and ARCHITECTURE carry a link plus at most two sentences.",
         ],
         depends_on=["T-1202", "T-1206"],
-        out_of_scope=["Remaining blocker: T-1202 still needs dated end-to-end evidence against each documented real proxy; T-1206 is Done and no longer blocks this runbook."],
+        out_of_scope=["Remaining blocker: T-1202 needs a dated end-to-end run against each of its three usable HTTPS recipes, not just one; T-1206 is Done and no longer blocks this runbook. This task's own acceptance already passes."],
     ),
     Task(
         id="T-1206", slug="authenticated-connection-audit", title="Authenticated-connection audit surface",
@@ -4196,11 +4196,12 @@ TASKS += [
     Task(
         id="T-1503", slug="drop-resolve-walk", title="Remove the node_modules walk once upstream ships",
         epic="EP-15", sprint="SP-16", status="Blocked",
-        goal="When a released pi-coding-agent fixes the resolution corruption, the node_modules walk in resolveOmpCli is deleted and the dependency floors rise to the fix version — one fix, one removal.",
+        goal="When a released runtime or a released compat layer removes the re-entrant resolution, the node_modules walk in resolveOmpCli is deleted and the floor that made it removable rises to the fix version — one fix, one removal.",
         read_first=[
             ("The walk", "src/worker/lifecycle.ts"),
             ("Worker lifecycle suite", "tests/worker-lifecycle.test.ts"),
-            ("Dependency ranges", "package.json"),
+            ("Dependency ranges and the Bun engine floor", "package.json"),
+            ("The repro whose control names the defect", "repro/bun-plugin-memo/README.md"),
         ],
         files=[
             "src/worker/lifecycle.ts",
@@ -4209,19 +4210,20 @@ TASKS += [
         ],
         assets=[
             ("src/worker/lifecycle.ts", "Edited", "The walk collapses back to a direct import.meta.resolve."),
-            ("package.json", "Edited", "The peer AND dev dependency floors rise to the released fix version."),
-            ("bun.lock", "Edited", "Refreshed against the raised floors."),
+            ("package.json", "Edited", "Whichever fix shipped sets the floor: engines.bun for the Bun path, or the pi-coding-agent peer AND dev floors for the compat-layer path."),
+            ("bun.lock", "Edited", "Refreshed against the raised floor."),
         ],
         steps=[
-            "Pick this up WHEN a released pi-coding-agent contains the resolution fix (T-1502's memo-corruption issue closed).",
-            "Remove the walk, raise the peer and dev dependency floors to the released fix version, and refresh the lockfile.",
-            "Regression coverage comes from the existing worker-lifecycle suite — real spawned workers with pid semantics — run green on the upgraded dependency.",
+            "Pick this up WHEN EITHER a released Bun contains the resolver fix (oven-sh/bun#41201, the tracker T-1501's bare control selected), OR a released pi-coding-agent stops its compat hook resolving the specifier it just matched. T-1501's control — a hand-written onResolve hook overflowing with no OMP package on disk and no OMP code in the process — puts the defect in Bun; a compat-layer change does not fix Bun, but it does remove this app's trigger, so either release makes the walk removable.",
+            "Remove the walk and raise only the floor that earned it: engines.bun for a Bun fix, the peer and dev pi-coding-agent floors for a compat-layer fix. Refresh the lockfile.",
+            "Regression coverage comes from the existing worker-lifecycle suite — real spawned workers with pid semantics — run green on the upgraded runtime or dependency.",
         ],
         acceptance=[
-            "No node_modules walk remains in resolveOmpCli; the worker-lifecycle suite is green on the upgraded dependency.",
+            "No node_modules walk remains in resolveOmpCli; the worker-lifecycle suite is green on the upgraded runtime or dependency.",
+            "The raised floor names the release that actually removed the re-entrancy: engines.bun for a Bun fix, or the pi-coding-agent floors for a compat-layer fix.",
         ],
         depends_on=["T-1502"],
-        out_of_scope=["Remaining blocker: wait for a released pi-coding-agent version containing the resolver fix tracked by T-1502; an upstream filing alone does not unblock removal."],
+        out_of_scope=["Remaining blocker: wait for a released Bun containing the resolver fix (oven-sh/bun#41201), or a released pi-coding-agent whose compat hook no longer self-resolves. An upstream filing alone does not unblock removal, and a merged-but-unreleased fix does not either."],
     ),
     Task(
         id="T-1504", slug="drop-rpc-pid-patch", title="Remove the RpcClient.pid patch once upstream ships",
