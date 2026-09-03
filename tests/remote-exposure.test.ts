@@ -2,10 +2,11 @@
  * T-1201 remote-mode trust boundaries plus T-1202 proxy URL correctness.
  *
  * The acceptance groups prove no listener ever answers a routable address;
- * remote mode demands the operator token on both surfaces; secret files are
- * verified before anything opens; forwarded identity requires the proxy
- * secret; an explicit external HTTPS origin is announced without a long-lived
- * token; and the loopback token URL remains unchanged.
+ * remote console API and control requests require operator authentication,
+ * while static files and WebSocket upgrades use short-lived one-time tickets;
+ * secret files are verified before anything opens; forwarded identity requires
+ * the proxy secret; an explicit external HTTPS origin is announced without a
+ * long-lived token; and the loopback token URL remains unchanged.
  *
  * The control socket is asserted on its JSON-RPC error code rather than an
  * HTTP status: it answers `Response.json(unauthorized(0))` — HTTP 200 with a
@@ -767,6 +768,31 @@ describe("remote mode control-socket hierarchy enforced", () => {
 		});
 	});
 
+	test("remote worker spawn parent must match its authenticated identity", async () => {
+		const { handle, worker } = await bootWithWorker({
+			OMA_REMOTE: "1",
+			OMA_CONSOLE: "0",
+		});
+		for (const params of [
+			{ name: "reviewer" },
+			{ name: "reviewer", parent: "someone-else" },
+		]) {
+			expect(
+				await controlCall(handle.socketPath, "agent_spawn", params, worker),
+			).toMatchObject({ error: { code: ERROR_CODE.FORBIDDEN } });
+		}
+		// Self-parentage passes the identity gate, then ordinary hierarchy
+		// validation rejects the cycle. A blanket refusal would return forbidden.
+		expect(
+			await controlCall(
+				handle.socketPath,
+				"agent_spawn",
+				{ name: "reviewer", parent: "reviewer" },
+				worker,
+			),
+		).toMatchObject({ error: { code: ERROR_CODE.INVALID_PARAMS } });
+	});
+
 	test("the loopback default differs only in that one refusal", async () => {
 		// The control for the remote-mode cases above, asserted on the same
 		// methods with the same bearers. The pair is what isolates the flag's
@@ -868,6 +894,127 @@ async function closeSocket(socket: WebSocket): Promise<void> {
 		socket.close();
 	});
 }
+
+describe("remote console ticket authentication", () => {
+	test("enforces token minting, path binding, 30-second lifetime, and one-time use", async () => {
+		let now = 1_000;
+		const clock = spyOn(Date, "now").mockImplementation(() => now);
+		try {
+			const booted = await bootRemoteConsole();
+			const operatorToken = (
+				await readFile(join(booted.stateDir, "console-token"), "utf8")
+			).trim();
+			const proxySecret = (
+				await readFile(join(booted.stateDir, "console-proxy-secret"), "utf8")
+			).trim();
+			const forwarded = {
+				"X-OMA-Proxy-Secret": proxySecret,
+				"X-Forwarded-Proto": "https",
+				"X-Forwarded-Host": "console.example.com",
+			};
+			const mint = async (endpoint: "/api/session" | "/api/ws-ticket") => {
+				const response = await fetch(
+					anonymous(booted.handle, endpoint, booted.localUrl),
+					{
+						method: "POST",
+						headers: {
+							...forwarded,
+							Authorization: `Bearer ${operatorToken}`,
+						},
+					},
+				);
+				expect(response.status).toBe(200);
+				const body: unknown = await response.json();
+				if (
+					typeof body !== "object" ||
+					body === null ||
+					!("ticket" in body) ||
+					typeof body.ticket !== "string"
+				) {
+					throw new Error("Ticket response carried no ticket");
+				}
+				return body.ticket;
+			};
+			const use = (path: string, ticket: string) => {
+				const url = anonymous(booted.handle, path, booted.localUrl);
+				url.searchParams.set("ticket", ticket);
+				return fetch(url, { headers: forwarded });
+			};
+
+			expect(
+				(
+					await fetch(
+						anonymous(booted.handle, "/api/session", booted.localUrl),
+						{ method: "POST", headers: forwarded },
+					)
+				).status,
+			).toBe(401);
+
+			const wrongPath = await mint("/api/session");
+			expect((await use("/style.css", wrongPath)).status).toBe(401);
+			expect((await use("/", wrongPath)).status).toBe(401);
+
+			const boundary = await mint("/api/session");
+			now += 30_000;
+			const shell = await use("/", boundary);
+			expect(shell.status).toBe(200);
+			expect((await use("/", boundary)).status).toBe(401);
+			const html = await shell.text();
+			const style = /href="(\/style\.css\?ticket=[^"]+)"/.exec(html)?.[1];
+			const script = /src="(\/app\.js\?ticket=[^"]+)"/.exec(html)?.[1];
+			if (style === undefined || script === undefined) {
+				throw new Error("Authenticated shell carried no asset tickets");
+			}
+			expect(
+				(
+					await fetch(new URL(style, booted.localUrl), {
+						headers: forwarded,
+					})
+				).status,
+			).toBe(200);
+			expect(
+				(
+					await fetch(new URL(style, booted.localUrl), {
+						headers: forwarded,
+					})
+				).status,
+			).toBe(401);
+			expect(
+				(
+					await fetch(new URL(script, booted.localUrl), {
+						headers: forwarded,
+					})
+				).status,
+			).toBe(200);
+
+			const expired = await mint("/api/session");
+			now += 30_001;
+			expect((await use("/", expired)).status).toBe(401);
+
+			const wrongPathWsTicket = await mint("/api/ws-ticket");
+			expect((await use("/", wrongPathWsTicket)).status).toBe(401);
+			expect((await use("/api/events", wrongPathWsTicket)).status).toBe(401);
+
+			const wsTicket = await mint("/api/ws-ticket");
+			const events = new URL("/api/events", booted.localUrl);
+			events.protocol = "ws:";
+			events.searchParams.set("ticket", wsTicket);
+			const socket = new WebSocket(events.href, { headers: forwarded });
+			await new Promise<void>((resolve, reject) => {
+				socket.addEventListener("open", () => resolve(), { once: true });
+				socket.addEventListener(
+					"error",
+					() => reject(new Error("socket error")),
+					{ once: true },
+				);
+			});
+			await closeSocket(socket);
+			expect((await use("/api/events", wsTicket)).status).toBe(401);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+});
 
 describe("authenticated connection audit", () => {
 	test("loopback audit changes no persisted listener state", async () => {
