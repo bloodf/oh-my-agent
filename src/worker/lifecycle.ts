@@ -119,6 +119,7 @@ export function classifyAgentSpawn(payload: {
  * `file:` prefixes, and the spawned child dies with `Module not found`. A
  * filesystem walk is plugin-proof; `existsSync` turns a bad layout into a named
  * error here rather than an opaque child-exit downstream.
+ * Upstream resolver issue: https://github.com/oven-sh/bun/issues/41201
  *
  * Exported so tests spawn through the same construction production uses; a
  * resolver duplicated in a test can pass while this one drifts.
@@ -397,6 +398,7 @@ export async function startWorker(
 		get sessionId() {
 			return sessionId;
 		},
+		// Upstream accessor request: https://github.com/can1357/oh-my-pi/issues/10597
 		get pid() {
 			return client?.pid;
 		},
