@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-14](../epics/EP-14-dogfooding.md) | [SP-15](../sprints/SP-15-live-accounts.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-14](../epics/EP-14-dogfooding.md) | [SP-15](../sprints/SP-15-live-accounts.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -31,8 +31,8 @@ The in-process worker backend built in T-1006 becomes operator-reachable: an exp
 | [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | The spawn path honors the CLI-provided selector; the default stays RPC subprocess. |
 | [`tests/daemon-cli.test.ts`](../../../tests/daemon-cli.test.ts) | Edited | Selector round-trip through the CLI: explicit rpc, explicit in-process, and the unset default. |
 | [`docs/dogfooding.md`](../../../docs/dogfooding.md) | Edited | Created by T-1401; the 'unexposed today' note becomes the selector command, and the scenario's backend coverage becomes real. |
-| `scripts/dogfood.ts` (to be created) | Edited | Created by T-1402; the driver gains the in-process leg via the selector. |
-| `tests/dogfood.test.ts` (to be created) | Edited | Created by T-1402; the fixture suite covers the in-process leg. |
+| [`scripts/dogfood.ts`](../../../scripts/dogfood.ts) | Edited | Created by T-1402; the driver gains the in-process leg via the selector. |
+| [`tests/dogfood.test.ts`](../../../tests/dogfood.test.ts) | Edited | Created by T-1402; the fixture suite covers the in-process leg. |
 
 ## Steps
 
@@ -43,9 +43,17 @@ The in-process worker backend built in T-1006 becomes operator-reachable: an exp
 
 ## Acceptance
 
-- [ ] An operator selects the in-process backend through the shipped CLI alone; the default remains RPC subprocess.
-- [ ] The CLI suite proves the selector round-trip and the refusal of unknown values.
-- [ ] The runbook and driver cover both backends with no step described as skipped-but-successful.
+- [x] An operator selects the in-process backend through the shipped CLI alone; the default remains RPC subprocess.
+- [x] The CLI suite proves the selector round-trip and the refusal of unknown values.
+- [x] The runbook and driver cover both backends with no step described as skipped-but-successful.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commit 1530d34 exposes the explicit worker-backend selector while retaining RPC as the default | [`src/daemon/cli.ts`](../../../src/daemon/cli.ts) |
+| Commit 1530d34 verifies explicit rpc, explicit in-process, unset-default, and unknown-backend refusal | [`tests/daemon-cli.test.ts`](../../../tests/daemon-cli.test.ts) |
+| Commit 1530d34 adds both backend legs to the dogfood driver without treating skipped coverage as success | [`scripts/dogfood.ts`](../../../scripts/dogfood.ts) |
 
 ## Out of scope
 

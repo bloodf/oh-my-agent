@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-14](../epics/EP-14-dogfooding.md) | [SP-15](../sprints/SP-15-live-accounts.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-14](../epics/EP-14-dogfooding.md) | [SP-15](../sprints/SP-15-live-accounts.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -23,8 +23,8 @@ Every JSON-capable management verb in the runbook's scenario runs as one command
 
 | Path | Role | Note |
 |---|---|---|
-| `scripts/dogfood.ts` (to be created) | New | The scenario driver: verbs in sequence, JSON results asserted, per-step timeouts, the poll primitive, resource sampling, log capture with token redaction. |
-| `tests/dogfood.test.ts` (to be created) | New | The driver against a fixture daemon with stub accounts and injected latency — the harness is testable without live credentials. |
+| [`scripts/dogfood.ts`](../../../scripts/dogfood.ts) | New | The scenario driver: verbs in sequence, JSON results asserted, per-step timeouts, the poll primitive, resource sampling, log capture with token redaction. |
+| [`tests/dogfood.test.ts`](../../../tests/dogfood.test.ts) | New | The driver against a fixture daemon with stub accounts and injected latency — the harness is testable without live credentials. |
 | [`.gitignore`](../../../.gitignore) | Edited | The .dogfood/ session-log directory. |
 
 ## Steps
@@ -37,11 +37,18 @@ Every JSON-capable management verb in the runbook's scenario runs as one command
 
 ## Acceptance
 
-- [ ] One command runs every JSON-capable management verb of the scenario and writes a session log; any failed check exits non-zero with the step named.
-- [ ] The driver claims no coverage it cannot drive: daemon start, the console URL, the TUI, and the in-process backend selector (T-1405) are outside its mapping and never reported as passed.
-- [ ] The suite proves the driver against a fixture daemon with no live credentials.
-- [ ] Per-step timeouts and the poll-until-state primitive are proven against the latency-injecting fixture; no step can hang forever.
-- [ ] The session log lands in .dogfood/ with mode 0600 and the suite asserts it contains no token material.
+- [x] One command runs every JSON-capable management verb of the scenario and writes a session log; any failed check exits non-zero with the step named.
+- [x] The driver claims no coverage it cannot drive: daemon start, the console URL, the TUI, and the in-process backend selector (T-1405) are outside its mapping and never reported as passed.
+- [x] The suite proves the driver against a fixture daemon with no live credentials.
+- [x] Per-step timeouts and the poll-until-state primitive are proven against the latency-injecting fixture; no step can hang forever.
+- [x] The session log lands in .dogfood/ with mode 0600 and the suite asserts it contains no token material.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commit d5faa93 drives the bounded JSON-capable dogfood scenario and writes redacted mode-0600 logs | [`scripts/dogfood.ts`](../../../scripts/dogfood.ts) |
+| Commit d5faa93 verifies timeouts, polling, injected failures, resource samples, and token-free logs against the fixture daemon | [`tests/dogfood.test.ts`](../../../tests/dogfood.test.ts) |
 
 ## Out of scope
 

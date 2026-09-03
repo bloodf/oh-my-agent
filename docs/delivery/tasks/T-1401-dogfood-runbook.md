@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-14](../epics/EP-14-dogfooding.md) | [SP-15](../sprints/SP-15-live-accounts.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-14](../epics/EP-14-dogfooding.md) | [SP-15](../sprints/SP-15-live-accounts.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -32,7 +32,13 @@ A written runbook takes the operator from zero to a live dogfood session: accoun
 
 ## Acceptance
 
-- [ ] T-1402's driver implements every JSON-capable runbook step 1:1; daemon start, the console URL, the TUI checklist, and the in-process backend note are marked manual (or deferred to T-1405) with a check to record — no step is described as automated or covered when it is not.
+- [x] T-1402's driver implements every JSON-capable runbook step 1:1; daemon start, the console URL, the TUI checklist, and the in-process backend note are marked manual (or deferred to T-1405) with a check to record — no step is described as automated or covered when it is not.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commit a42075f documents dogfood preconditions, JSON-capable scenario steps, manual checks, capture, and triage | [`docs/dogfooding.md`](../../../docs/dogfooding.md) |
 
 ## Out of scope
 

@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-14](../epics/EP-14-dogfooding.md) | [SP-15](../sprints/SP-15-live-accounts.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-14](../epics/EP-14-dogfooding.md) | [SP-15](../sprints/SP-15-live-accounts.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -23,9 +23,9 @@ The harness can never run away with real accounts: a documented abort procedure,
 
 | Path | Role | Note |
 |---|---|---|
-| `scripts/dogfood.ts` (to be created) | Edited | Created by T-1402; gains the allowlist/ceiling refusals and the cleanup phase that runs in a finally. |
+| [`scripts/dogfood.ts`](../../../scripts/dogfood.ts) | Edited | Created by T-1402; gains the allowlist/ceiling refusals and the cleanup phase that runs in a finally. |
 | [`docs/dogfooding.md`](../../../docs/dogfooding.md) | Edited | Created by T-1401; gains the abort procedure with the exact commands. |
-| `tests/dogfood.test.ts` (to be created) | Edited | Created by T-1402; asserts the refusals and the no-survivors abort against the fixture daemon. |
+| [`tests/dogfood.test.ts`](../../../tests/dogfood.test.ts) | Edited | Created by T-1402; asserts the refusals and the no-survivors abort against the fixture daemon. |
 
 ## Steps
 
@@ -35,9 +35,17 @@ The harness can never run away with real accounts: a documented abort procedure,
 
 ## Acceptance
 
-- [ ] The harness refuses an account outside the allowlist or a bump above the ceiling.
-- [ ] An abort during any phase leaves no running worker and no armed schedule, suite-proven against the fixture daemon.
-- [ ] The runbook's abort section names the exact commands.
+- [x] The harness refuses an account outside the allowlist or a bump above the ceiling.
+- [x] An abort during any phase leaves no running worker and no armed schedule, suite-proven against the fixture daemon.
+- [x] The runbook's abort section names the exact commands.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Account and bump ceilings are enforced before live verbs, with unconditional cleanup | [`scripts/dogfood.ts`](../../../scripts/dogfood.ts) |
+| Refusal and cleanup behavior covers restart and schedule-control failures | [`tests/dogfood.test.ts`](../../../tests/dogfood.test.ts) |
+| Required allowlist, ceiling, abort, and cleanup commands are documented | [`docs/dogfooding.md`](../../../docs/dogfooding.md) |
 
 ## Out of scope
 

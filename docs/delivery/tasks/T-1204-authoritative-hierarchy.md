@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-12](../epics/EP-12-remote-exposure.md) | [SP-13](../sprints/SP-13-beyond-loopback.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-12](../epics/EP-12-remote-exposure.md) | [SP-13](../sprints/SP-13-beyond-loopback.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -17,6 +17,7 @@ In remote mode, parentage stops being cooperative metadata: kill, inject, and sp
 ## Files this task may change
 
 - `src/daemon/socket.ts`
+- `src/daemon/main.ts`
 - `tests/socket-identity.test.ts`
 - `tests/remote-exposure.test.ts`
 
@@ -24,9 +25,10 @@ In remote mode, parentage stops being cooperative metadata: kill, inject, and sp
 
 | Path | Role | Note |
 |---|---|---|
+| [`src/daemon/main.ts`](../../../src/daemon/main.ts) | Edited | Boot logs the active trust model once. |
 | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Edited | Remote mode flips the enforcement switch T-1004 built; loopback keeps cooperative behavior. |
 | [`tests/socket-identity.test.ts`](../../../tests/socket-identity.test.ts) | Edited | The enforcement assertions run in remote mode. |
-| [`tests/remote-exposure.test.ts`](../../../tests/remote-exposure.test.ts) | Edited | Created by T-1201; the flip is on in remote mode and off on loopback — both asserted. |
+| [`tests/remote-exposure.test.ts`](../../../tests/remote-exposure.test.ts) | Edited | Created by T-1201; real daemon boots assert the active trust-model log in both remote and loopback modes. |
 
 ## Steps
 
@@ -36,9 +38,17 @@ In remote mode, parentage stops being cooperative metadata: kill, inject, and sp
 
 ## Acceptance
 
-- [ ] Remote mode: every privileged verb refuses a foreign-identity caller, suite-proven over a remote-mode connection.
-- [ ] Loopback: cooperative behavior and the existing suites are unchanged.
-- [ ] The boot log names the active trust model.
+- [x] Remote mode: every privileged verb refuses a foreign-identity caller, suite-proven over a remote-mode connection.
+- [x] Loopback: cooperative behavior and the existing suites are unchanged.
+- [x] The boot log names the active trust model.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commit 3a7bcb2 makes remote parentage authoritative while preserving cooperative loopback behavior | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) |
+| Commit 3a7bcb2 logs the active trust model at boot | [`src/daemon/main.ts`](../../../src/daemon/main.ts) |
+| Commit 3a7bcb2 proves remote identity enforcement and loopback behavior | [`tests/socket-identity.test.ts`](../../../tests/socket-identity.test.ts) |
 
 ## Out of scope
 

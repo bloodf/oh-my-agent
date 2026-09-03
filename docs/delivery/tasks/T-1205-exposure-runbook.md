@@ -24,7 +24,7 @@ One page an operator reads before flipping remote mode: the threat model, the ch
 
 | Path | Role | Note |
 |---|---|---|
-| `docs/remote-exposure.md` (to be created) | Edited | Created by T-1202; the threat-model and checklist sections land here, and T-1202's recipes reference them. |
+| [`docs/remote-exposure.md`](../../../docs/remote-exposure.md) | Edited | Created by T-1202; the threat-model and checklist sections land here, and T-1202's recipes reference them. |
 | [`README.md`](../../../README.md) | Edited | A remote-access section pointing at the runbook, not duplicating it. |
 | [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) | Edited | The trust-model section names remote mode and its preconditions. |
 
@@ -41,7 +41,7 @@ One page an operator reads before flipping remote mode: the threat model, the ch
 
 ## Out of scope
 
-- Nothing deferred.
+- Remaining blocker: T-1202 still needs dated end-to-end evidence against each documented real proxy; T-1206 is Done and no longer blocks this runbook.
 
 ## Depends on
 

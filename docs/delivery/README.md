@@ -11,7 +11,7 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**75 of 97 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
+**89 of 97 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
 Every runtime subsystem is built and under test: workers, isolation, credentials, rooms, scheduling, and quota handling. Two things keep that from meaning finished.
 
@@ -56,11 +56,11 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-08](epics/EP-08-agent-hierarchy.md) | Agent hierarchy and authoring | Done | 4 |
 | [EP-09](epics/EP-09-tui-management.md) | Full TUI management surface | Done | 3 |
 | [EP-10](epics/EP-10-production-wiring.md) | Production wiring: serving, usage, and deferred hardening | Done | 6 |
-| [EP-11](epics/EP-11-operator-polish.md) | Operator polish: AAA console and the CLI surface | Ready | 5 |
-| [EP-12](epics/EP-12-remote-exposure.md) | Beyond loopback: remote exposure with a real trust model | Ready | 6 |
+| [EP-11](epics/EP-11-operator-polish.md) | Operator polish: AAA console and the CLI surface | Done | 5 |
+| [EP-12](epics/EP-12-remote-exposure.md) | Beyond loopback: remote exposure with a real trust model | Blocked | 6 |
 | [EP-13](epics/EP-13-distribution.md) | Distribution: packable artifact, versioning, and release CI | Ready | 6 |
-| [EP-14](epics/EP-14-dogfooding.md) | Live-account hardening | Ready | 5 |
-| [EP-15](epics/EP-15-upstream-filings.md) | Upstream pi-coding-agent hygiene | Ready | 4 |
+| [EP-14](epics/EP-14-dogfooding.md) | Live-account hardening | Blocked | 5 |
+| [EP-15](epics/EP-15-upstream-filings.md) | Upstream pi-coding-agent hygiene | Blocked | 4 |
 | [EP-16](epics/EP-16-fidelity-and-hardening.md) | Surface fidelity and protocol hardening | Done | 15 |
 
 ## Sprints
@@ -78,11 +78,11 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [SP-09](sprints/SP-09-agent-hierarchy.md) | Agent hierarchy | Done | Persistent child peers under a parent: spawn-time parentage, cascades, and the authoring protocol and skills behind them. |
 | [SP-10](sprints/SP-10-tui-management.md) | TUI management | Done | The full-screen manager: browse the tree, edit definitions and models, steer agents without leaving the TUI. |
 | [SP-11](sprints/SP-11-production-wiring.md) | Production wiring | Done | The console served for real, budgets fed by real usage, and the hardening deferred to a named trigger. |
-| [SP-12](sprints/SP-12-operator-polish.md) | Operator polish | Ready | AAA visuals and accessibility for the console, and a CLI that needs no TUI at all. |
-| [SP-13](sprints/SP-13-beyond-loopback.md) | Beyond loopback | Ready | Remote exposure of the console and control socket under one declared trust model: proxy TLS, operator token, enforced hierarchy. |
+| [SP-12](sprints/SP-12-operator-polish.md) | Operator polish | Done | AAA visuals and accessibility for the console, and a CLI that needs no TUI at all. |
+| [SP-13](sprints/SP-13-beyond-loopback.md) | Beyond loopback | Blocked | Remote exposure of the console and control socket under one declared trust model: proxy TLS, operator token, enforced hierarchy. |
 | [SP-14](sprints/SP-14-release-pipeline.md) | Release pipeline | Ready | A packable npm artifact with a version story and a tag-driven release workflow. |
-| [SP-15](sprints/SP-15-live-accounts.md) | Live accounts | Ready | Dogfooding against real accounts, with findings landing back in the tree as tasks. |
-| [SP-16](sprints/SP-16-upstream-hygiene.md) | Upstream hygiene | Ready | Two pi-coding-agent issues filed with minimal repros, and the workarounds they replace made removable. |
+| [SP-15](sprints/SP-15-live-accounts.md) | Live accounts | Blocked | Dogfooding against real accounts, with findings landing back in the tree as tasks. |
+| [SP-16](sprints/SP-16-upstream-hygiene.md) | Upstream hygiene | Blocked | Two pi-coding-agent issues filed with minimal repros, and the workarounds they replace made removable. |
 | [SP-17](sprints/SP-17-fidelity-and-hardening.md) | Fidelity and hardening | Done | Close what the two-model review found: threads, reactions, attribution, typed events, and the acceptance bullets no test proved. |
 
 ## Decisions

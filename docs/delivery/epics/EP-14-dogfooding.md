@@ -1,6 +1,6 @@
 # EP-14 — Live-account hardening
 
-**Status:** Ready
+**Status:** Blocked
 
 *Derived from the tasks below.*
 
@@ -32,8 +32,8 @@ Eight hundred tests prove the machinery; they say nothing about a live account's
 
 | Task | Title | Status |
 |---|---|---|
-| [T-1401](../tasks/T-1401-dogfood-runbook.md) | Dogfooding runbook | Ready |
-| [T-1402](../tasks/T-1402-dogfood-harness.md) | Scripted dogfood scenario driver | Blocked |
+| [T-1401](../tasks/T-1401-dogfood-runbook.md) | Dogfooding runbook | Done |
+| [T-1402](../tasks/T-1402-dogfood-harness.md) | Scripted dogfood scenario driver | Done |
 | [T-1403](../tasks/T-1403-first-live-session.md) | First live session and triage | Blocked |
-| [T-1404](../tasks/T-1404-live-session-safety-rails.md) | Live-session safety rails | Blocked |
-| [T-1405](../tasks/T-1405-daemon-backend-selector.md) | Explicit worker-backend selector on the daemon CLI | Blocked |
+| [T-1404](../tasks/T-1404-live-session-safety-rails.md) | Live-session safety rails | Done |
+| [T-1405](../tasks/T-1405-daemon-backend-selector.md) | Explicit worker-backend selector on the daemon CLI | Done |

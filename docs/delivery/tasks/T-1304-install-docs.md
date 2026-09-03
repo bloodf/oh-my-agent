@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -31,7 +31,14 @@ The README's install path installs the released package into OMP and reaches a r
 
 ## Acceptance
 
-- [ ] The quickstart's commands are executed against the packed artifact by T-1306's consumer smoke test.
+- [x] The quickstart's commands are executed against the packed artifact by T-1306's consumer smoke test.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commit 53a07b0 documents released-package installation and a five-command daemon quickstart | `README.md §Quick start` |
+| Commit 53a07b0 exercises the documented released-install commands against the packed artifact | [`tests/consumer-install.test.ts`](../../../tests/consumer-install.test.ts) |
 
 ## Out of scope
 

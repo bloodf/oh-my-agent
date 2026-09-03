@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -24,7 +24,7 @@ Prove the packed artifact works for a real consumer: npm pack, install the tarba
 
 | Path | Role | Note |
 |---|---|---|
-| `tests/consumer-install.test.ts` (to be created) | New | Packs, installs into a temp project with fresh peer resolution, drives the installed shim, boots the daemon, records the pid contract state. |
+| [`tests/consumer-install.test.ts`](../../../tests/consumer-install.test.ts) | New | Packs, installs into a temp project with fresh peer resolution, drives the installed shim, boots the daemon, records the pid contract state. |
 | [`package.json`](../../../package.json) | Edited | A script entry wrapping the smoke test; the bin mapping itself is unchanged. |
 | [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) | Edited | Runs the consumer-install smoke test on changes to package.json, patches/, or src/. |
 
@@ -37,8 +37,15 @@ Prove the packed artifact works for a real consumer: npm pack, install the tarba
 
 ## Acceptance
 
-- [ ] The smoke test invokes the installed shim, asserts exit code and daemon boot, and records the pid contract state.
-- [ ] CI runs it on every change to package.json, patches/, or src/.
+- [x] The smoke test invokes the installed shim, asserts exit code and daemon boot, and records the pid contract state.
+- [x] CI runs it on every change to package.json, patches/, or src/.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commit 6d40f7d installs the packed artifact with npm and Bun, invokes its installed shim, boots the daemon, and asserts the pid contract | [`tests/consumer-install.test.ts`](../../../tests/consumer-install.test.ts) |
+| Commit 6d40f7d exposes the consumer-install smoke command used by release verification | `package.json §scripts` |
 
 ## Out of scope
 

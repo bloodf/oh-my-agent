@@ -2,11 +2,11 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-12](../epics/EP-12-remote-exposure.md) | [SP-13](../sprints/SP-13-beyond-loopback.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-12](../epics/EP-12-remote-exposure.md) | [SP-13](../sprints/SP-13-beyond-loopback.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
-One explicit remote-mode switch exists and governs auth and enforcement only; any non-loopback bind is refused unconditionally with the reason on stderr, and the loopback default is byte-identical to today.
+One explicit remote-mode switch governs authentication and enforcement only: remote console requests and operator-only control-socket methods require the operator token; scoped worker bearers remain valid only for workerMethods and bind worker identity for T-1204; missing, unregistered, and wrong-authority bearers are refused; any non-loopback bind is refused unconditionally with the reason on stderr; and loopback behavior is unchanged.
 
 ## Read first
 
@@ -35,18 +35,29 @@ One explicit remote-mode switch exists and governs auth and enforcement only; an
 
 1. Add the surface: one flag or config key, parsed at boot, off by default; the flag governs authentication and enforcement only. Any non-loopback bind exits before any listener opens, naming the refused address on stderr — flag or no flag.
 2. Enumerate every listener at boot — console API, control socket, credential gateway — with per-listener behavior written down: console and control socket take the remote-mode auth layer; the credential gateway is loopback-always and never joins remote mode.
-3. Thread remote mode into the console API and the control socket: in remote mode every request and connection presents the operator token (T-1004's layer), and the console additionally requires the per-install proxy shared-secret header (generated at boot, stored next to the operator token) before honoring forwarded identity.
+3. Thread remote mode into the console API and the control socket: every remote console request requires the operator token; control-socket calls to operator-only methods or surfaces require the operator token, while a scoped T-1004 worker bearer remains valid only for workerMethods and binds that worker's identity for T-1204. Refuse missing or unregistered bearers everywhere, and return unauthorized when a remote worker bearer attempts an operator-only surface. The console additionally requires the per-install proxy shared-secret header (generated at boot, stored next to the operator token) before honoring forwarded identity.
 4. Verify the operator token file's permissions at boot: anything looser than 0600 refuses to start.
-5. Tests: the bind refusal is unconditional, the token is required in remote mode, a direct loopback caller with forged X-Forwarded-* headers gains nothing, and every existing suite passes unchanged on the loopback default.
+5. Tests: bind refusal is unconditional; every remote console request and operator-only control call requires the operator token; scoped worker bearers remain valid only for workerMethods and bind worker identity; missing, unregistered, and wrong-authority bearers are refused; a direct loopback caller with forged X-Forwarded-* headers gains nothing; constant-time token comparison remains; and every existing suite passes unchanged on the loopback default.
 
 ## Acceptance
 
-- [ ] Any non-loopback bind exits before any listener opens, with the reason on stderr — the flag does not permit one.
-- [ ] Remote mode without the operator token is refused on both the console and the control socket.
-- [ ] Token comparison is constant-time on every listener, including the control socket's identity lookup.
-- [ ] The operator token file's permissions are verified at boot (0600, else refuse).
-- [ ] A direct loopback caller with forged X-Forwarded-* headers gains nothing in remote mode.
-- [ ] The loopback default keeps every existing suite green unchanged.
+- [x] Any non-loopback bind exits before any listener opens, with the reason on stderr — the flag does not permit one.
+- [x] A remote console request without the operator token is refused.
+- [x] A remote control-socket call to an operator-only method or surface without the operator token is refused; a scoped worker bearer is unauthorized there.
+- [x] A scoped worker bearer remains valid only for workerMethods and binds worker identity for T-1204.
+- [x] A missing or unregistered bearer is refused everywhere.
+- [x] Token comparison is constant-time on every listener, including the control socket's identity lookup.
+- [x] The operator token file's permissions are verified at boot (0600, else refuse).
+- [x] A direct loopback caller with forged X-Forwarded-* headers gains nothing in remote mode.
+- [x] Loopback behavior is unchanged, and every existing suite stays green.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commit 65ba0a8 wires explicit remote mode and refuses non-loopback binds before listeners open | [`src/daemon/main.ts`](../../../src/daemon/main.ts) |
+| Commit 65ba0a8 enforces operator and scoped-worker authority on the control socket | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) |
+| Commit 65ba0a8 covers bind refusal, authentication boundaries, forged forwarded headers, and unchanged loopback defaults | [`tests/remote-exposure.test.ts`](../../../tests/remote-exposure.test.ts) |
 
 ## Out of scope
 

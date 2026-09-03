@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-12](../epics/EP-12-remote-exposure.md) | [SP-13](../sprints/SP-13-beyond-loopback.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-12](../epics/EP-12-remote-exposure.md) | [SP-13](../sprints/SP-13-beyond-loopback.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -39,8 +39,16 @@ The daemon logs every authenticated remote-mode connection (identity, source, ti
 
 ## Acceptance
 
-- [ ] Every authenticated remote-mode connection leaves a log line with identity and source.
-- [ ] `omp-agent audit` reports the active trust model and live authenticated connections.
+- [x] Every authenticated remote-mode connection leaves a log line with identity and source.
+- [x] `omp-agent audit` reports the active trust model and live authenticated connections.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commit cc1187e records bounded authenticated remote connection metadata and tracks the live set | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) |
+| Commit cc1187e exposes the audit verb for trust mode and live authenticated connections | [`src/daemon/cli.ts`](../../../src/daemon/cli.ts) |
+| Commit cc1187e verifies connection logging and audit output | [`tests/remote-exposure.test.ts`](../../../tests/remote-exposure.test.ts) |
 
 ## Out of scope
 

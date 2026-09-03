@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-11](../epics/EP-11-operator-polish.md) | [SP-12](../sprints/SP-12-operator-polish.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-11](../epics/EP-11-operator-polish.md) | [SP-12](../sprints/SP-12-operator-polish.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -34,8 +34,15 @@ Messages that arrive in background rooms while the events socket is down (or not
 
 ## Acceptance
 
-- [ ] A post made while the console is deaf marks the room unread after reconnect, browser-proven.
-- [ ] The open channel never marks itself unread.
+- [x] A post made while the console is deaf marks the room unread after reconnect, browser-proven.
+- [x] The open channel never marks itself unread.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commits 222310a and 2a3a589 reconcile missed background-room activity on socket open without marking the open room unread | [`src/console/app.js`](../../../src/console/app.js) |
+| Commits 222310a and 2a3a589 browser-prove disconnect, background post, reconnect, and unread healing | [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) |
 
 ## Out of scope
 

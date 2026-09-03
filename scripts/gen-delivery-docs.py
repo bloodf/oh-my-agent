@@ -674,8 +674,16 @@ ADRS = [
             "nginx, tailscale serve, or an SSH tunnel) that terminates TLS and forwards to "
             "the loopback console/control endpoints. The daemon gains an explicit opt-in "
             "flag acknowledging remote mode, and the flag changes authentication and "
-            "enforcement only: (a) the operator token is required on every console request "
-            "and control-socket connection, and (b) parentage flips from cooperative "
+            "enforcement only: (a) remote `/api/*` HTTP requests, including `POST /api/session` "
+            "and `POST /api/ws-ticket`, require the operator token; successful authentication "
+            "mints path-bound, single-use tickets that expire after 30 seconds, and the static "
+            "shell, static assets, and `/api/events` WebSocket upgrade authenticate with those "
+            "tickets; (b) remote control-socket calls to operator-only methods or surfaces "
+            "require the operator token, while a scoped T-1004 worker bearer remains valid only "
+            "for workerMethods and binds that worker's identity for T-1204; and (c) a missing or "
+            "unregistered bearer is refused everywhere, and a remote worker bearer used on an "
+            "operator-only surface is unauthorized. Token comparison remains constant-time, "
+            "including the control socket's identity Map lookup. Parentage flips from cooperative "
             "metadata to enforced identity per T-1004's prepared bearer layer. Any "
             "bind-address configuration is refused unconditionally, flag or no flag — "
             "there is no mode in which the daemon listens on a routable address. The proxy "
@@ -689,13 +697,15 @@ ADRS = [
         ),
         consequences=[
             "The console and control socket keep their loopback-only binds in every mode; the only new code is the unconditional bind refusal, the flag, and the proxy-secret check.",
+            "Remote `/api/*` HTTP requests, including `POST /api/session` and `POST /api/ws-ticket`, require the operator token; the static shell, static assets, and `/api/events` WebSocket upgrade authenticate with path-bound, single-use tickets minted only after operator-token authentication and expiring after 30 seconds. Operator-only control-socket methods or surfaces require the operator token; scoped worker bearers authorize only workerMethods and bind worker identity for T-1204, never operator authority.",
+            "Missing or unregistered bearers are refused everywhere, and a remote worker attempt on an operator-only surface is unauthorized.",
             "Parentage enforcement becomes real only in remote mode, so loopback single-operator flows keep working unchanged (T-1004's tests stand).",
             "Documentation owns the proxy recipes; the daemon ships no TLS code, no cert lifecycle, no reload semantics.",
-            "The operator token never rides URLs in remote mode: the WebSocket upgrade and static loads authenticate with a one-time ticket or a __Host- cookie, so proxy access logs and browser history never see it.",
+            "The operator token never rides URLs in remote mode: the static shell, static assets, and `/api/events` WebSocket upgrade authenticate with path-bound, single-use tickets minted only after operator-token authentication and expiring after 30 seconds, so proxy access logs and browser history never see the operator token.",
             "The credential gateway stays loopback-always and is never proxied; remote mode changes nothing about it.",
             "Every proxy recipe carries a rate-limit stanza; the daemon does not grow backoff logic of its own.",
             "Token comparison is constant-time on every listener — the control socket's identity Map lookup in socket.ts included.",
-            "Every exposure recipe carries the same assertions in the suite: bind-address config refused unconditionally, token required, forwarded identity ignored without the proxy secret, hierarchy enforced when remote.",
+            "Every exposure recipe carries the same assertions in the suite: bind-address config refused unconditionally; remote console and operator-only control calls require the operator token; scoped worker bearers work only for workerMethods; missing, unregistered, and wrong-authority bearers are refused; forwarded identity is ignored without the proxy secret; hierarchy is enforced when remote; loopback behavior is unchanged.",
         ],
         alternatives=[
             ("Daemon-side TLS", "Duplicates cert lifecycle, reload, and ALPN semantics that mature proxies already solve, and a unix-socket-first daemon has no TLS code path today to extend."),
@@ -721,20 +731,23 @@ ADRS = [
         ),
         decision=(
             "Distribution is a single npm package with an explicit `files` allowlist; versions are "
-            "semver with a CHANGELOG; releases are tag-driven CI runs that execute the full gate "
-            "suite, `npm pack` dry-run, then publish. The `RpcClient.pid` patch cannot travel with "
-            "the artifact — Bun honors `patchedDependencies` only from the consumer's root "
-            "manifest, and pi-coding-agent reaches the consumer as a peerDependency — so publish "
-            "gates on the consumer-install smoke test (T-1306), which installs the packed tarball "
-            "into a clean project and asserts the pid contract state of the resolved peer. Until "
-            "EP-15 lands the accessor upstream, that state is 'pid absent, degraded supervision' "
-            "and the release notes must state it; after T-1504 the state flips to 'pid present' "
-            "and the same test enforces it. No silent drift in either direction."
+            "semver with a CHANGELOG; releases use an operator-dispatched CI run with a required "
+            "tag input and a `publish` input that defaults false. Every dispatch verifies the tag, "
+            "runs the full gate suite, packs once, and runs the consumer-install smoke against that "
+            "tarball; publishing is an explicit opt-in and publishes the same verified tarball. The "
+            "`RpcClient.pid` patch cannot travel with the artifact because Bun honors "
+            "`patchedDependencies` only from the consumer's root manifest, while pi-coding-agent "
+            "reaches the consumer as a peerDependency. Publication therefore gates on the "
+            "consumer-install smoke test (T-1306), which installs the packed tarball into a clean "
+            "project and asserts the pid contract state of the resolved peer. Until EP-15 lands "
+            "the accessor upstream, that state is 'pid absent, degraded supervision' and the "
+            "release notes must state it; after T-1504 the state flips "
+            "to 'pid present' and the same test enforces it. No silent drift in either direction."
         ),
         consequences=[
             "A release may ship before EP-15 lands, but only with the degraded-supervision state named in its release notes — the smoke test makes the state explicit instead of letting a user discover it.",
             "The patch pin (18.0.7) is already stale against the peer range (^18.0.7) and the registry head; T-1305's gate asserts patch keys match the lockfile-resolved version.",
-            "Every release is reproducible: tag → gates → pack → publish, with no hand steps.",
+            "Every release is reproducible: operator-supplied tag, gates, one verified tarball, then explicit publish, with no artifact rebuild between verification and publication.",
             "Git-only installs stay supported for development but are not a release channel.",
         ],
         alternatives=[
@@ -3459,7 +3472,7 @@ TASKS += [
     ),
     Task(
         id="T-1105", slug="unread-reconcile-on-open", title="Reconcile unread state when the events socket opens",
-        epic="EP-11", sprint="SP-12", status="Ready",
+        epic="EP-11", sprint="SP-12", status="Done",
         goal="Messages that arrive in background rooms while the events socket is down (or not yet open) mark those rooms unread on reconnect — missed frames are healed, not lost.",
         read_first=[
             ("Console client", "src/console/app.js"),
@@ -3483,6 +3496,10 @@ TASKS += [
             "A post made while the console is deaf marks the room unread after reconnect, browser-proven.",
             "The open channel never marks itself unread.",
         ],
+        evidence=[
+            ("Commits 222310a and 2a3a589 reconcile missed background-room activity on socket open without marking the open room unread", "src/console/app.js"),
+            ("Commits 222310a and 2a3a589 browser-prove disconnect, background post, reconnect, and unread healing", "tests/console-client.test.ts"),
+        ],
         depends_on=["T-1104"],
         out_of_scope=["Read cursors persisted across console sessions."],
     ),
@@ -3492,8 +3509,8 @@ TASKS += [
     # ── EP-12: beyond loopback ───────────────────────────────────────────────
     Task(
         id="T-1201", slug="exposure-policy", title="Remote-mode surface and bind refusal",
-        epic="EP-12", sprint="SP-13", status="Ready",
-        goal="One explicit remote-mode switch exists and governs auth and enforcement only; any non-loopback bind is refused unconditionally with the reason on stderr, and the loopback default is byte-identical to today.",
+        epic="EP-12", sprint="SP-13", status="Done",
+        goal="One explicit remote-mode switch governs authentication and enforcement only: remote console requests and operator-only control-socket methods require the operator token; scoped worker bearers remain valid only for workerMethods and bind worker identity for T-1204; missing, unregistered, and wrong-authority bearers are refused; any non-loopback bind is refused unconditionally with the reason on stderr; and loopback behavior is unchanged.",
         read_first=[
             ARCH,
             ("ADR-012: remote exposure", "docs/delivery/adr/ADR-012-remote-exposure.md"),
@@ -3515,17 +3532,25 @@ TASKS += [
         steps=[
             "Add the surface: one flag or config key, parsed at boot, off by default; the flag governs authentication and enforcement only. Any non-loopback bind exits before any listener opens, naming the refused address on stderr — flag or no flag.",
             "Enumerate every listener at boot — console API, control socket, credential gateway — with per-listener behavior written down: console and control socket take the remote-mode auth layer; the credential gateway is loopback-always and never joins remote mode.",
-            "Thread remote mode into the console API and the control socket: in remote mode every request and connection presents the operator token (T-1004's layer), and the console additionally requires the per-install proxy shared-secret header (generated at boot, stored next to the operator token) before honoring forwarded identity.",
+            "Thread remote mode into the console API and the control socket: every remote console request requires the operator token; control-socket calls to operator-only methods or surfaces require the operator token, while a scoped T-1004 worker bearer remains valid only for workerMethods and binds that worker's identity for T-1204. Refuse missing or unregistered bearers everywhere, and return unauthorized when a remote worker bearer attempts an operator-only surface. The console additionally requires the per-install proxy shared-secret header (generated at boot, stored next to the operator token) before honoring forwarded identity.",
             "Verify the operator token file's permissions at boot: anything looser than 0600 refuses to start.",
-            "Tests: the bind refusal is unconditional, the token is required in remote mode, a direct loopback caller with forged X-Forwarded-* headers gains nothing, and every existing suite passes unchanged on the loopback default.",
+            "Tests: bind refusal is unconditional; every remote console request and operator-only control call requires the operator token; scoped worker bearers remain valid only for workerMethods and bind worker identity; missing, unregistered, and wrong-authority bearers are refused; a direct loopback caller with forged X-Forwarded-* headers gains nothing; constant-time token comparison remains; and every existing suite passes unchanged on the loopback default.",
         ],
         acceptance=[
             "Any non-loopback bind exits before any listener opens, with the reason on stderr — the flag does not permit one.",
-            "Remote mode without the operator token is refused on both the console and the control socket.",
+            "A remote console request without the operator token is refused.",
+            "A remote control-socket call to an operator-only method or surface without the operator token is refused; a scoped worker bearer is unauthorized there.",
+            "A scoped worker bearer remains valid only for workerMethods and binds worker identity for T-1204.",
+            "A missing or unregistered bearer is refused everywhere.",
             "Token comparison is constant-time on every listener, including the control socket's identity lookup.",
             "The operator token file's permissions are verified at boot (0600, else refuse).",
             "A direct loopback caller with forged X-Forwarded-* headers gains nothing in remote mode.",
-            "The loopback default keeps every existing suite green unchanged.",
+            "Loopback behavior is unchanged, and every existing suite stays green.",
+        ],
+        evidence=[
+            ("Commit 65ba0a8 wires explicit remote mode and refuses non-loopback binds before listeners open", "src/daemon/main.ts"),
+            ("Commit 65ba0a8 enforces operator and scoped-worker authority on the control socket", "src/daemon/socket.ts"),
+            ("Commit 65ba0a8 covers bind refusal, authentication boundaries, forged forwarded headers, and unchanged loopback defaults", "tests/remote-exposure.test.ts"),
         ],
         depends_on=["T-1004"],
         out_of_scope=["TLS itself (T-1202, via proxy per ADR-012) and the console's login UX (T-1203)."],
@@ -3537,34 +3562,39 @@ TASKS += [
         read_first=[
             ("ADR-012: remote exposure", "docs/delivery/adr/ADR-012-remote-exposure.md"),
             ("Console API", "src/daemon/console-api.ts"),
+            ("Daemon console URL owner", "src/daemon/main.ts"),
             ("Identity suite", "tests/socket-identity.test.ts"),
         ],
         files=[
             "docs/remote-exposure.md",
             "tests/remote-exposure.test.ts",
             "src/daemon/console-api.ts",
+            "src/daemon/main.ts",
         ],
         assets=[
-            ("docs/remote-exposure.md", "New", "The three recipes — Caddy, tailscale serve, SSH tunnel — each setting the proxy shared-secret header, carrying a rate-limit stanza and a log-scrub note, and ending in the same three checks."),
+            ("docs/remote-exposure.md", "New", "Three usable HTTPS recipes -- Caddy, tailscale serve, and SSH tunnel paired with loopback Caddy -- set the proxy shared-secret header, rate limiting, log scrubbing, and the required external origin; the SSH+Caddy recipe uses a matching non-loopback origin hostname (oma-console.test) locally mapped via /etc/hosts into the tunnel, deliberately avoiding the daemon's loopback carve-out; the SSH-only section rejects an unsafe configuration that cannot satisfy the HTTPS-origin precondition on its own."),
             ("tests/remote-exposure.test.ts", "Edited", "Created by T-1201; behind-proxy assertions: forwarded headers honored only with the secret, unproxied remote access refused."),
             ("src/daemon/console-api.ts", "Edited", "Proxy-aware request handling per the recipe contract: scheme and host from forwarded headers, only when the shared secret matches."),
+            ("src/daemon/main.ts", "Edited", "Requires an explicit external HTTPS origin whenever remote mode serves the console, validates it, and persists/announces it without the long-lived operator token; a headless remote daemon (OMA_CONSOLE=0) needs no origin, and loopback URLs retain their token."),
         ],
         steps=[
-            "Write the three recipes in docs/remote-exposure.md; each sets the proxy shared-secret header, carries a rate-limit stanza, and notes how to scrub token material from the proxy's log format; each ends with the same checks: bind-address config refused unconditionally, token required, hierarchy enforced.",
+            "Write the Caddy, tailscale serve, and SSH tunnel with loopback Caddy HTTPS recipes in docs/remote-exposure.md; each sets the external console origin and proxy shared-secret header, carries a rate-limit stanza, notes how to scrub token material from proxy logs, and ends with the same checks: bind-address config refused unconditionally, token required, hierarchy enforced. The SSH+Caddy recipe uses a matching non-loopback origin hostname locally mapped to the tunnel, not localhost, so it exercises the same origin/token hardening a real DNS name gets. Document why SSH alone, without a paired Caddy boundary, cannot satisfy the HTTPS-origin precondition.",
             "Make the console proxy-aware so URLs the client builds are correct behind the documented proxy.",
             "Extend the suite: a request carrying forwarded headers without the proxy shared secret is treated as a direct loopback caller — forwarded identity ignored, never trusted.",
+            "Extend the boot preflight: remote mode with the console enabled refuses a missing or empty external origin before the pidfile or any listener; remote mode with OMA_CONSOLE=0 needs none.",
         ],
         acceptance=[
-            "Each recipe's three checks appear verbatim in the doc and are mirrored by suite assertions.",
-            "Each recipe is verified once end-to-end against a real proxy, with the date and versions recorded in the doc.",
+            "Each usable HTTPS recipe's three checks appear verbatim in the doc and are mirrored by suite assertions; the SSH-only configuration (SSH with no paired TLS/auth proxy) is explicitly rejected, distinct from the accepted SSH-tunnel-with-loopback-Caddy recipe.",
+            "Each usable HTTPS recipe is verified once end-to-end against a real proxy, with the date and versions recorded in the doc.",
             "`omp-agent console` prints a URL that is correct when the daemon sits behind the documented proxy.",
+            "Remote mode with the console enabled and no external origin configured fails before the pidfile or any listener opens; a headless remote daemon (OMA_CONSOLE=0) boots without one, and loopback mode is unaffected.",
         ],
         depends_on=["T-1201"],
-        out_of_scope=["The daemon terminating TLS (ADR-012 rejects it) and the login flow UX (T-1203)."],
+        out_of_scope=["The daemon terminating TLS (ADR-012 rejects it) and the login flow UX (T-1203). Remaining blocker: each documented HTTPS recipe still needs dated end-to-end evidence against a real proxy."],
     ),
     Task(
         id="T-1203", slug="remote-console-auth", title="Operator-token flow in the console client",
-        epic="EP-12", sprint="SP-13", status="Blocked",
+        epic="EP-12", sprint="SP-13", status="Done",
         goal="The console client authenticates as the operator over the wire: a first-visit token prompt, reload persistence, a clear refusal state — and no prompt at all on loopback. In remote mode the long-lived token never rides a URL.",
         read_first=[
             ("Console client", "src/console/app.js"),
@@ -3578,28 +3608,33 @@ TASKS += [
             "tests/console-client.test.ts",
         ],
         assets=[
-            ("src/console/app.js", "Edited", "Token entry flow, the token on every fetch, the ticket/cookie path for the WebSocket upgrade and static loads, a 401 state with re-entry."),
+            ("src/console/app.js", "Edited", "Token entry flow, the token on every API fetch, one-time tickets for the WebSocket upgrade and static loads, and a 401 state with re-entry."),
             ("src/console/index.html", "Edited", "The token prompt markup: semantic, labeled, keyboard-first."),
-            ("src/daemon/console-api.ts", "Edited", "Token verification on every request in remote mode; the 401 shape the client renders; mints the one-time tickets or sets the __Host- cookie for the upgrade and static loads."),
+            ("src/daemon/console-api.ts", "Edited", "Token verification on remote `/api/*` requests, including the two ticket-mint endpoints; the 401 shape the client renders; and path-bound, single-use tickets for the WebSocket upgrade and static loads, expiring after 30 seconds."),
             ("tests/console-client.test.ts", "Edited", "Browser-proven: prompt, success, refusal, reload persistence, no token in any URL."),
         ],
         steps=[
             "Daemon side first: the remote-mode 401 shape, then the client renders it as a labeled prompt using the T-1101/T-1102 landmarks and focus model.",
-            "Persist the token in sessionStorage (an operator surface is not a remember-me app) and send it as a header on every API fetch; the WebSocket upgrade and static loads authenticate with a one-time ticket or a __Host- cookie per amended ADR-012 — no `?token=` material in remote mode.",
+            "Persist the token in sessionStorage (an operator surface is not a remember-me app) and send it as a header on every API fetch; the WebSocket upgrade and static loads authenticate with path-bound, single-use tickets minted only after operator-token authentication and expiring after 30 seconds — no `?token=` material in remote mode.",
             "The client learns the mode from the daemon's first response, not from configuration; loopback never shows the prompt.",
         ],
         acceptance=[
             "The browser suite drives: first visit shows the prompt, a good token opens the console, reload with the stored token opens directly, a bad token shows the refusal state with re-entry.",
-            "The WebSocket upgrade and static loads authenticate via the ticket/cookie path — no token in any URL; an unauthenticated upgrade is refused in remote mode.",
+            "The WebSocket upgrade and static loads authenticate with path-bound, single-use tickets minted only after operator-token authentication and expiring after 30 seconds — no operator token in any URL; an unauthenticated upgrade is refused in remote mode.",
             "The token prompt and refusal state pass the console's existing accessibility assertions and are driven keyboard-only in the browser suite.",
             "Loopback flows show no prompt and pass unchanged.",
+        ],
+        evidence=[
+            ("Commit ede50c4 ships the semantic keyboard-first operator-token login and refusal surface", "src/console/index.html"),
+            ("Commit ede50c4 persists remote operator credentials for the session and supports revocation without putting tokens in URLs", "src/console/app.js"),
+            ("Commit ede50c4 browser-proves login, reload persistence, refusal, revocation, and unchanged loopback behavior", "tests/console-client.test.ts"),
         ],
         depends_on=["T-1201"],
         out_of_scope=["Multi-user accounts or sessions; one operator token, per ADR-012."],
     ),
     Task(
         id="T-1204", slug="authoritative-hierarchy", title="Hierarchy enforcement flips in remote mode",
-        epic="EP-12", sprint="SP-13", status="Blocked",
+        epic="EP-12", sprint="SP-13", status="Done",
         goal="In remote mode, parentage stops being cooperative metadata: kill, inject, and spawn-parent claims are enforced against the caller's identity, and the cooperative path is unreachable remotely.",
         read_first=[
             ("ADR-011: agent hierarchy", "docs/delivery/adr/ADR-011-agent-hierarchy.md"),
@@ -3608,13 +3643,15 @@ TASKS += [
         ],
         files=[
             "src/daemon/socket.ts",
+            "src/daemon/main.ts",
             "tests/socket-identity.test.ts",
             "tests/remote-exposure.test.ts",
         ],
         assets=[
+            ("src/daemon/main.ts", "Edited", "Boot logs the active trust model once."),
             ("src/daemon/socket.ts", "Edited", "Remote mode flips the enforcement switch T-1004 built; loopback keeps cooperative behavior."),
             ("tests/socket-identity.test.ts", "Edited", "The enforcement assertions run in remote mode."),
-            ("tests/remote-exposure.test.ts", "Edited", "Created by T-1201; the flip is on in remote mode and off on loopback — both asserted."),
+            ("tests/remote-exposure.test.ts", "Edited", "Created by T-1201; real daemon boots assert the active trust-model log in both remote and loopback modes."),
         ],
         steps=[
             "Wire the remote-mode flag to T-1004's enforcement, specified by set difference: every protocol method not in socket.ts's workerMethods is operator-only, and the suite iterates METHOD_NAMES so a future method is deny-by-default — the dangerous ones the old enumeration missed (definition_update, agent_create, schedules_arm, rooms_post) are covered by the difference, not named. A spawn's parent claim must equal the caller identity.",
@@ -3625,6 +3662,11 @@ TASKS += [
             "Remote mode: every privileged verb refuses a foreign-identity caller, suite-proven over a remote-mode connection.",
             "Loopback: cooperative behavior and the existing suites are unchanged.",
             "The boot log names the active trust model.",
+        ],
+        evidence=[
+            ("Commit 3a7bcb2 makes remote parentage authoritative while preserving cooperative loopback behavior", "src/daemon/socket.ts"),
+            ("Commit 3a7bcb2 logs the active trust model at boot", "src/daemon/main.ts"),
+            ("Commit 3a7bcb2 proves remote identity enforcement and loopback behavior", "tests/socket-identity.test.ts"),
         ],
         depends_on=["T-1201"],
         out_of_scope=["Room ACLs beyond parentage (ADR-011's list); identity grows no new powers here."],
@@ -3658,10 +3700,11 @@ TASKS += [
             "The threat model exists in exactly one file; README and ARCHITECTURE carry a link plus at most two sentences.",
         ],
         depends_on=["T-1202", "T-1206"],
+        out_of_scope=["Remaining blocker: T-1202 still needs dated end-to-end evidence against each documented real proxy; T-1206 is Done and no longer blocks this runbook."],
     ),
     Task(
         id="T-1206", slug="authenticated-connection-audit", title="Authenticated-connection audit surface",
-        epic="EP-12", sprint="SP-13", status="Blocked",
+        epic="EP-12", sprint="SP-13", status="Done",
         goal="The daemon logs every authenticated remote-mode connection (identity, source, time) and a CLI verb reports the current mode plus the live authenticated connections — the audit commands T-1205 documents must exist.",
         read_first=[
             ("ADR-012: remote exposure", "docs/delivery/adr/ADR-012-remote-exposure.md"),
@@ -3689,6 +3732,11 @@ TASKS += [
         acceptance=[
             "Every authenticated remote-mode connection leaves a log line with identity and source.",
             "`omp-agent audit` reports the active trust model and live authenticated connections.",
+        ],
+        evidence=[
+            ("Commit cc1187e records bounded authenticated remote connection metadata and tracks the live set", "src/daemon/socket.ts"),
+            ("Commit cc1187e exposes the audit verb for trust mode and live authenticated connections", "src/daemon/cli.ts"),
+            ("Commit cc1187e verifies connection logging and audit output", "tests/remote-exposure.test.ts"),
         ],
         depends_on=["T-1201"],
         out_of_scope=["Log retention and rotation; the daemon log's existing handling applies."],
@@ -3754,9 +3802,9 @@ TASKS += [
         out_of_scope=["The release workflow itself (T-1303)."],
     ),
     Task(
-        id="T-1303", slug="release-ci", title="Tag-driven release workflow",
-        epic="EP-13", sprint="SP-14", status="Blocked",
-        goal="A pushed tag runs the full gate suite and the pack test, then publishes the npm artifact — with ADR-013's pid-contract state asserted as a pipeline step, not a wiki note.",
+        id="T-1303", slug="release-ci", title="Manual-dispatch release workflow",
+        epic="EP-13", sprint="SP-14", status="Done",
+        goal="An operator dispatches the release workflow with a tag; the workflow always verifies the release and its single packed tarball, then publishes that tarball only when the `publish` input is true, with ADR-013's pid-contract state asserted as a pipeline step, not a wiki note.",
         read_first=[
             ("CI workflow", ".github/workflows/ci.yml"),
             ("Package manifest", "package.json"),
@@ -3767,27 +3815,31 @@ TASKS += [
             "package.json",
         ],
         assets=[
-            (".github/workflows/release.yml", "New", "Tag-triggered: install, gates, pack test, publish with provenance, pid-contract assert."),
+            (".github/workflows/release.yml", "New", "Manual dispatch with required tag input; always verifies one tarball, then publishes that exact artifact with provenance only when opted in."),
             ("package.json", "Edited", "publishConfig and the version/omp.version pair the tag step asserts."),
         ],
         steps=[
-            "Trigger on v* tags; a step asserts tag == package.json version == omp.version before anything publishes.",
-            "Run the full suite, the delivery-doc gates, and the pack test on the tag checkout.",
-            "Publish with the pinned command `npm publish --provenance`: the job declares `permissions: id-token: write`, the manifest sets publishConfig.access to \"public\" for the scoped name, and the token policy is an npm automation token, not interactive 2FA.",
-            "The pack/publish step asserts the RpcClient.pid contract state of the resolved peer per amended ADR-013 — 'pid absent, degraded supervision' until T-1504 lands, 'pid present' after — so the patch story never drifts silently.",
+            "Expose only `workflow_dispatch`, with a required `tag` input and a boolean `publish` input defaulting false; checkout and the version gate use `inputs.tag`, and the gate asserts tag == package.json version == omp.version before publication is possible.",
+            "Always run version/changelog validation, patch hygiene, typecheck and fast suites through the pack lifecycle, the console suite, lint, delivery-doc drift checks, pack assertions, and the consumer-install smoke asserting the current RpcClient.pid state: 'pid absent, degraded supervision'.",
+            "Create one tarball, retain it as the verified artifact through every pack and consumer assertion, and publish that exact tarball only when `inputs.publish` is true.",
+            "Publish the verified tarball with `npm publish <tarball> --provenance`; the job declares `permissions: id-token: write`, and the manifest sets publishConfig.access to \"public\" for the scoped name.",
         ],
         acceptance=[
-            "A tag that mismatches package.json's version or omp.version fails before publish.",
-            "The publish job has id-token: write and publishes public.",
-            "The pack/publish step asserts the pid contract state per amended ADR-013 (no silent patch-story drift).",
-            "A workflow_dispatch dry-run mode exercises everything except the publish step.",
+            "The workflow has only a manual `workflow_dispatch` trigger with required `tag` and boolean `publish` inputs; `publish` defaults false, while checkout and version validation use `inputs.tag`.",
+            "Every dispatch runs version/changelog validation, patch hygiene, typecheck and fast suites through the pack lifecycle, the console suite, lint, docs drift, pack assertions, and the consumer-install smoke with RpcClient.pid in the 'pid absent, degraded supervision' state.",
+            "The publish step runs only when `inputs.publish` is true, has `id-token: write`, and publishes public with `--provenance`.",
+            "Publication uses the same single tarball already exercised by pack assertions and the consumer-install smoke; no publish-time rebuild can change the artifact.",
+        ],
+        evidence=[
+            ("Commits 264207d and 0cf7d17 ship manual-only verification with explicit publication opt-in for one verified tarball", ".github/workflows/release.yml"),
+            ("Commit 264207d supplies release lifecycle commands", "package.json §scripts"),
         ],
         depends_on=["T-1301", "T-1302", "T-1306"],
         out_of_scope=["GitHub Releases notes beyond the changelog excerpt."],
     ),
     Task(
         id="T-1304", slug="install-docs", title="README install path for the released artifact",
-        epic="EP-13", sprint="SP-14", status="Blocked",
+        epic="EP-13", sprint="SP-14", status="Done",
         goal="The README's install path installs the released package into OMP and reaches a running daemon in five commands — not a repo build.",
         read_first=[
             ("README", "README.md"),
@@ -3804,6 +3856,10 @@ TASKS += [
         ],
         acceptance=[
             "The quickstart's commands are executed against the packed artifact by T-1306's consumer smoke test.",
+        ],
+        evidence=[
+            ("Commit 53a07b0 documents released-package installation and a five-command daemon quickstart", "README.md §Quick start"),
+            ("Commit 53a07b0 exercises the documented released-install commands against the packed artifact", "tests/consumer-install.test.ts"),
         ],
         depends_on=["T-1301", "T-1306"],
         out_of_scope=["The release pipeline (T-1303)."],
@@ -3839,7 +3895,7 @@ TASKS += [
     ),
     Task(
         id="T-1306", slug="consumer-install-smoke", title="Consumer-install smoke test",
-        epic="EP-13", sprint="SP-14", status="Blocked",
+        epic="EP-13", sprint="SP-14", status="Done",
         goal="Prove the packed artifact works for a real consumer: npm pack, install the tarball into a temp project with fresh peer resolution from the registry (npm and bun variants), invoke the installed node_modules/.bin/omp-agent shim — never the source path — boot the daemon through it, and assert the RpcClient.pid contract state per amended ADR-013. This is the test that makes the patch-travel gap visible before a user hits it.",
         read_first=[
             ("ADR-013: release channel", "docs/delivery/adr/ADR-013-release-channel.md"),
@@ -3866,12 +3922,16 @@ TASKS += [
             "The smoke test invokes the installed shim, asserts exit code and daemon boot, and records the pid contract state.",
             "CI runs it on every change to package.json, patches/, or src/.",
         ],
+        evidence=[
+            ("Commit 6d40f7d installs the packed artifact with npm and Bun, invokes its installed shim, boots the daemon, and asserts the pid contract", "tests/consumer-install.test.ts"),
+            ("Commit 6d40f7d exposes the consumer-install smoke command used by release verification", "package.json §scripts"),
+        ],
         depends_on=["T-1301"],
     ),
     # ── EP-14: live accounts ─────────────────────────────────────────────────
     Task(
         id="T-1401", slug="dogfood-runbook", title="Dogfooding runbook",
-        epic="EP-14", sprint="SP-15", status="Ready",
+        epic="EP-14", sprint="SP-15", status="Done",
         goal="A written runbook takes the operator from zero to a live dogfood session: account checklist, the scenario, what to capture, and how a finding becomes a task.",
         read_first=[
             ("README", "README.md"),
@@ -3890,6 +3950,9 @@ TASKS += [
         acceptance=[
             "T-1402's driver implements every JSON-capable runbook step 1:1; daemon start, the console URL, the TUI checklist, and the in-process backend note are marked manual (or deferred to T-1405) with a check to record — no step is described as automated or covered when it is not.",
         ],
+        evidence=[
+            ("Commit a42075f documents dogfood preconditions, JSON-capable scenario steps, manual checks, capture, and triage", "docs/dogfooding.md"),
+        ],
         out_of_scope=[
             "Automating the scenario (T-1402).",
             "Abort/allowlist/cleanup enforcement (T-1404); the runbook may say stop and preserve evidence, never implement cleanup.",
@@ -3898,7 +3961,7 @@ TASKS += [
     ),
     Task(
         id="T-1402", slug="dogfood-harness", title="Scripted dogfood scenario driver",
-        epic="EP-14", sprint="SP-15", status="Blocked",
+        epic="EP-14", sprint="SP-15", status="Done",
         goal="Every JSON-capable management verb in the runbook's scenario runs as one command: a script drives `omp-agent --json` end-to-end against a live daemon the operator already started per the runbook, captures a timestamped session log, and exits non-zero on any failed check.",
         read_first=[
             ("CLI verbs", "src/daemon/cli.ts"),
@@ -3927,6 +3990,10 @@ TASKS += [
             "The suite proves the driver against a fixture daemon with no live credentials.",
             "Per-step timeouts and the poll-until-state primitive are proven against the latency-injecting fixture; no step can hang forever.",
             "The session log lands in .dogfood/ with mode 0600 and the suite asserts it contains no token material.",
+        ],
+        evidence=[
+            ("Commit d5faa93 drives the bounded JSON-capable dogfood scenario and writes redacted mode-0600 logs", "scripts/dogfood.ts"),
+            ("Commit d5faa93 verifies timeouts, polling, injected failures, resource samples, and token-free logs against the fixture daemon", "tests/dogfood.test.ts"),
         ],
         depends_on=["T-1401"],
         out_of_scope=[
@@ -3962,11 +4029,12 @@ TASKS += [
             "Every wont-fix quotes the session log line as evidence.",
             "The generator regenerates clean with the finding tasks added.",
         ],
+        out_of_scope=["Remaining blocker: an operator must run and record the first live-account session; fixture coverage cannot satisfy this ticket."],
         depends_on=["T-1402", "T-1404", "T-1405"],
     ),
     Task(
         id="T-1404", slug="live-session-safety-rails", title="Live-session safety rails",
-        epic="EP-14", sprint="SP-15", status="Blocked",
+        epic="EP-14", sprint="SP-15", status="Done",
         goal="The harness can never run away with real accounts: a documented abort procedure, an account allowlist and max-bump ceiling enforced as a refusal, and a cleanup phase that always runs.",
         read_first=[
             ("The harness this hardens", "docs/delivery/tasks/T-1402-dogfood-harness.md"),
@@ -3992,12 +4060,17 @@ TASKS += [
             "An abort during any phase leaves no running worker and no armed schedule, suite-proven against the fixture daemon.",
             "The runbook's abort section names the exact commands.",
         ],
+        evidence=[
+            ("Account and bump ceilings are enforced before live verbs, with unconditional cleanup", "scripts/dogfood.ts"),
+            ("Refusal and cleanup behavior covers restart and schedule-control failures", "tests/dogfood.test.ts"),
+            ("Required allowlist, ceiling, abort, and cleanup commands are documented", "docs/dogfooding.md"),
+        ],
         depends_on=["T-1402"],
         out_of_scope=["A `daemon stop` CLI verb; the abort procedure documents the pid path instead."],
     ),
     Task(
         id="T-1405", slug="daemon-backend-selector", title="Explicit worker-backend selector on the daemon CLI",
-        epic="EP-14", sprint="SP-15", status="Blocked",
+        epic="EP-14", sprint="SP-15", status="Done",
         goal="The in-process worker backend built in T-1006 becomes operator-reachable: an explicit backend selector in the daemon spawn path and CLI, proven by tests, with the runbook and harness updated so live dogfooding covers both backends for real.",
         read_first=[
             ("The in-process backend behind SupervisedWorker", "src/worker/lifecycle.ts"),
@@ -4031,6 +4104,11 @@ TASKS += [
             "The CLI suite proves the selector round-trip and the refusal of unknown values.",
             "The runbook and driver cover both backends with no step described as skipped-but-successful.",
         ],
+        evidence=[
+            ("Commit 1530d34 exposes the explicit worker-backend selector while retaining RPC as the default", "src/daemon/cli.ts"),
+            ("Commit 1530d34 verifies explicit rpc, explicit in-process, unset-default, and unknown-backend refusal", "tests/daemon-cli.test.ts"),
+            ("Commit 1530d34 adds both backend legs to the dogfood driver without treating skipped coverage as success", "scripts/dogfood.ts"),
+        ],
         depends_on=["T-1402"],
         out_of_scope=[
             "Sandboxing in-process workers — impossible per T-1006; the shield rules keep that visible.",
@@ -4040,7 +4118,7 @@ TASKS += [
     # ── EP-15: upstream hygiene ──────────────────────────────────────────────
     Task(
         id="T-1501", slug="repro-import-meta-resolve", title="Minimal repro: Bun.plugin corruption of import.meta.resolve",
-        epic="EP-15", sprint="SP-16", status="Ready",
+        epic="EP-15", sprint="SP-16", status="Done",
         goal="A minimal, self-contained repro of the legacy-pi-compat Bun.plugin onResolve hook corrupting import.meta.resolve for @oh-my-pi/* — mechanism derived from observed output, not asserted — runnable upstream without our repo.",
         read_first=[
             ("The workaround this replaces", "src/worker/lifecycle.ts"),
@@ -4071,11 +4149,15 @@ TASKS += [
             "The repro names its public hosting (this repo is public — the in-tree repro/ path) and its README carries an MIT license line.",
             "The README is the issue body with a fixed structure: symptoms, observed resolutions, affected versions, expected vs actual, and repro command. Its commands install Bun 1.3.14 with the official exact-version installer, run `bun install --frozen-lockfile`, then run `bun run repro`.",
         ],
+        evidence=[
+            ("Commits d66d4e4 and 4b1a803 provide the exact-version resolver repro with plugin, no-plugin, and bare-hook controls", "repro/bun-plugin-memo/repro.ts"),
+            ("Commits d66d4e4 and 4b1a803 document observed output, affected versions, exact setup, expected behavior, and public reproduction steps", "repro/bun-plugin-memo/README.md"),
+        ],
         out_of_scope=["Filing the issue (T-1502) and removing our workaround (T-1503)."],
     ),
     Task(
         id="T-1502", slug="file-upstream-issues", title="File both pi-coding-agent issues",
-        epic="EP-15", sprint="SP-16", status="Blocked",
+        epic="EP-15", sprint="SP-16", status="Done",
         goal="Both upstream issues are filed — the resolver corruption with T-1501's repro, on the tracker the control outcome selects, and the RpcClient.pid accessor request — with links recorded in the tree and at the code sites that can carry them.",
         read_first=[
             ("The repro task whose README is the issue body", "docs/delivery/tasks/T-1501-repro-import-meta-resolve.md"),
@@ -4098,6 +4180,16 @@ TASKS += [
         ],
         acceptance=[
             "Both URLs are in the tree and in the code comments; a reader of either workaround reaches the issue in one click.",
+        ],
+        evidence=[
+            (
+                "[Resolver corruption filed as oven-sh/bun#41201](https://github.com/oven-sh/bun/issues/41201)",
+                "repro/bun-plugin-memo/README.md",
+            ),
+            (
+                "[RpcClient.pid accessor requested as can1357/oh-my-pi#10597](https://github.com/can1357/oh-my-pi/issues/10597)",
+                "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch",
+            ),
         ],
         depends_on=["T-1501"],
     ),
@@ -4129,7 +4221,7 @@ TASKS += [
             "No node_modules walk remains in resolveOmpCli; the worker-lifecycle suite is green on the upgraded dependency.",
         ],
         depends_on=["T-1502"],
-        out_of_scope=["Waiting on the upstream release, which is outside this repo's control; this task stays Blocked until T-1502's issue closes."],
+        out_of_scope=["Remaining blocker: wait for a released pi-coding-agent version containing the resolver fix tracked by T-1502; an upstream filing alone does not unblock removal."],
     ),
     Task(
         id="T-1504", slug="drop-rpc-pid-patch", title="Remove the RpcClient.pid patch once upstream ships",
@@ -4162,7 +4254,7 @@ TASKS += [
             "The pack test and release workflow no longer reference patches/, and the consumer smoke test asserts 'pid present'.",
         ],
         depends_on=["T-1502"],
-        out_of_scope=["Waiting on the upstream release, which is outside this repo's control; this task stays Blocked until T-1502's issue closes."],
+        out_of_scope=["Remaining blocker: wait for a released pi-coding-agent version containing the RpcClient.pid accessor tracked by T-1502; an upstream filing alone does not unblock patch removal."],
     ),
 ]
 

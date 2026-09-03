@@ -8,13 +8,13 @@ The plugin works from a checkout but has no version story: no `files` allowlist,
 
 ## Decision
 
-Distribution is a single npm package with an explicit `files` allowlist; versions are semver with a CHANGELOG; releases are tag-driven CI runs that execute the full gate suite, `npm pack` dry-run, then publish. The `RpcClient.pid` patch cannot travel with the artifact — Bun honors `patchedDependencies` only from the consumer's root manifest, and pi-coding-agent reaches the consumer as a peerDependency — so publish gates on the consumer-install smoke test (T-1306), which installs the packed tarball into a clean project and asserts the pid contract state of the resolved peer. Until EP-15 lands the accessor upstream, that state is 'pid absent, degraded supervision' and the release notes must state it; after T-1504 the state flips to 'pid present' and the same test enforces it. No silent drift in either direction.
+Distribution is a single npm package with an explicit `files` allowlist; versions are semver with a CHANGELOG; releases use an operator-dispatched CI run with a required tag input and a `publish` input that defaults false. Every dispatch verifies the tag, runs the full gate suite, packs once, and runs the consumer-install smoke against that tarball; publishing is an explicit opt-in and publishes the same verified tarball. The `RpcClient.pid` patch cannot travel with the artifact because Bun honors `patchedDependencies` only from the consumer's root manifest, while pi-coding-agent reaches the consumer as a peerDependency. Publication therefore gates on the consumer-install smoke test (T-1306), which installs the packed tarball into a clean project and asserts the pid contract state of the resolved peer. Until EP-15 lands the accessor upstream, that state is 'pid absent, degraded supervision' and the release notes must state it; after T-1504 the state flips to 'pid present' and the same test enforces it. No silent drift in either direction.
 
 ## Consequences
 
 - A release may ship before EP-15 lands, but only with the degraded-supervision state named in its release notes — the smoke test makes the state explicit instead of letting a user discover it.
 - The patch pin (18.0.7) is already stale against the peer range (^18.0.7) and the registry head; T-1305's gate asserts patch keys match the lockfile-resolved version.
-- Every release is reproducible: tag → gates → pack → publish, with no hand steps.
+- Every release is reproducible: operator-supplied tag, gates, one verified tarball, then explicit publish, with no artifact rebuild between verification and publication.
 - Git-only installs stay supported for development but are not a release channel.
 
 ## Alternatives considered

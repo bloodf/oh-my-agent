@@ -28,7 +28,7 @@ When a released pi-coding-agent ships the RpcClient.pid accessor, the patchedDep
 | [`package.json`](../../../package.json) | Edited | The patchedDependencies entry is removed; the peer and dev dependency floors rise to the released fix version. |
 | [`patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`](../../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch) | Edited | Deleted; this row records the removal. |
 | [`tests/pack.test.ts`](../../../tests/pack.test.ts) | Edited | Created by T-1301; the patches/ presence assertions come out. |
-| `.github/workflows/release.yml` (to be created) | Edited | Created by T-1303; the pid contract state flips to 'pid present'. |
+| [`.github/workflows/release.yml`](../../../.github/workflows/release.yml) | Edited | Created by T-1303; the pid contract state flips to 'pid present'. |
 
 ## Steps
 
@@ -43,7 +43,7 @@ When a released pi-coding-agent ships the RpcClient.pid accessor, the patchedDep
 
 ## Out of scope
 
-- Waiting on the upstream release, which is outside this repo's control; this task stays Blocked until T-1502's issue closes.
+- Remaining blocker: wait for a released pi-coding-agent version containing the RpcClient.pid accessor tracked by T-1502; an upstream filing alone does not unblock patch removal.
 
 ## Depends on
 

@@ -1,12 +1,12 @@
-# T-1303 — Tag-driven release workflow
+# T-1303 — Manual-dispatch release workflow
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
-A pushed tag runs the full gate suite and the pack test, then publishes the npm artifact — with ADR-013's pid-contract state asserted as a pipeline step, not a wiki note.
+An operator dispatches the release workflow with a tag; the workflow always verifies the release and its single packed tarball, then publishes that tarball only when the `publish` input is true, with ADR-013's pid-contract state asserted as a pipeline step, not a wiki note.
 
 ## Read first
 
@@ -23,22 +23,29 @@ A pushed tag runs the full gate suite and the pack test, then publishes the npm 
 
 | Path | Role | Note |
 |---|---|---|
-| `.github/workflows/release.yml` (to be created) | New | Tag-triggered: install, gates, pack test, publish with provenance, pid-contract assert. |
+| [`.github/workflows/release.yml`](../../../.github/workflows/release.yml) | New | Manual dispatch with required tag input; always verifies one tarball, then publishes that exact artifact with provenance only when opted in. |
 | [`package.json`](../../../package.json) | Edited | publishConfig and the version/omp.version pair the tag step asserts. |
 
 ## Steps
 
-1. Trigger on v* tags; a step asserts tag == package.json version == omp.version before anything publishes.
-2. Run the full suite, the delivery-doc gates, and the pack test on the tag checkout.
-3. Publish with the pinned command `npm publish --provenance`: the job declares `permissions: id-token: write`, the manifest sets publishConfig.access to "public" for the scoped name, and the token policy is an npm automation token, not interactive 2FA.
-4. The pack/publish step asserts the RpcClient.pid contract state of the resolved peer per amended ADR-013 — 'pid absent, degraded supervision' until T-1504 lands, 'pid present' after — so the patch story never drifts silently.
+1. Expose only `workflow_dispatch`, with a required `tag` input and a boolean `publish` input defaulting false; checkout and the version gate use `inputs.tag`, and the gate asserts tag == package.json version == omp.version before publication is possible.
+2. Always run version/changelog validation, patch hygiene, typecheck and fast suites through the pack lifecycle, the console suite, lint, delivery-doc drift checks, pack assertions, and the consumer-install smoke asserting the current RpcClient.pid state: 'pid absent, degraded supervision'.
+3. Create one tarball, retain it as the verified artifact through every pack and consumer assertion, and publish that exact tarball only when `inputs.publish` is true.
+4. Publish the verified tarball with `npm publish <tarball> --provenance`; the job declares `permissions: id-token: write`, and the manifest sets publishConfig.access to "public" for the scoped name.
 
 ## Acceptance
 
-- [ ] A tag that mismatches package.json's version or omp.version fails before publish.
-- [ ] The publish job has id-token: write and publishes public.
-- [ ] The pack/publish step asserts the pid contract state per amended ADR-013 (no silent patch-story drift).
-- [ ] A workflow_dispatch dry-run mode exercises everything except the publish step.
+- [x] The workflow has only a manual `workflow_dispatch` trigger with required `tag` and boolean `publish` inputs; `publish` defaults false, while checkout and version validation use `inputs.tag`.
+- [x] Every dispatch runs version/changelog validation, patch hygiene, typecheck and fast suites through the pack lifecycle, the console suite, lint, docs drift, pack assertions, and the consumer-install smoke with RpcClient.pid in the 'pid absent, degraded supervision' state.
+- [x] The publish step runs only when `inputs.publish` is true, has `id-token: write`, and publishes public with `--provenance`.
+- [x] Publication uses the same single tarball already exercised by pack assertions and the consumer-install smoke; no publish-time rebuild can change the artifact.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commits 264207d and 0cf7d17 ship manual-only verification with explicit publication opt-in for one verified tarball | [`.github/workflows/release.yml`](../../../.github/workflows/release.yml) |
+| Commit 264207d supplies release lifecycle commands | `package.json §scripts` |
 
 ## Out of scope
 

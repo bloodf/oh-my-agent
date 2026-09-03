@@ -1,6 +1,6 @@
 # EP-11 — Operator polish: AAA console and the CLI surface
 
-**Status:** Ready
+**Status:** Done
 
 *Derived from the tasks below.*
 
@@ -25,9 +25,9 @@ The console was built for correctness; it has one ARIA attribute and no visual s
 
 ## Acceptance
 
-- [ ] Every daemon operation is scriptable via `omp-agent <verb>` with non-zero exits on failure and a `--json` mode.
-- [ ] The console passes the browser suite's accessibility assertions: landmarks, keyboard flows, focus order, contrast.
-- [ ] The visual overhaul ships as one design system (tokens), not a restyle per component.
+- [x] Every daemon operation is scriptable via `omp-agent <verb>` with non-zero exits on failure and a `--json` mode.
+- [x] The console passes the browser suite's accessibility assertions: landmarks, keyboard flows, focus order, contrast.
+- [x] The visual overhaul ships as one design system (tokens), not a restyle per component.
 
 ## Tasks
 
@@ -37,4 +37,4 @@ The console was built for correctness; it has one ARIA attribute and no visual s
 | [T-1102](../tasks/T-1102-console-accessibility.md) | Console accessibility to AAA standard | Done |
 | [T-1103](../tasks/T-1103-cli-management-surface.md) | CLI management verbs: no TUI required | Done |
 | [T-1104](../tasks/T-1104-console-focus-stability.md) | Focus stability across transcript repaints | Done |
-| [T-1105](../tasks/T-1105-unread-reconcile-on-open.md) | Reconcile unread state when the events socket opens | Ready |
+| [T-1105](../tasks/T-1105-unread-reconcile-on-open.md) | Reconcile unread state when the events socket opens | Done |

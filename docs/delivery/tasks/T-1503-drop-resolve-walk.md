@@ -40,7 +40,7 @@ When a released pi-coding-agent fixes the resolution corruption, the node_module
 
 ## Out of scope
 
-- Waiting on the upstream release, which is outside this repo's control; this task stays Blocked until T-1502's issue closes.
+- Remaining blocker: wait for a released pi-coding-agent version containing the resolver fix tracked by T-1502; an upstream filing alone does not unblock removal.
 
 ## Depends on
 

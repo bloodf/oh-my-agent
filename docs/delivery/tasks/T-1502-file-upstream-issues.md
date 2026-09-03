@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-15](../epics/EP-15-upstream-filings.md) | [SP-16](../sprints/SP-16-upstream-hygiene.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-15](../epics/EP-15-upstream-filings.md) | [SP-16](../sprints/SP-16-upstream-hygiene.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -35,7 +35,14 @@ Both upstream issues are filed — the resolver corruption with T-1501's repro, 
 
 ## Acceptance
 
-- [ ] Both URLs are in the tree and in the code comments; a reader of either workaround reaches the issue in one click.
+- [x] Both URLs are in the tree and in the code comments; a reader of either workaround reaches the issue in one click.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| [Resolver corruption filed as oven-sh/bun#41201](https://github.com/oven-sh/bun/issues/41201) | [`repro/bun-plugin-memo/README.md`](../../../repro/bun-plugin-memo/README.md) |
+| [RpcClient.pid accessor requested as can1357/oh-my-pi#10597](https://github.com/can1357/oh-my-pi/issues/10597) | [`patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`](../../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch) |
 
 ## Out of scope
 

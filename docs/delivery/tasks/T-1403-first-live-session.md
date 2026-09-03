@@ -40,7 +40,7 @@ The first live dogfood session runs end-to-end and every finding lands in the tr
 
 ## Out of scope
 
-- Nothing deferred.
+- Remaining blocker: an operator must run and record the first live-account session; fixture coverage cannot satisfy this ticket.
 
 ## Depends on
 

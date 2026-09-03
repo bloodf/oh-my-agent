@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-15](../epics/EP-15-upstream-filings.md) | [SP-16](../sprints/SP-16-upstream-hygiene.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-15](../epics/EP-15-upstream-filings.md) | [SP-16](../sprints/SP-16-upstream-hygiene.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -38,11 +38,18 @@ A minimal, self-contained repro of the legacy-pi-compat Bun.plugin onResolve hoo
 
 ## Acceptance
 
-- [ ] The repro prints Bun.version and refuses to run on any runtime version other than exactly 1.3.14.
-- [ ] The repro fails N/N consecutive runs with the plugin installed and passes N/N with it removed.
-- [ ] A hand-written minimal Bun.plugin onResolve hook with no OMP installed either reproduces the corruption or doesn't. package.json pins @oh-my-pi/pi-coding-agent to exactly 18.0.7, and committed bun.lock pins the resulting dependency resolution; neither packageManager metadata nor bun.lock selects or pins the Bun executable/runtime. The control result determines whether the issue goes to oven-sh/bun or oh-my-pi.
-- [ ] The repro names its public hosting (this repo is public — the in-tree repro/ path) and its README carries an MIT license line.
-- [ ] The README is the issue body with a fixed structure: symptoms, observed resolutions, affected versions, expected vs actual, and repro command. Its commands install Bun 1.3.14 with the official exact-version installer, run `bun install --frozen-lockfile`, then run `bun run repro`.
+- [x] The repro prints Bun.version and refuses to run on any runtime version other than exactly 1.3.14.
+- [x] The repro fails N/N consecutive runs with the plugin installed and passes N/N with it removed.
+- [x] A hand-written minimal Bun.plugin onResolve hook with no OMP installed either reproduces the corruption or doesn't. package.json pins @oh-my-pi/pi-coding-agent to exactly 18.0.7, and committed bun.lock pins the resulting dependency resolution; neither packageManager metadata nor bun.lock selects or pins the Bun executable/runtime. The control result determines whether the issue goes to oven-sh/bun or oh-my-pi.
+- [x] The repro names its public hosting (this repo is public — the in-tree repro/ path) and its README carries an MIT license line.
+- [x] The README is the issue body with a fixed structure: symptoms, observed resolutions, affected versions, expected vs actual, and repro command. Its commands install Bun 1.3.14 with the official exact-version installer, run `bun install --frozen-lockfile`, then run `bun run repro`.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commits d66d4e4 and 4b1a803 provide the exact-version resolver repro with plugin, no-plugin, and bare-hook controls | [`repro/bun-plugin-memo/repro.ts`](../../../repro/bun-plugin-memo/repro.ts) |
+| Commits d66d4e4 and 4b1a803 document observed output, affected versions, exact setup, expected behavior, and public reproduction steps | [`repro/bun-plugin-memo/README.md`](../../../repro/bun-plugin-memo/README.md) |
 
 ## Out of scope
 
