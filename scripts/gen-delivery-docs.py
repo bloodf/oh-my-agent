@@ -4211,11 +4211,11 @@ TASKS += [
         assets=[
             ("src/worker/lifecycle.ts", "Edited", "The walk collapses back to a direct import.meta.resolve."),
             ("package.json", "Edited", "Whichever fix shipped sets the floor: engines.bun for the Bun path, or the pi-coding-agent peer AND dev floors for the compat-layer path."),
-            ("bun.lock", "Edited", "Refreshed against the raised floor."),
+            ("bun.lock", "Edited", "Refreshed only on the compat-layer path, where the pi-coding-agent floors move a resolved dependency; a Bun engines floor changes no resolution and leaves this file untouched."),
         ],
         steps=[
             "Pick this up WHEN EITHER a released Bun contains the resolver fix (oven-sh/bun#41201, the tracker T-1501's bare control selected), OR a released pi-coding-agent stops its compat hook resolving the specifier it just matched. T-1501's control — a hand-written onResolve hook overflowing with no OMP package on disk and no OMP code in the process — puts the defect in Bun; a compat-layer change does not fix Bun, but it does remove this app's trigger, so either release makes the walk removable.",
-            "Remove the walk and raise only the floor that earned it: engines.bun for a Bun fix, the peer and dev pi-coding-agent floors for a compat-layer fix. Refresh the lockfile.",
+            "Remove the walk and raise only the floor that earned it: engines.bun for a Bun fix, the peer and dev pi-coding-agent floors for a compat-layer fix. Refresh the lockfile only on the compat-layer path — raising engines.bun resolves no dependency and must not produce a lockfile diff.",
             "Regression coverage comes from the existing worker-lifecycle suite — real spawned workers with pid semantics — run green on the upgraded runtime or dependency.",
         ],
         acceptance=[
