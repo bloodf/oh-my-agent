@@ -50,9 +50,9 @@ the three slowest suites (pack, consumer-install, console-client).
 
 ## The delivery tree
 
-Every unit of work is a task file in [`docs/delivery/`](docs/delivery/README.md) with a
-fixed nine-section contract: Goal, Read first, Files this task may change, Modules and
-assets in play, Steps, Acceptance, Out of scope, Depends on, Unblocks.
+Every unit of work is a task file in [`docs/delivery/`](docs/delivery/README.md) with the
+same nine headings in the same order: Goal, Read first, Files this task may change,
+Modules and assets in play, Steps, Acceptance, Out of scope, Depends on, Unblocks.
 
 Two files are worth reading before your first change:
 

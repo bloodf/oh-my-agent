@@ -4816,7 +4816,7 @@ def render_readme() -> str:
         "",
         "## Unit contract",
         "",
-        "Every task file carries the same eight sections in the same order: Goal, Read first, "
+        "Every task file carries the same nine headings in the same order: Goal, Read first, "
         "Files this task may change, Modules and assets in play, Steps, Acceptance, and then "
         "Out of scope, Depends on, Unblocks. Anything else is drift.",
         "",

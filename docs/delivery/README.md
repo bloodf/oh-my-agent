@@ -19,7 +19,7 @@ What remains is a small set of tickets blocked on things outside the repo: T-120
 
 ## Unit contract
 
-Every task file carries the same eight sections in the same order: Goal, Read first, Files this task may change, Modules and assets in play, Steps, Acceptance, and then Out of scope, Depends on, Unblocks. Anything else is drift.
+Every task file carries the same nine headings in the same order: Goal, Read first, Files this task may change, Modules and assets in play, Steps, Acceptance, and then Out of scope, Depends on, Unblocks. Anything else is drift.
 
 `Unblocks` is derived by inverting `Depends on`, so the two halves of an edge cannot disagree. Only `Depends on` is authored.
 
