@@ -1,6 +1,6 @@
 # EP-13 — Distribution: packable artifact, versioning, and release CI
 
-**Status:** Ready
+**Status:** Done
 
 *Derived from the tasks below.*
 
@@ -25,9 +25,9 @@ The plugin installs and runs from a checkout, but nothing about a release is rep
 
 ## Acceptance
 
-- [ ] `npm pack` dry-run output is asserted in CI: no unintended file ships, and the patch story is explicit.
-- [ ] A release is a tag; CI runs the full gate suite before publish.
-- [ ] The README's install section describes installing the released artifact, not the repo.
+- [x] `npm pack` dry-run output is asserted in CI: no unintended file ships, and the patch story is explicit.
+- [x] A release is a tag; CI runs the full gate suite before publish.
+- [x] The README's install section describes installing the released artifact, not the repo.
 
 ## Decisions
 
@@ -37,9 +37,9 @@ The plugin installs and runs from a checkout, but nothing about a release is rep
 
 | Task | Title | Status |
 |---|---|---|
-| [T-1301](../tasks/T-1301-packable-artifact.md) | Files allowlist and the pack test | Ready |
-| [T-1302](../tasks/T-1302-versioning-policy.md) | Semver policy and the changelog | Ready |
+| [T-1301](../tasks/T-1301-packable-artifact.md) | Files allowlist and the pack test | Done |
+| [T-1302](../tasks/T-1302-versioning-policy.md) | Semver policy and the changelog | Done |
 | [T-1303](../tasks/T-1303-release-ci.md) | Manual-dispatch release workflow | Done |
 | [T-1304](../tasks/T-1304-install-docs.md) | README install path for the released artifact | Done |
-| [T-1305](../tasks/T-1305-patch-hygiene-gate.md) | patches/ contains code only, enforced | Ready |
+| [T-1305](../tasks/T-1305-patch-hygiene-gate.md) | patches/ contains code only, enforced | Done |
 | [T-1306](../tasks/T-1306-consumer-install-smoke.md) | Consumer-install smoke test | Done |

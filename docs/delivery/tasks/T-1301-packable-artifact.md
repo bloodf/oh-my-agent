@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -34,8 +34,15 @@
 
 ## Acceptance
 
-- [ ] The dry-run manifest contains src/ (the src/console/*.html/css/js assets included), skills/ with every SKILL.md, patches/, LICENSE, and README.md, and nothing under tests/, docs/, or .github/.
-- [ ] CI runs the pack test; a manifest regression fails the build.
+- [x] The dry-run manifest contains src/ (the src/console/*.html/css/js assets included), skills/ with every SKILL.md, patches/, LICENSE, and README.md, and nothing under tests/, docs/, or .github/.
+- [x] CI runs the pack test; a manifest regression fails the build.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commit 3c3f611 defines the published package allowlist | `package.json § files` |
+| Commit 3c3f611 proves the packed manifest; the pack test passes 2/2 today | [`tests/pack.test.ts`](../../../tests/pack.test.ts) |
 
 ## Out of scope
 

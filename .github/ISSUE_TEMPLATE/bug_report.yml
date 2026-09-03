@@ -1,0 +1,84 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Not for security vulnerabilities — see [SECURITY.md](https://github.com/bloodf/oh-my-agent/blob/main/SECURITY.md)
+        and report those privately.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: |
+        Exact commands. A reproduction someone else can run is worth more than a
+        paragraph of description.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: |
+        Paste the output of:
+
+        ```sh
+        bun --version
+        omp --version
+        git rev-parse --short HEAD
+        ```
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface
+      options:
+        - Daemon / control socket
+        - CLI (omp-agent)
+        - Browser console
+        - OMP TUI extension
+        - Worker lifecycle / sandbox
+        - Credential gateway
+        - Rooms / scheduling
+        - Packaging / install
+        - Other or not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Trust mode
+      description: "The daemon prints `trust model: loopback` or `trust model: remote` at boot."
+      options:
+        - loopback (default)
+        - remote (OMA_REMOTE=1)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: |
+        Daemon stderr, CLI output, or console errors.
+
+        **Redact tokens before pasting.** Anything after `?token=`, an `Authorization`
+        header, or an `X-Operator-Token` value is a live credential.
+      render: shell

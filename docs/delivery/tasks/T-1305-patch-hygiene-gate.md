@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -34,9 +34,16 @@ CI proves every file under patches/ is a code-only patch whose pin matches the l
 
 ## Acceptance
 
-- [ ] The gate passes on the current patch and fails on a binary-hunk fixture under --selftest.
-- [ ] Each patch filename decodes (%2F) to a patchedDependencies key that matches the lockfile-resolved version.
-- [ ] CI runs both the gate and its selftest.
+- [x] The gate passes on the current patch and fails on a binary-hunk fixture under --selftest.
+- [x] Each patch filename decodes (%2F) to a patchedDependencies key that matches the lockfile-resolved version.
+- [x] CI runs both the gate and its selftest.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commit 3c3f611 adds the patch hygiene gate, which passes today | [`scripts/check-patches.py`](../../../scripts/check-patches.py) |
+| Commit 3c3f611 runs the patch hygiene gate in CI | [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) |
 
 ## Out of scope
 

@@ -3744,7 +3744,7 @@ TASKS += [
     # ── EP-13: distribution ──────────────────────────────────────────────────
     Task(
         id="T-1301", slug="packable-artifact", title="Files allowlist and the pack test",
-        epic="EP-13", sprint="SP-14", status="Ready",
+        epic="EP-13", sprint="SP-14", status="Done",
         goal="`npm pack` produces a tarball with exactly what the plugin needs — manifest, sources, skills, console assets, the patches contract, LICENSE, README — and the suite proves it.",
         read_first=[
             ("Package manifest", "package.json"),
@@ -3768,11 +3768,15 @@ TASKS += [
             "The dry-run manifest contains src/ (the src/console/*.html/css/js assets included), skills/ with every SKILL.md, patches/, LICENSE, and README.md, and nothing under tests/, docs/, or .github/.",
             "CI runs the pack test; a manifest regression fails the build.",
         ],
+        evidence=[
+            ("Commit 3c3f611 defines the published package allowlist", "package.json § files"),
+            ("Commit 3c3f611 proves the packed manifest; the pack test passes 2/2 today", "tests/pack.test.ts"),
+        ],
         out_of_scope=["Publishing itself (T-1303), the consumer-install smoke test (T-1306), and removing the patch (T-1504)."],
     ),
     Task(
         id="T-1302", slug="versioning-policy", title="Semver policy and the changelog",
-        epic="EP-13", sprint="SP-14", status="Ready",
+        epic="EP-13", sprint="SP-14", status="Done",
         goal="The repo has a written versioning policy and a changelog the release workflow consumes: semver semantics for a pre-1.0 plugin and the release-commit ritual.",
         read_first=[
             ("ADR-013: release channel", "docs/delivery/adr/ADR-013-release-channel.md"),
@@ -3798,6 +3802,10 @@ TASKS += [
         acceptance=[
             "CHANGELOG.md exists with the policy header — versioning and rollback — and an Unreleased section.",
             "A CI check compares package.json's version and omp.version to the top non-Unreleased changelog entry.",
+        ],
+        evidence=[
+            ("Commit 3c3f611 adds the versioning policy and release record", "CHANGELOG.md § Changelog"),
+            ("Commit 3c3f611 enforces package and changelog version agreement in CI", ".github/workflows/ci.yml"),
         ],
         out_of_scope=["The release workflow itself (T-1303)."],
     ),
@@ -3866,7 +3874,7 @@ TASKS += [
     ),
     Task(
         id="T-1305", slug="patch-hygiene-gate", title="patches/ contains code only, enforced",
-        epic="EP-13", sprint="SP-14", status="Ready",
+        epic="EP-13", sprint="SP-14", status="Done",
         goal="CI proves every file under patches/ is a code-only patch whose pin matches the lockfile: no binary hunks, no stray files, no hunks touching non-source paths, no stale patch keys — the .DS_Store incident becomes a gate.",
         read_first=[
             ("The one patch under contract", "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"),
@@ -3890,6 +3898,10 @@ TASKS += [
             "The gate passes on the current patch and fails on a binary-hunk fixture under --selftest.",
             "Each patch filename decodes (%2F) to a patchedDependencies key that matches the lockfile-resolved version.",
             "CI runs both the gate and its selftest.",
+        ],
+        evidence=[
+            ("Commit 3c3f611 adds the patch hygiene gate, which passes today", "scripts/check-patches.py"),
+            ("Commit 3c3f611 runs the patch hygiene gate in CI", ".github/workflows/ci.yml"),
         ],
         out_of_scope=["Removing the patch (T-1504)."],
     ),
@@ -4793,21 +4805,14 @@ def render_readme() -> str:
         "pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` "
         "on every push, and `bun test` locally gives you the same answer.",
         "",
-        "Every runtime subsystem is built and under test: workers, isolation, credentials, "
-        "rooms, scheduling, and quota handling. Two things keep that from meaning finished.",
+        "Every runtime subsystem and every operator surface is built and tested. Workers, "
+        "isolation, credentials, rooms, scheduling, quota handling, the daemon binary, the "
+        "control socket, the TUI extension, the CLI, and the browser console all ship; EP-05, "
+        "EP-06, EP-09, EP-10, EP-11, and EP-16 are Done.",
         "",
-        "First, there is no operator surface. The extension entry point is an empty factory "
-        "and there is no daemon binary, so nothing here can currently be launched or looked "
-        "at by a human (EP-05).",
-        "",
-        "Second, the release surface is one push old: the CI workflow, lint "
-        "configuration, and root README now exist (EP-07), but the workflow has "
-        "never run on a runner — T-701 stays In progress until a push proves it.",
-        "",
-        "The credential gateway is now verified at its consumer as well as its wire: a "
-        "stock `RemoteAuthCredentialStore` drives it in "
-        "[T-303](tasks/T-303-client-integration.md), which found and fixed a real shutdown "
-        "defect — a daemon would hang on exit while any worker was parked on a long-poll.",
+        "What remains is a small set of tickets blocked on things outside the repo: T-1202 "
+        "needs real-proxy evidence and therefore blocks T-1205; T-1403 needs a live-account "
+        "session; and T-1503 and T-1504 need released upstream fixes.",
         "",
         "## Unit contract",
         "",

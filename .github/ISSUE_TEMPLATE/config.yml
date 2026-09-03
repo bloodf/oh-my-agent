@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/bloodf/oh-my-agent/security/advisories/new
+    about: Report privately. For vulnerabilities only — not conduct reports, which go to the maintainer per CODE_OF_CONDUCT.md.
+  - name: Contributing guide
+    url: https://github.com/bloodf/oh-my-agent/blob/main/CONTRIBUTING.md
+    about: Setup, testing standards, and what evidence a PR needs.
+  - name: Delivery tree
+    url: https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/README.md
+    about: Every task with its status. Anything marked Ready is specified and unblocked.

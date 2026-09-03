@@ -1,0 +1,55 @@
+name: Feature request
+description: Propose new behavior
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every unit of work here becomes a task file in
+        [`docs/delivery/`](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/README.md)
+        with explicit acceptance criteria. This form collects what that task would need.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: |
+        What can you not do today? Describe the situation, not the solution — the
+        problem outlives any particular fix for it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What the system should do instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: How would we know it works
+      description: |
+        What observable behavior would prove this shipped? Phrase it as something a test
+        could assert. "The daemon refuses X before opening any listener" is checkable;
+        "X is handled better" is not.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        Including doing nothing. If an existing ADR in `docs/delivery/adr/` covers this
+        ground, say which and why it should be revisited.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This does not require the daemon to bind a routable address (ADR-012 refuses that unconditionally)
+        - label: This does not assume multi-tenancy (one operator per daemon is the model)

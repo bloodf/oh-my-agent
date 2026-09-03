@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Ready | [asset-map](../asset-map.md) |
+| [EP-13](../epics/EP-13-distribution.md) | [SP-14](../sprints/SP-14-release-pipeline.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -37,8 +37,15 @@ The repo has a written versioning policy and a changelog the release workflow co
 
 ## Acceptance
 
-- [ ] CHANGELOG.md exists with the policy header — versioning and rollback — and an Unreleased section.
-- [ ] A CI check compares package.json's version and omp.version to the top non-Unreleased changelog entry.
+- [x] CHANGELOG.md exists with the policy header — versioning and rollback — and an Unreleased section.
+- [x] A CI check compares package.json's version and omp.version to the top non-Unreleased changelog entry.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Commit 3c3f611 adds the versioning policy and release record | `CHANGELOG.md § Changelog` |
+| Commit 3c3f611 enforces package and changelog version agreement in CI | [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) |
 
 ## Out of scope
 

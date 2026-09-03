@@ -11,15 +11,11 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**89 of 97 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
+**92 of 97 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
-Every runtime subsystem is built and under test: workers, isolation, credentials, rooms, scheduling, and quota handling. Two things keep that from meaning finished.
+Every runtime subsystem and every operator surface is built and tested. Workers, isolation, credentials, rooms, scheduling, quota handling, the daemon binary, the control socket, the TUI extension, the CLI, and the browser console all ship; EP-05, EP-06, EP-09, EP-10, EP-11, and EP-16 are Done.
 
-First, there is no operator surface. The extension entry point is an empty factory and there is no daemon binary, so nothing here can currently be launched or looked at by a human (EP-05).
-
-Second, the release surface is one push old: the CI workflow, lint configuration, and root README now exist (EP-07), but the workflow has never run on a runner — T-701 stays In progress until a push proves it.
-
-The credential gateway is now verified at its consumer as well as its wire: a stock `RemoteAuthCredentialStore` drives it in [T-303](tasks/T-303-client-integration.md), which found and fixed a real shutdown defect — a daemon would hang on exit while any worker was parked on a long-poll.
+What remains is a small set of tickets blocked on things outside the repo: T-1202 needs real-proxy evidence and therefore blocks T-1205; T-1403 needs a live-account session; and T-1503 and T-1504 need released upstream fixes.
 
 ## Unit contract
 
@@ -58,7 +54,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-10](epics/EP-10-production-wiring.md) | Production wiring: serving, usage, and deferred hardening | Done | 6 |
 | [EP-11](epics/EP-11-operator-polish.md) | Operator polish: AAA console and the CLI surface | Done | 5 |
 | [EP-12](epics/EP-12-remote-exposure.md) | Beyond loopback: remote exposure with a real trust model | Blocked | 6 |
-| [EP-13](epics/EP-13-distribution.md) | Distribution: packable artifact, versioning, and release CI | Ready | 6 |
+| [EP-13](epics/EP-13-distribution.md) | Distribution: packable artifact, versioning, and release CI | Done | 6 |
 | [EP-14](epics/EP-14-dogfooding.md) | Live-account hardening | Blocked | 5 |
 | [EP-15](epics/EP-15-upstream-filings.md) | Upstream pi-coding-agent hygiene | Blocked | 4 |
 | [EP-16](epics/EP-16-fidelity-and-hardening.md) | Surface fidelity and protocol hardening | Done | 15 |
@@ -80,7 +76,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [SP-11](sprints/SP-11-production-wiring.md) | Production wiring | Done | The console served for real, budgets fed by real usage, and the hardening deferred to a named trigger. |
 | [SP-12](sprints/SP-12-operator-polish.md) | Operator polish | Done | AAA visuals and accessibility for the console, and a CLI that needs no TUI at all. |
 | [SP-13](sprints/SP-13-beyond-loopback.md) | Beyond loopback | Blocked | Remote exposure of the console and control socket under one declared trust model: proxy TLS, operator token, enforced hierarchy. |
-| [SP-14](sprints/SP-14-release-pipeline.md) | Release pipeline | Ready | A packable npm artifact with a version story and a manual-dispatch release workflow. |
+| [SP-14](sprints/SP-14-release-pipeline.md) | Release pipeline | Done | A packable npm artifact with a version story and a manual-dispatch release workflow. |
 | [SP-15](sprints/SP-15-live-accounts.md) | Live accounts | Blocked | Dogfooding against real accounts, with findings landing back in the tree as tasks. |
 | [SP-16](sprints/SP-16-upstream-hygiene.md) | Upstream hygiene | Blocked | Two pi-coding-agent issues filed with minimal repros, and the workarounds they replace made removable. |
 | [SP-17](sprints/SP-17-fidelity-and-hardening.md) | Fidelity and hardening | Done | Close what the two-model review found: threads, reactions, attribution, typed events, and the acceptance bullets no test proved. |
