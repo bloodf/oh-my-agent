@@ -11,7 +11,7 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**92 of 97 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
+**93 of 98 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
 Every runtime subsystem and every operator surface is built and tested. Workers, isolation, credentials, rooms, scheduling, quota handling, the daemon binary, the control socket, the TUI extension, the CLI, and the browser console all ship; EP-05, EP-06, EP-09, EP-10, EP-11, and EP-16 are Done.
 
@@ -57,7 +57,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-13](epics/EP-13-distribution.md) | Distribution: packable artifact, versioning, and release CI | Done | 6 |
 | [EP-14](epics/EP-14-dogfooding.md) | Live-account hardening | Blocked | 5 |
 | [EP-15](epics/EP-15-upstream-filings.md) | Upstream pi-coding-agent hygiene | Blocked | 4 |
-| [EP-16](epics/EP-16-fidelity-and-hardening.md) | Surface fidelity and protocol hardening | Done | 15 |
+| [EP-16](epics/EP-16-fidelity-and-hardening.md) | Surface fidelity and protocol hardening | Done | 16 |
 
 ## Sprints
 

@@ -27,3 +27,4 @@ Close what the two-model review found: threads, reactions, attribution, typed ev
 | [T-1613](../tasks/T-1613-build-hygiene-test.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Dependency-free console build hygiene | Done |
 | [T-1614](../tasks/T-1614-test-timing-hygiene.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Deadline-bounded test timing | Done |
 | [T-1615](../tasks/T-1615-repaint-focus-stability.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Repaint stability: identity-keyed focus, thread-pane restore, and sticky scroll | Done |
+| [T-1616](../tasks/T-1616-control-cap-json-rpc.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | A saturated audit stays readable on the control socket | Done |

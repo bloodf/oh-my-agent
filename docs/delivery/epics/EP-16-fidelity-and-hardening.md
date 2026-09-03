@@ -57,3 +57,4 @@ The two-model review (sol + m3) found the console advertises thread replies and 
 | [T-1613](../tasks/T-1613-build-hygiene-test.md) | Dependency-free console build hygiene | Done |
 | [T-1614](../tasks/T-1614-test-timing-hygiene.md) | Deadline-bounded test timing | Done |
 | [T-1615](../tasks/T-1615-repaint-focus-stability.md) | Repaint stability: identity-keyed focus, thread-pane restore, and sticky scroll | Done |
+| [T-1616](../tasks/T-1616-control-cap-json-rpc.md) | A saturated audit stays readable on the control socket | Done |

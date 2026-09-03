@@ -61,10 +61,12 @@ Load-bearing properties, each covered by tests:
 
 ### Known gaps
 
-The three documented proxy recipes in `docs/remote-exposure.md` carry `UNVERIFIED` rows:
-each still needs one dated end-to-end run against a real proxy. The daemon-side behavior
-they depend on is tested; the recipes themselves are not yet verified end-to-end. This
-is tracked as T-1202 and is stated in the doc rather than glossed over.
+One of the three documented proxy recipes in `docs/remote-exposure.md` still carries an
+`UNVERIFIED` row: `tailscale serve` needs one dated end-to-end run against a real proxy.
+The Caddy and SSH-tunnel recipes were run end to end on 2026-09-03 against real
+Caddy-terminated TLS from a separate operator machine, on an internal CA rather than
+public ACME; public ACME issuance and renewal remain unproven. This is tracked as T-1202
+and is stated in the doc rather than glossed over.
 
 ## Handling credentials
 

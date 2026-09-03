@@ -1373,9 +1373,21 @@ export async function startControlSocket(
 				socketPath,
 			);
 			if (auditConnection === undefined) {
-				return new Response("Connection audit capacity reached", {
-					status: 503,
-				});
+				// A JSON-RPC caller — the CLI included — parses every reply as
+				// JSON-RPC. A bare-text body here would surface a saturated audit
+				// as a parser complaint about JSON, hiding the one reason an
+				// operator needs at exactly the moment they run `omp-agent audit`.
+				// `id` is 0 because the refusal precedes `request.text()`, so the
+				// caller's id was never parsed — the same reason the parse
+				// refusals above use 0.
+				return Response.json(
+					failure(
+						0,
+						ERROR_CODE.UNAVAILABLE,
+						"Connection audit capacity reached",
+					),
+					{ status: 503 },
+				);
 			}
 			try {
 				return await dispatch(await request.text(), identity);

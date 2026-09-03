@@ -26,7 +26,7 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { runCli } from "../src/daemon/cli";
 import { normalizeRequestUrl } from "../src/daemon/console-api";
 import type { DaemonHandle, WorkerFactory } from "../src/daemon/main";
@@ -1350,6 +1350,76 @@ describe("authenticated connection audit", () => {
 		} finally {
 			for (const socket of sockets) await closeSocket(socket);
 			stderr.mockRestore();
+		}
+	});
+
+	// A saturated audit is exactly when an operator reaches for `omp-agent
+	// audit`, so the control socket's refusal has to survive the CLI's JSON-RPC
+	// client. A bare-text 503 does not: `createCliClient` calls `response.json()`
+	// on every reply, so the operator would read a parser's complaint about
+	// JSON instead of the daemon's own reason.
+	test("refuses a control connection at the cap as a readable JSON-RPC error", async () => {
+		const booted = await bootRemoteConsole();
+		const operatorToken = (
+			await readFile(join(booted.stateDir, "console-token"), "utf8")
+		).trim();
+		const proxySecret = (
+			await readFile(join(booted.stateDir, "console-proxy-secret"), "utf8")
+		).trim();
+		const sockets: WebSocket[] = [];
+		try {
+			for (let index = 0; index < 32; index += 1) {
+				const opened = await openRemoteConsoleSocket(
+					booted,
+					operatorToken,
+					proxySecret,
+				);
+				sockets.push(opened.socket);
+			}
+			const response = await fetch("http://localhost/rpc", {
+				unix: booted.handle.socketPath,
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${operatorToken}`,
+				},
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "status",
+					params: {},
+				}),
+			});
+			expect(response.status).toBe(503);
+			const frame = (await response.json()) as JsonRpcFailure;
+			// Pin the envelope, not just the prose: the console API returns the
+			// identical message in a REST-shaped body, so asserting the message
+			// alone would pass on the wrong surface's frame.
+			expect(frame.jsonrpc).toBe("2.0");
+			expect(frame.error.code).toBe(ERROR_CODE.UNAVAILABLE);
+			expect(frame.error.message).toBe("Connection audit capacity reached");
+
+			// The operator-facing surface, not just the wire: the CLI must print
+			// the daemon's reason rather than a JSON parse failure.
+			const io: string[] = [];
+			const code = await runCli(["audit"], {
+				agentDir: dirname(booted.stateDir),
+				io: {
+					stdout: (text: string) => io.push(text),
+					stderr: (text: string) => io.push(text),
+				},
+			});
+			// 4 is the daemon-reported-failure code, distinct from 3 (daemon
+			// unavailable) and 2 (usage). A thrown parse error would also land
+			// here, so the two message assertions below are what separate a
+			// readable refusal from the regression.
+			expect(code).toBe(4);
+			expect(io.join("")).toContain("Connection audit capacity reached");
+			expect(io.join("")).not.toContain("Failed to parse JSON");
+		} finally {
+			// Settle every close: a serial await abandons the remaining sockets
+			// if one rejects, leaving audit slots held for the rest of the run.
+			await Promise.allSettled(sockets.map((socket) => closeSocket(socket)));
 		}
 	});
 });

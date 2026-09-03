@@ -323,6 +323,10 @@ export const ERROR_CODE = {
 	INVALID_PARAMS: -32602,
 	INTERNAL_ERROR: -32603,
 	UNAUTHORIZED: -32001,
+	// Refusing on a documented, deliberate limit — not a malfunction. Distinct
+	// from INTERNAL_ERROR so a client can tell "saturated, retry when a slot
+	// frees" from "a handler threw" without matching on the message string.
+	UNAVAILABLE: -32002,
 	FORBIDDEN: -32003,
 } as const;
 

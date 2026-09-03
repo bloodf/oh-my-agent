@@ -47,7 +47,7 @@ Remote mode is reachable only behind TLS: the docs ship copy-paste proxy recipes
 
 ## Out of scope
 
-- The daemon terminating TLS (ADR-012 rejects it) and the login flow UX (T-1203). Remaining blocker: acceptance is per-recipe, so all three usable HTTPS recipes — Caddy, tailscale serve, and SSH tunnel paired with loopback Caddy — each need their own dated end-to-end run against a real proxy. Verifying one converts one row and does not unblock this task or T-1205; the tailnet and second-host recipes need infrastructure a single workstation does not have.
+- The daemon terminating TLS (ADR-012 rejects it) and the login flow UX (T-1203). Remaining blocker: acceptance is per-recipe, and two of the three usable HTTPS recipes are now verified end to end against real Caddy-terminated TLS from a separate operator machine on 2026-09-03 -- Caddy with public TLS and SSH tunnel paired with loopback Caddy, each 11/11 checks, both on an internal CA rather than public ACME. The tailscale serve row stays UNVERIFIED: it needs two tailnet devices, and no second device on the available tailnet accepted a shell nor was an auth key available to enlist one. That single row is what keeps this task and T-1205 blocked.
 
 ## Depends on
 
