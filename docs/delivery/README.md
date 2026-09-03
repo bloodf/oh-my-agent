@@ -80,7 +80,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [SP-11](sprints/SP-11-production-wiring.md) | Production wiring | Done | The console served for real, budgets fed by real usage, and the hardening deferred to a named trigger. |
 | [SP-12](sprints/SP-12-operator-polish.md) | Operator polish | Done | AAA visuals and accessibility for the console, and a CLI that needs no TUI at all. |
 | [SP-13](sprints/SP-13-beyond-loopback.md) | Beyond loopback | Blocked | Remote exposure of the console and control socket under one declared trust model: proxy TLS, operator token, enforced hierarchy. |
-| [SP-14](sprints/SP-14-release-pipeline.md) | Release pipeline | Ready | A packable npm artifact with a version story and a tag-driven release workflow. |
+| [SP-14](sprints/SP-14-release-pipeline.md) | Release pipeline | Ready | A packable npm artifact with a version story and a manual-dispatch release workflow. |
 | [SP-15](sprints/SP-15-live-accounts.md) | Live accounts | Blocked | Dogfooding against real accounts, with findings landing back in the tree as tasks. |
 | [SP-16](sprints/SP-16-upstream-hygiene.md) | Upstream hygiene | Blocked | Two pi-coding-agent issues filed with minimal repros, and the workarounds they replace made removable. |
 | [SP-17](sprints/SP-17-fidelity-and-hardening.md) | Fidelity and hardening | Done | Close what the two-model review found: threads, reactions, attribution, typed events, and the acceptance bullets no test proved. |

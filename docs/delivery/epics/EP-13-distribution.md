@@ -6,7 +6,7 @@
 
 ## Outcome
 
-The plugin ships as one npm package with a version story — a files allowlist, a changelog, and a tag-driven release pipeline that runs the gates before anything publishes.
+The plugin ships as one npm package with a version story — a files allowlist, a changelog, and a manual-dispatch release pipeline that runs the gates before anything publishes.
 
 ## Why this is its own epic
 
@@ -15,7 +15,7 @@ The plugin installs and runs from a checkout, but nothing about a release is rep
 ## In scope
 
 - A files allowlist in the manifest and a pack test that proves the tarball contains exactly what the plugin needs.
-- Semver + CHANGELOG + a tag-driven release workflow that runs gates first, publishes second.
+- Semver + CHANGELOG + a manual-dispatch release workflow that runs gates first, publishes second.
 - A decision on how the pi-coding-agent patch travels with the artifact (ADR-013; upstreaming is EP-15).
 
 ## Not in scope

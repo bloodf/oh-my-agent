@@ -1260,8 +1260,8 @@ EPICS = [
         slug="distribution",
         title="Distribution: packable artifact, versioning, and release CI",
         outcome=(
-            "The plugin ships as one npm package with a version story — a files allowlist, a changelog, and a tag-driven "
-            "release pipeline that runs the gates before anything publishes."
+            "The plugin ships as one npm package with a version story — a files allowlist, a changelog, and a "
+            "manual-dispatch release pipeline that runs the gates before anything publishes."
         ),
         why=(
             "The plugin installs and runs from a checkout, but nothing about a release is reproducible: no "
@@ -1271,7 +1271,7 @@ EPICS = [
         ),
         scope=[
             "A files allowlist in the manifest and a pack test that proves the tarball contains exactly what the plugin needs.",
-            "Semver + CHANGELOG + a tag-driven release workflow that runs gates first, publishes second.",
+            "Semver + CHANGELOG + a manual-dispatch release workflow that runs gates first, publishes second.",
             "A decision on how the pi-coding-agent patch travels with the artifact (ADR-013; upstreaming is EP-15).",
         ],
         non_goals=[
@@ -1419,7 +1419,7 @@ SPRINTS = [
            theme="Remote exposure of the console and control socket under one declared "
                  "trust model: proxy TLS, operator token, enforced hierarchy."),
     Sprint(id="SP-14", slug="release-pipeline", title="Release pipeline",
-           theme="A packable npm artifact with a version story and a tag-driven "
+           theme="A packable npm artifact with a version story and a manual-dispatch "
                  "release workflow."),
     Sprint(id="SP-15", slug="live-accounts", title="Live accounts",
            theme="Dogfooding against real accounts, with findings landing back in "

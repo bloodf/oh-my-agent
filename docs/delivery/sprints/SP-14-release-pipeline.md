@@ -6,7 +6,7 @@
 
 ## Theme
 
-A packable npm artifact with a version story and a tag-driven release workflow.
+A packable npm artifact with a version story and a manual-dispatch release workflow.
 
 ## Tasks
 
