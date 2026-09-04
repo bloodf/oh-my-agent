@@ -6,6 +6,12 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-04
+
+### Fixed
+
+- Exclude Archify diagram JSON/SVG and brand rasters from Biome so the release lint gate can pass.
+
 ## [1.0.2] - 2026-09-04
 
 ### Changed

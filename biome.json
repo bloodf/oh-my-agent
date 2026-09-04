@@ -7,7 +7,7 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**", "!**/.agentic"]
+		"includes": ["**", "!**/.agentic", "!**/docs/diagrams", "!**/docs/assets"]
 	},
 	"formatter": {
 		"enabled": true,
