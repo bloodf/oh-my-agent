@@ -7,6 +7,45 @@
 	</head>
 	<body>
 		<div id="root"></div>
+		<script>
+			if (document.documentElement.hasAttribute("data-auth-bootstrap")) {
+				const root = document.getElementById("root");
+				root.innerHTML = `<main id="operator-auth" style="min-height:100vh;display:grid;place-items:center;font:16px system-ui;background:#09090b;color:#fafafa"><form id="operator-auth-form" aria-labelledby="operator-auth-title" style="display:grid;gap:1rem;width:min(24rem,calc(100% - 3rem));padding:1.5rem;border:1px solid #27272a;border-radius:.75rem"><h1 id="operator-auth-title" style="margin:0;font-size:1.25rem">Operator authentication</h1><p style="margin:0;color:#a1a1aa">Enter the operator token to open this remote console.</p><label for="operator-token">Operator token</label><input id="operator-token" name="operator-token" type="password" autocomplete="off" required autofocus style="font:inherit;padding:.6rem;background:#18181b;color:inherit;border:1px solid #3f3f46;border-radius:.4rem"><button type="submit" style="font:inherit;padding:.6rem;cursor:pointer">Open console</button><p id="operator-auth-error" role="alert" style="min-height:1.25rem;margin:0;color:#f87171"></p></form></main>`;
+				const form = document.getElementById("operator-auth-form");
+				const input = document.getElementById("operator-token");
+				const error = document.getElementById("operator-auth-error");
+				const authenticate = async (token, submittedValue = input.value) => {
+					try {
+						const response = await fetch("/api/session", {
+							method: "POST",
+							headers: { "X-Operator-Token": token },
+						});
+						if (!response.ok) throw new Error("Operator token refused. Re-enter the token.");
+						const payload = await response.json();
+						if (typeof payload.ticket !== "string" || !payload.ticket) throw new Error("Authentication unavailable.");
+						sessionStorage.setItem("oh-my-agent.operator-token", token);
+						const destination = new URL("/", location.href);
+						destination.searchParams.set("ticket", payload.ticket);
+						location.replace(destination);
+					} catch (cause) {
+						sessionStorage.removeItem("oh-my-agent.operator-token");
+						if (input.value === submittedValue) input.value = "";
+						error.textContent = cause instanceof Error ? cause.message : "Authentication unavailable.";
+						input.focus();
+					}
+				};
+				form.addEventListener("submit", (event) => {
+					event.preventDefault();
+					const token = input.value.trim();
+					if (!token) return input.focus();
+					error.textContent = "";
+					void authenticate(token, input.value);
+				});
+				const stored = sessionStorage.getItem("oh-my-agent.operator-token");
+				if (stored) void authenticate(stored, input.value);
+				input.focus();
+			}
+		</script>
 		<script type="module" src="/src/main.tsx"></script>
 	</body>
 </html>

@@ -1,5 +1,5 @@
 /**
- * Purpose: Expose the worker's nine daemon-backed collaboration tools without
+ * Purpose: Expose the worker's twelve daemon-backed collaboration tools without
  *          giving worker processes direct access to daemon state or room data.
  *
  * Public API: default extension factory `(pi: ExtensionAPI): void`.
@@ -34,6 +34,9 @@ const TOOL_NAMES = [
 	"agent_spawn",
 	"agent_status",
 	"task_handoff",
+	"room_plans_list",
+	"room_plan_create",
+	"room_plan_update",
 ] as const satisfies readonly MethodName[];
 
 interface ToolResult {
@@ -338,6 +341,58 @@ export default function toolbeltExtension(pi: ExtensionAPI): void {
 		approval: "write",
 		execute: async (_id, params, signal) =>
 			await callReaction("chat_unreact", params, signal),
+	});
+
+	pi.registerTool({
+		name: "room_plans_list",
+		label: "List room plans",
+		description: "List durable plans for one room.",
+		loadMode: "essential",
+		parameters: z.object({
+			room: z.string().describe("Room id"),
+		}),
+		approval: "read",
+		execute: async (_id, params, signal) =>
+			await call("room_plans_list", params, signal),
+	});
+
+	pi.registerTool({
+		name: "room_plan_create",
+		label: "Create room plan",
+		description: "Create a durable draft plan in one of this worker's rooms.",
+		loadMode: "essential",
+		parameters: z.object({
+			room: z.string().describe("Room id"),
+			title: z.string().describe("Plan title"),
+			body: z.string().describe("Plan body"),
+		}),
+		approval: "write",
+		execute: async (_id, params, signal) =>
+			await call("room_plan_create", params, signal),
+	});
+
+	pi.registerTool({
+		name: "room_plan_update",
+		label: "Update room plan",
+		description:
+			"Update a durable plan using the revision returned by the latest list, create, or update call. On conflict, list again before retrying.",
+		loadMode: "essential",
+		parameters: z.object({
+			room: z.string().describe("Room id"),
+			id: z.string().describe("Plan id"),
+			title: z.string().optional().describe("Replacement title"),
+			body: z.string().optional().describe("Replacement body"),
+			status: z
+				.enum(["draft", "active", "completed"])
+				.optional()
+				.describe("Replacement status"),
+			expectedRevision: z
+				.number()
+				.describe("Current positive integer revision for optimistic update"),
+		}),
+		approval: "write",
+		execute: async (_id, params, signal) =>
+			await call("room_plan_update", params, signal),
 	});
 
 	pi.registerTool({

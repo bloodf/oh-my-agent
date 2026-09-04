@@ -50,7 +50,7 @@
 		"typescript": "latest"
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit && bun run --cwd web exec tsc -b --pretty false",
+		"typecheck": "tsc --noEmit && bun run --cwd web typecheck",
 		"console:dev": "bun run --cwd web dev",
 		"console:build": "bun run --cwd web build",
 		"prepack": "bun run console:build && bun run typecheck && bun run test:fast",

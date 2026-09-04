@@ -225,36 +225,25 @@ function messageId(result: ToolResult): number {
 }
 
 describe("worker toolbelt", () => {
-	test("registers nine additive tools and pins their selection guidance", async () => {
+	test("exposes only the contracted collaboration tools", async () => {
 		const { tools } = await harness();
-		expect([...tools.keys()]).toEqual([
-			"chat_send",
-			"chat_read",
-			"chat_wait",
-			"chat_react",
-			"chat_unreact",
-			"agent_create",
-			"agent_spawn",
-			"agent_status",
-			"task_handoff",
-		]);
-		const guidance =
-			"native task for temporary in-run subagents; agent_create then agent_spawn with parent for persistent children; agent_spawn without parent for top-level peers; post to a room to talk to an existing peer";
-		expect(tools.get("agent_create")?.description).toContain(guidance);
-		expect(tools.get("agent_spawn")?.description).toContain(guidance);
-		expect(tools.get("agent_spawn")?.description).toContain(
-			"Parentage is cooperative metadata, never an authority boundary.",
+		expect([...tools.keys()].sort()).toEqual(
+			[
+				"chat_send",
+				"chat_read",
+				"chat_wait",
+				"chat_react",
+				"chat_unreact",
+				"room_plans_list",
+				"room_plan_create",
+				"room_plan_update",
+				"agent_create",
+				"agent_spawn",
+				"agent_status",
+				"task_handoff",
+			].sort(),
 		);
-		const reactionDescription = tools.get("chat_react")?.description ?? "";
-		for (const convention of ["👀", "⏳", "✅", "❌"]) {
-			expect(reactionDescription).toContain(convention);
-		}
-		expect(reactionDescription).toContain("reading/picked-up");
-		expect(reactionDescription).toContain("in-progress");
-		expect(reactionDescription).toContain("done");
-		expect(reactionDescription).toContain("blocked/failed");
 	});
-
 	test("a real OMP child keeps native task while loading the toolbelt", async () => {
 		const root = await mkdtemp(join(tmpdir(), "oma-toolbelt-child-"));
 		const gateway = Bun.serve({

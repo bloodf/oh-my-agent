@@ -10,8 +10,13 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 - TUI auto-starts the detached daemon on session start from the plugin tree, so `omp install` then `omp` is enough. PATH and `omp-agent daemon` stay optional for the CLI.
 - `/cli <verb>` and `/console` run the same CLI dispatcher inside the TUI, so shell PATH is not required to print status or the browser console URL.
-- Console storybook at `bun run storybook`: pages, components, and states painted with production `style.css`, no daemon required.
-- Operator console rebuilt with latest shadcn/ui (Radix, Tailwind v4) so the live UI is a usable three-pane app rather than stacked raw forms.
+- Conversation-first OMP web workspace with independent native chats alongside durable rooms and DMs. Each chat runs in its selected folder with normal OMP discovery, its own live model catalog and selection, and destination-preserving Conversation, Plans, and Changes views.
+- Independent chat metadata, native sessions, and pasted clipboard images stay in OS temporary storage. Existing machine files remain in place and attach by absolute path through the daemon-backed picker; workspaces are not copied or browser-uploaded.
+- Local operator access follows the daemon's full OS filesystem authority; privileged HTTP and WebSocket workspace operations remain disabled for remote clients unless `OMA_REMOTE_FULL_CONTROL=1` explicitly opts in. Git status and diffs use bounded, read-only commands rather than a shell endpoint.
+- Rooms gain durable, revision-checked plans, while workspace Changes displays real Git status and file diffs instead of fabricated progress.
+- Agent controls now cover creation, membership, steering, logs, stop, account ceilings, and soul/definition editing through the real daemon APIs.
+- Console storybook at `bun run storybook` catalogs the production pages, components, dialogs, and operational states with isolated demo data and production `style.css`, no daemon required.
+- Operator console rebuilt with latest shadcn/ui (Radix, Tailwind v4) as the compact conversation workspace, including rooms-first navigation, keyboard search, responsive threads, attachments, and designed offline/error states.
 
 ## [1.0.4] - 2026-09-04
 

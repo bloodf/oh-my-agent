@@ -9,10 +9,9 @@
  * owns them — `HUMAN_AUTHOR` and `InvalidParamsError`.
  *
  * Upstream deps: `../shared/protocol` (frames, error builders, version),
- * `../shared/protocol-schemas` (`METHODS`), `../rooms/store`,
+ * `../shared/protocol-schemas` (`METHODS`), room message and plan stores,
  * `../worker/lifecycle` (sandbox state), `./supervisor`, and `./operations`
- * (the shared kill, inject, logs-tail, and bump the four matching handlers
- * delegate to, plus the two values above).
+ * (the shared kill, inject, logs-tail, and bump handlers plus attribution).
  *
  * Downstream consumers: `./main`, which owns composition and lifetime; every
  * operator client speaks to this socket rather than to those objects.
@@ -24,9 +23,9 @@
  * those authenticate against the operator token specifically (ADR-012 (a)).
  * Authenticated callers outside their own scope answer `forbidden`; malformed
  * calls retain their declared protocol errors. Handler throws answer an
- * internal error. A worker's chat attribution is overwritten with its own
- * identity rather than refused (ADR-014); the operator token keeps full
- * override as the human's privileged credential.
+ * internal error. Worker chat and plan attribution is overwritten with its
+ * authenticated identity rather than trusted from payload (ADR-014); plan
+ * operations additionally require membership in the requested room.
  *
  * Performance: one dispatch per request. `chat_wait` parks on a polling loop;
  * reaction state checks scan public message listings across known rooms.
@@ -44,7 +43,8 @@ import {
 } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
-
+import type { RoomPlans } from "../rooms/plans";
+import { RoomPlanError } from "../rooms/plans";
 import type { RoomStore, RoomMessage as StoredMessage } from "../rooms/store";
 import type { PeerDefinition } from "../shared/agent-definition";
 import { fingerprintPeerDefinition } from "../shared/agent-definition";
@@ -85,6 +85,12 @@ import type {
 	MethodName,
 	RoomInfo,
 	RoomMessage,
+	RoomPlanCreateParams,
+	RoomPlanCreateResult,
+	RoomPlansListParams,
+	RoomPlansListResult,
+	RoomPlanUpdateParams,
+	RoomPlanUpdateResult,
 	RoomsListParams,
 	RoomsListResult,
 	RoomsPostParams,
@@ -329,6 +335,10 @@ export interface ScheduleRecord {
  */
 export interface DaemonContext {
 	rooms: RoomStore;
+	/** Durable room plans. Optional where plan authoring is not composed. */
+	plans?: RoomPlans;
+	/** Notify live surfaces after a plan write commits. */
+	onPlanChanged?(room: string): void;
 	supervisor: Supervisor;
 	/** Registered peers by name. */
 	peers: Map<string, PeerRecord>;
@@ -518,6 +528,9 @@ interface ParamsByMethod {
 	task_handoff: TaskHandoffParams;
 	rooms_list: RoomsListParams;
 	rooms_post: RoomsPostParams;
+	room_plans_list: RoomPlansListParams;
+	room_plan_create: RoomPlanCreateParams & { author?: string };
+	room_plan_update: RoomPlanUpdateParams & { author?: string };
 	schedules_list: SchedulesListParams;
 	schedules_arm: SchedulesArmParams;
 	/**
@@ -811,6 +824,30 @@ export async function startControlSocket(
 		return write;
 	};
 
+	const requirePlans = (): RoomPlans => {
+		if (!context.plans) {
+			throw new InvalidParamsError(
+				"room",
+				"Room plans are not available on this daemon",
+			);
+		}
+		return context.plans;
+	};
+
+	const planFailure = (error: unknown): never => {
+		if (error instanceof RoomPlanError) {
+			const messages: Record<RoomPlanError["code"], string> = {
+				INVALID_PLAN: "Invalid plan data",
+				ROOM_NOT_FOUND: "Unknown room",
+				PLAN_NOT_FOUND: "Unknown plan",
+				PLAN_REVISION_CONFLICT:
+					"Plan revision conflict; list plans and retry with current revision",
+			};
+			throw new InvalidParamsError("plan", messages[error.code]);
+		}
+		throw error;
+	};
+
 	const handlers: Handlers = {
 		status: async (): Promise<StatusResult> => ({
 			protocolVersion: PROTOCOL_VERSION,
@@ -895,6 +932,57 @@ export async function startControlSocket(
 		rooms_list: async (): Promise<RoomsListResult> => ({
 			rooms: [...context.knownRooms.values()],
 		}),
+
+		room_plans_list: async (params): Promise<RoomPlansListResult> => {
+			try {
+				return { plans: requirePlans().list(params.room) };
+			} catch (error) {
+				return planFailure(error);
+			}
+		},
+
+		room_plan_create: async (params): Promise<RoomPlanCreateResult> => {
+			let plan: RoomPlanCreateResult["plan"];
+			try {
+				plan = requirePlans().create({
+					room: params.room,
+					title: params.title,
+					body: params.body,
+					author: params.author ?? HUMAN_AUTHOR,
+				});
+			} catch (error) {
+				return planFailure(error);
+			}
+			try {
+				context.onPlanChanged?.(params.room);
+			} catch {
+				// Notification failure cannot roll back a committed plan or invite retry.
+			}
+			return { plan };
+		},
+
+		room_plan_update: async (params): Promise<RoomPlanUpdateResult> => {
+			let plan: RoomPlanUpdateResult["plan"];
+			try {
+				plan = requirePlans().update({
+					room: params.room,
+					id: params.id,
+					title: params.title,
+					body: params.body,
+					status: params.status,
+					expectedRevision: params.expectedRevision,
+					author: params.author ?? HUMAN_AUTHOR,
+				});
+			} catch (error) {
+				return planFailure(error);
+			}
+			try {
+				context.onPlanChanged?.(params.room);
+			} catch {
+				// Notification failure cannot roll back a committed plan or invite retry.
+			}
+			return { plan };
+		},
 
 		agent_status: async (params): Promise<AgentStatusResult> => {
 			const agents = toAgentStatuses(
@@ -1140,6 +1228,9 @@ export async function startControlSocket(
 		agent_spawn: true,
 		task_handoff: true,
 		logs_tail: true,
+		room_plans_list: true,
+		room_plan_create: true,
+		room_plan_update: true,
 	};
 
 	/**
@@ -1156,6 +1247,8 @@ export async function startControlSocket(
 		chat_react: "actor",
 		chat_unreact: "actor",
 		task_handoff: "fromAgent",
+		room_plan_create: "author",
+		room_plan_update: "author",
 	};
 
 	/**
@@ -1175,11 +1268,15 @@ export async function startControlSocket(
 		method: MethodName,
 		params: unknown,
 	): unknown => {
-		if (identity.kind === "operator") return params;
 		const field = ATTRIBUTION_FIELD[method];
 		if (field === undefined) return params;
 		if (typeof params !== "object" || params === null) return params;
-		return { ...params, [field]: identity.peerName };
+		if (identity.kind === "worker") {
+			return { ...params, [field]: identity.peerName };
+		}
+		return method === "room_plan_create" || method === "room_plan_update"
+			? { ...params, [field]: HUMAN_AUTHOR }
+			: params;
 	};
 
 	const authorize = (
@@ -1213,6 +1310,23 @@ export async function startControlSocket(
 				id,
 				`Worker ${identity.peerName} may only spawn with itself as parent`,
 			);
+		}
+		if (
+			method === "room_plans_list" ||
+			method === "room_plan_create" ||
+			method === "room_plan_update"
+		) {
+			const peer = context.peers.get(identity.peerName);
+			const room =
+				typeof params === "object" && params !== null && "room" in params
+					? params.room
+					: undefined;
+			if (!peer || typeof room !== "string" || !peer.rooms.includes(room)) {
+				return forbidden(
+					id,
+					`Worker ${identity.peerName} may only access plans in its own rooms`,
+				);
+			}
 		}
 		if (method === "logs_tail") {
 			const named =

@@ -7,7 +7,15 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**", "!**/.agentic", "!**/docs/diagrams", "!**/docs/assets", "!**/web", "!**/src/console/app.js", "!**/src/console/style.css"]
+		"includes": [
+			"**",
+			"!**/.agentic",
+			"!**/docs/diagrams",
+			"!**/docs/assets",
+			"!**/web",
+			"!**/src/console/app.js",
+			"!**/src/console/style.css"
+		]
 	},
 	"formatter": {
 		"enabled": true,

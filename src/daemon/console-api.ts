@@ -67,6 +67,7 @@ import {
 	type PeerRecord,
 } from "./socket";
 import type { Supervisor } from "./supervisor";
+import { handleWebRoute, type WebServices } from "./web-routes";
 
 /** Loopback: a console reachable from the network is a rooms leak. */
 const DEFAULT_HOSTNAME = "127.0.0.1";
@@ -192,6 +193,8 @@ const WIRE_DEFINITION_FIELDS = [
  * that then throws publishes a state the daemon is not in.
  */
 export type ConsoleEvent =
+	| { type: "plan"; room: string }
+	| { type: "chat"; chatId: string; event: unknown }
 	| { type: "message"; message: RoomMessage }
 	| {
 			type: "reaction";
@@ -222,6 +225,7 @@ export type ConsoleEvent =
 	| { type: "schedule"; agent: string; phase: "armed" | "fired" };
 
 export interface StartConsoleApiOptions {
+	web?: WebServices;
 	rooms: RoomStore;
 	/** Every post goes through this; writing to the store leaves peers deaf. */
 	supervisor: Supervisor;
@@ -318,6 +322,7 @@ export interface ConsoleApi {
 /** Attached to an upgraded socket; its private audit record closes with it. */
 interface SocketData {
 	id: number;
+	fullControl: boolean;
 	auditConnection?: AuditConnection;
 }
 
@@ -477,7 +482,10 @@ export async function startConsoleApi(
 	 */
 	const publish = (event: ConsoleEvent): void => {
 		const frame = JSON.stringify(event);
-		for (const socket of sockets) socket.send(frame);
+		for (const socket of sockets) {
+			if (event.type === "chat" && !socket.data.fullControl) continue;
+			socket.send(frame);
+		}
 	};
 
 	/**
@@ -863,9 +871,10 @@ export async function startConsoleApi(
 	};
 
 	// ── Routes ────────────────────────────────────────────────────────────────
-
 	const handle = async (request: Request, url: URL): Promise<Response> => {
 		const path = url.pathname;
+		if (path === "/api/capabilities" && request.method === "GET")
+			return json(200, { fullControl: false });
 
 		// Every route below decodes the segments it captures, and a malformed
 		// escape makes `decodeURIComponent` throw. Caught here, once, rather
@@ -1112,7 +1121,7 @@ export async function startConsoleApi(
 		if (membershipRoute?.[1] !== undefined) {
 			const peerName = decodeURIComponent(membershipRoute[1]);
 			const definition = await peerStore.get(peerName);
-			if (!definition || !peers.has(peerName)) {
+			if (!definition) {
 				return fail(404, "not_found", `Unknown agent: ${peerName}`);
 			}
 
@@ -1167,11 +1176,15 @@ export async function startConsoleApi(
 
 			// Disk is not enough: the live peer's cached room set decides who
 			// `Supervisor.post()` wakes, and only the supervisor may write it.
-			const applied = await applyMembership(peerName);
+			const applied = peers.has(peerName)
+				? await applyMembership(peerName)
+				: next;
 			return json(200, {
 				rooms: applied,
 				rebuildRequired: false,
-				notice: "Membership took effect immediately.",
+				notice: peers.has(peerName)
+					? "Membership took effect immediately."
+					: "Membership saved. Messages wait in this room until the agent starts.",
 			});
 		}
 
@@ -1555,16 +1568,17 @@ export async function startConsoleApi(
 		idleTimeout: 0,
 		fetch: async (request, self): Promise<Response | undefined> => {
 			let url = new URL(request.url);
-			const directUrl = url;
 			const isUpgrade = url.pathname === "/api/events";
 			const isStatic = !url.pathname.startsWith("/api/");
 			// Only an authenticated proxy can select remote behavior. An untrusted
 			// Host header must not turn a direct loopback request into remote mode.
 			url = normalizeRequestUrl(url, request.headers, remoteMode, proxySecret);
+			const proxyBearer = request.headers.get("X-OMA-Proxy-Secret");
 			const remoteRequest =
 				remoteMode &&
-				url.origin !== directUrl.origin &&
-				!isLoopback(url.hostname);
+				proxySecret !== undefined &&
+				proxyBearer !== null &&
+				tokenMatches(proxyBearer, proxySecret);
 			const observedSource = self.requestIP(request)?.address ?? "unknown";
 			const forwardedSource = request.headers
 				.get("X-Forwarded-For")
@@ -1685,6 +1699,8 @@ export async function startConsoleApi(
 					const upgraded = self.upgrade(request, {
 						data: {
 							id: nextSocketId++,
+							fullControl:
+								!remoteRequest || options.web?.remoteFullControl === true,
 							...(connection === undefined
 								? {}
 								: { auditConnection: connection }),
@@ -1698,6 +1714,16 @@ export async function startConsoleApi(
 
 			return await audited(connectionClass, source, async (connection) => {
 				try {
+					if (options.web) {
+						const response = await handleWebRoute(
+							request,
+							url,
+							options.web,
+							remoteRequest,
+							(room) => publish({ type: "plan", room }),
+						);
+						if (response) return response;
+					}
 					return await handle(request, url);
 				} catch (error) {
 					return fail(

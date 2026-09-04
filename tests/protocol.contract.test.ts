@@ -98,6 +98,18 @@ const VALID_PARAMS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 	},
 	rooms_list: {},
 	rooms_post: { room: "#reviews", body: "shipping", author: "@you" },
+	room_plans_list: { room: "#reviews" },
+	room_plan_create: {
+		room: "#reviews",
+		title: "Ship review findings",
+		body: "Resolve the remaining findings before merge.",
+	},
+	room_plan_update: {
+		room: "#reviews",
+		id: "plan-1",
+		status: "active",
+		expectedRevision: 1,
+	},
 	schedules_list: {},
 	schedules_arm: { scheduleId: "sched-1", enabled: true },
 	kill: { name: "researcher" },
@@ -158,6 +170,50 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 		rooms: [{ id: "#reviews", kind: "channel", name: "#reviews" }],
 	},
 	rooms_post: { messageId: 43, createdAt: 1750000000000 },
+	room_plans_list: {
+		plans: [
+			{
+				id: "plan-1",
+				room: "#reviews",
+				title: "Ship review findings",
+				body: "Resolve the remaining findings before merge.",
+				status: "active",
+				revision: 2,
+				author: "reviewer",
+				updatedBy: "reviewer",
+				createdAt: 1750000000000,
+				updatedAt: 1750000001000,
+			},
+		],
+	},
+	room_plan_create: {
+		plan: {
+			id: "plan-1",
+			room: "#reviews",
+			title: "Ship review findings",
+			body: "Resolve the remaining findings before merge.",
+			status: "draft",
+			revision: 1,
+			author: "reviewer",
+			updatedBy: "reviewer",
+			createdAt: 1750000000000,
+			updatedAt: 1750000000000,
+		},
+	},
+	room_plan_update: {
+		plan: {
+			id: "plan-1",
+			room: "#reviews",
+			title: "Ship review findings",
+			body: "Resolve the remaining findings before merge.",
+			status: "active",
+			revision: 2,
+			author: "reviewer",
+			updatedBy: "reviewer",
+			createdAt: 1750000000000,
+			updatedAt: 1750000001000,
+		},
+	},
 	schedules_list: {
 		schedules: [
 			{
@@ -188,7 +244,7 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 // ---------------------------------------------------------------------------
 
 describe("declared method set", () => {
-	test("is exactly the twenty-one contracted methods", () => {
+	test("is exactly the twenty-four contracted methods", () => {
 		expect(([...METHOD_NAMES] as string[]).sort()).toEqual(
 			[
 				"agent_create",
@@ -208,6 +264,9 @@ describe("declared method set", () => {
 				"rooms_list",
 				"logs_tail",
 				"rooms_post",
+				"room_plan_create",
+				"room_plan_update",
+				"room_plans_list",
 				"schedules_arm",
 				"schedules_list",
 				"status",

@@ -56,6 +56,12 @@ import type {
 	LogsTailResult,
 	MethodName,
 	RoomMessage,
+	RoomPlanCreateParams,
+	RoomPlanCreateResult,
+	RoomPlansListParams,
+	RoomPlansListResult,
+	RoomPlanUpdateParams,
+	RoomPlanUpdateResult,
 	RoomsListParams,
 	RoomsListResult,
 	RoomsPostParams,
@@ -181,6 +187,26 @@ function explainRoomInfo(value: unknown): string | null {
 	if (!isNonEmptyString(value.id)) return "id";
 	if (value.kind !== "channel" && value.kind !== "dm") return "kind";
 	if (!isNonEmptyString(value.name)) return "name";
+	return null;
+}
+
+function explainRoomPlan(value: unknown): string | null {
+	if (!isRecord(value)) return "";
+	if (!isNonEmptyString(value.id)) return "id";
+	if (!isNonEmptyString(value.room)) return "room";
+	if (!isNonEmptyString(value.title)) return "title";
+	if (typeof value.body !== "string") return "body";
+	if (
+		value.status !== "draft" &&
+		value.status !== "active" &&
+		value.status !== "completed"
+	)
+		return "status";
+	if (!isPositiveSafeInteger(value.revision)) return "revision";
+	if (!isNonEmptyString(value.author)) return "author";
+	if (!isNonEmptyString(value.updatedBy)) return "updatedBy";
+	if (!isFiniteNumber(value.createdAt)) return "createdAt";
+	if (!isFiniteNumber(value.updatedAt)) return "updatedAt";
 	return null;
 }
 
@@ -661,6 +687,19 @@ function validateNamedBooleanResult<T>(
 	);
 }
 
+function validatePlanResult(
+	value: unknown,
+): Validation<RoomPlanCreateResult | RoomPlanUpdateResult> {
+	if (!isRecord(value)) return fail("result", "expected an object");
+	if (!("plan" in value)) return fail("plan", "plan is required");
+	const leaf = explainRoomPlan(value.plan);
+	if (leaf !== null) {
+		const field = leaf === "" ? "plan" : `plan.${leaf}`;
+		return fail(field, `${field} is malformed`);
+	}
+	return ok(value as unknown as RoomPlanCreateResult | RoomPlanUpdateResult);
+}
+
 // ── Registry ────────────────────────────────────────────────────────────────
 
 interface MethodContract {
@@ -866,6 +905,67 @@ export const METHODS: Record<MethodName, MethodContract> = {
 			validateChatSendShape(v),
 		validateResult: (v): Validation<RoomsPostResult> =>
 			validateChatSendResultShape(v),
+	},
+	room_plans_list: {
+		validateParams: (v): Validation<RoomPlansListParams> =>
+			fromFields(v, checkFields(v, [(r) => requireString(r, "room")])),
+		validateResult: (v): Validation<RoomPlansListResult> => {
+			if (!isRecord(v)) return fail("result", "expected an object");
+			const plans = checkList(v.plans, "plans", explainRoomPlan);
+			if (!plans.ok) return fail(plans.field, plans.message);
+			return ok(v as unknown as RoomPlansListResult);
+		},
+	},
+	room_plan_create: {
+		validateParams: (v): Validation<RoomPlanCreateParams> =>
+			fromFields(
+				v,
+				checkFields(v, [
+					(r) => requireString(r, "room"),
+					(r) => requireString(r, "title"),
+					(r) =>
+						typeof r.body === "string"
+							? null
+							: { field: "body", message: "body must be a string" },
+				]),
+			),
+		validateResult: (v): Validation<RoomPlanCreateResult> =>
+			validatePlanResult(v) as Validation<RoomPlanCreateResult>,
+	},
+	room_plan_update: {
+		validateParams: (v): Validation<RoomPlanUpdateParams> =>
+			fromFields(
+				v,
+				checkFields(v, [
+					(r) => requireString(r, "room"),
+					(r) => requireString(r, "id"),
+					(r) => optionalNonEmptyString(r, "title"),
+					(r) => optionalString(r, "body"),
+					(r) =>
+						r.status === undefined ||
+						r.status === "draft" ||
+						r.status === "active" ||
+						r.status === "completed"
+							? null
+							: {
+									field: "status",
+									message:
+										'status must be "draft", "active", or "completed" when present',
+								},
+					(r) => requirePositiveSafeInteger(r, "expectedRevision"),
+					(r) =>
+						r.title !== undefined ||
+						r.body !== undefined ||
+						r.status !== undefined
+							? null
+							: {
+									field: "params",
+									message: "at least one plan change is required",
+								},
+				]),
+			),
+		validateResult: (v): Validation<RoomPlanUpdateResult> =>
+			validatePlanResult(v) as Validation<RoomPlanUpdateResult>,
 	},
 	schedules_list: {
 		validateParams: (v): Validation<SchedulesListParams> => validateNoParams(v),

@@ -3,8 +3,6 @@ export interface ConsoleStory {
 	group: "Pages" | "Components" | "States";
 	title: string;
 	docs: string;
-	layout: "fullscreen" | "padded" | "dialog";
-	html: string;
 }
 
 export const STORIES: ConsoleStory[];

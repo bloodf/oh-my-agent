@@ -6,6 +6,8 @@ A local-first web interface to OMP: independent chats launched in a selected wor
 
 Independent chats run native OMP RPC subprocesses with cwd set to the selected folder and normal operator configuration discovery. They are not registered persistent agents. Model catalogs come from that session; model choice is per chat. Existing peer isolation remains unchanged.
 
+Independent chat metadata, native session files, and clipboard-created images live only under OS temporary directories. Original workspace files are not copied. OS cleanup can remove temporary chat history; persistent agent definitions and shared rooms remain daemon-owned durable data.
+
 The operator explicitly permits filesystem access matching OMP's OS identity across the machine. `workspace:` is location metadata, not authorization. New privileged services accept authenticated operator authority; worker access is bound to authenticated peer identity and room membership. Remote full control is disabled unless explicitly configured. No browser shell-command endpoint. Git inspection uses fixed read-only argv and bounded output, never shell interpolation.
 
 ## Information architecture
@@ -19,7 +21,7 @@ The operator explicitly permits filesystem access matching OMP's OS identity acr
 - Threads use a split only when enough transcript width remains; overlay on narrow viewports. Escape restores opener focus.
 - Plans are daemon-persisted room artifacts editable by authorized participants. Native OMP chat plans use native todo state rather than an unrelated duplicate tracker.
 - Changes show real Git status and diffs for the selected workspace. No fabricated progress, diffs, or charts.
-- Paste/drop/file selection uploads attachments. Images use native multimodal input when supported; files and videos remain accessible to OMP read tools through actual stored paths. Unsupported decoding is surfaced honestly.
+- Existing PC attachments are absolute file-path references, never browser uploads or copies. A daemon-backed filesystem picker and paste-path field expose paths the browser's native file picker cannot provide. Clipboard-only screenshots are the explicit exception: save them in OS temp, then pass the resulting path. OMP reads files and videos in place; unsupported decoding is surfaced honestly.
 
 ## Visual system
 
@@ -28,5 +30,7 @@ Neutral OKLCH near-black canvas, subtly lighter rail and overlays. One sky accen
 ## States and verification
 
 Designed loading skeletons, empty conversation actions, reconnect/offline and load-failure states, inline parser errors and destructive confirmation naming the affected subtree. Keyboard and 390px layouts must work. Storybook renders the real new components with isolated demo data, without a daemon.
+
+Visual acceptance uses Playwright screenshots at desktop and 390px, inspection and correction loops, plus interactive keyboard, overflow, and error checks across populated chats, rooms, plans, changes, attachments, and dialogs.
 
 Build remains exactly index.html, app.js, style.css in src/console; literal asset paths and dark HTML preserved. Verify console and daemon suites, native session lifecycle, model selection, attachments, plans, Git inspection, remote denial, and real browser journeys. No npm publication. Update guide and changelog, remove HANDOFF-WEBUI.md only when finished, commit and push.

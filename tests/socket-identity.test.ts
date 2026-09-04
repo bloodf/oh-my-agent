@@ -66,6 +66,9 @@ const WORKER_METHODS: Partial<Record<MethodName, true>> = {
 	agent_spawn: true,
 	task_handoff: true,
 	logs_tail: true,
+	room_plans_list: true,
+	room_plan_create: true,
+	room_plan_update: true,
 };
 
 const OPERATOR_ONLY_METHODS = METHOD_NAMES.filter(
@@ -102,6 +105,18 @@ const VALID_PARAMS: Record<MethodName, unknown> = {
 	},
 	rooms_list: {},
 	rooms_post: { room: "#general", body: "operator post" },
+	room_plans_list: { room: "#general" },
+	room_plan_create: {
+		room: "#general",
+		title: "Review findings",
+		body: "Resolve findings before merge.",
+	},
+	room_plan_update: {
+		room: "#general",
+		id: "plan-1",
+		status: "active",
+		expectedRevision: 1,
+	},
 	schedules_list: {},
 	schedules_arm: { scheduleId: "reviewer:schedule:0", enabled: false },
 	kill: { name: "other" },
@@ -286,6 +301,59 @@ describe("control-socket identity", () => {
 				.error,
 		).toMatchObject({ code: ERROR_CODE.FORBIDDEN });
 		expect(kills).toEqual([]);
+	});
+
+	test("plans stay worker-callable only within the worker's rooms", async () => {
+		const { socketPath } = await socketHarness();
+		for (const method of [
+			"room_plans_list",
+			"room_plan_create",
+			"room_plan_update",
+		] as const) {
+			const unavailable = failure(
+				await rpc(socketPath, method, VALID_PARAMS[method], "worker-token"),
+			);
+			expect(unavailable.error).toMatchObject({
+				code: ERROR_CODE.INVALID_PARAMS,
+				message: "Room plans are not available on this daemon",
+				data: { field: "room", protocolVersion: 1 },
+			});
+
+			const foreign = failure(
+				await rpc(
+					socketPath,
+					method,
+					{
+						...(VALID_PARAMS[method] as Record<string, unknown>),
+						room: "#foreign",
+					},
+					"worker-token",
+				),
+			);
+			expect(foreign.error).toMatchObject({
+				code: ERROR_CODE.FORBIDDEN,
+				message: "Worker reviewer may only access plans in its own rooms",
+			});
+		}
+	});
+
+	test("operator plan calls reach the unavailable service boundary", async () => {
+		const { socketPath } = await socketHarness();
+		for (const method of [
+			"room_plans_list",
+			"room_plan_create",
+			"room_plan_update",
+		] as const) {
+			expect(
+				failure(
+					await rpc(socketPath, method, VALID_PARAMS[method], "operator-token"),
+				).error,
+			).toMatchObject({
+				code: ERROR_CODE.INVALID_PARAMS,
+				message: "Room plans are not available on this daemon",
+				data: { field: "room", protocolVersion: 1 },
+			});
+		}
 	});
 
 	test("validates worker params before refusing method scope", async () => {

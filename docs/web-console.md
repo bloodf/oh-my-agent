@@ -1,15 +1,8 @@
 # The web console
 
-Newcomers start at [Getting started](guide/getting-started.md).
-The short console walkthrough is [Console](guide/console.md).
-This page is the operator reference for token lifecycle, HTTP and WebSocket API, and client behavior.
-Pictures live in [diagrams](diagrams/).
+Newcomers start at [Getting started](guide/getting-started.md). The short walkthrough is [Console](guide/console.md). This page describes the browser client, HTTP and WebSocket API, storage boundaries, and remote-control gate.
 
-The operator surface in a browser: watch and join agent conversations, manage agents and channels, and react to messages — all talking to the daemon over a loopback HTTP + WebSocket API. Nothing here requires the OMP TUI; the console and the TUI are two clients of the same daemon.
-
-> **Status: built, tested, and served by the daemon.** The API server (`src/daemon/console-api.ts`) and the client (`src/console/`) are mounted at boot behind an operator token ([T-1001](delivery/tasks/T-1001-console-mounted-at-boot.md)). Start the daemon and open the URL it prints.
-
----
+The console and OMP TUI are clients of the same daemon. The web interface adds independent native OMP chats alongside durable agent rooms and direct messages.
 
 ## Running it
 
@@ -17,113 +10,144 @@ The operator surface in a browser: watch and join agent conversations, manage ag
 omp-agent daemon
 ```
 
-prints the control socket path, then the console URL with its token:
+The launcher prints the control socket and console URL, then exits while the daemon remains detached:
 
 ```
 /Users/you/.omp/agent/oh-my-agent/daemon.sock
-http://127.0.0.1:50561/?token=zrUfj-haLY-I_xEGdfJb3-djjeGX6EPtWGNUs_Yu-D8
+http://127.0.0.1:50561/?token=<operator-token>
 ```
 
-Open the second line in a browser. It is printed once, by the launcher, just before it exits: the daemon detaches from the terminal, so afterwards it has nowhere to print.
+The operator token is 32 CSPRNG bytes stored in `<agent-dir>/oh-my-agent/console-token` with mode `0600`. It is reused across restarts. Delete it while the daemon is stopped to rotate it; loose permissions make boot fail rather than silently accepting or replacing the token.
 
-**The token.** 32 CSPRNG bytes, generated on first boot and stored at `<agent-dir>/oh-my-agent/console-token` mode 0600. It is reused on every restart, so a bookmarked URL keeps working — only the port changes, unless you pin it.
-
-- **Rotate:** delete the file and restart. The next boot mints a new token and the old URL stops working.
-- **Wrong permissions:** if the file is not 0600, the boot fails and names it. It is not silently regenerated, because that would revoke the URL you are holding without saying so, and it is not used as-is, because a token every local process can read gates nothing. `chmod 600` it to keep that token, or delete it to rotate.
-- **Lost the line?** Restart the daemon: same token, freshly printed. Nothing writes the URL to disk, because a file pairing the token with the port is a second copy of the secret to keep 0600 and to clean up after a crash.
-
-**Configuration.**
+While the console is running, the daemon writes its current URL to `<agent-dir>/oh-my-agent/console-url` with mode `0600`. `omp-agent console` reads that file, so it can reprint the current OS-assigned port without restarting the daemon. Shutdown and headless startup remove the file. In remote mode it contains `OMA_CONSOLE_ORIGIN`, without the operator token.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `OMA_CONSOLE_PORT` | `0` | Port to bind. `0` lets the OS pick, and the chosen port is what gets printed. |
-| `OMA_CONSOLE` | unset | `0` runs the daemon headless: no listener, no token file, nothing printed. |
+| `OMA_CONSOLE_PORT` | `0` | Listener port; `0` lets the OS choose. |
+| `OMA_CONSOLE` | unset | `0` runs headless: no listener or console URL. The operator token is still loaded or minted. |
+| `OMA_REMOTE` | unset | `1` enables the authenticated reverse-proxy trust model. |
+| `OMA_CONSOLE_ORIGIN` | unset | Required for an enabled remote console; exact external HTTPS origin. |
+| `OMA_REMOTE_FULL_CONTROL` | unset | `1` permits privileged web-chat and machine-filesystem routes for authenticated remote requests. |
 
-Everything binds `127.0.0.1`. Binding beyond loopback is [T-1004](delivery/tasks/T-1004-control-socket-identity.md)'s decision, not a flag here.
+The daemon listener remains loopback-only. `OMA_CONSOLE_HOST` cannot make it routable; remote access requires a TLS-terminating proxy described in [Remote console exposure](remote-exposure.md).
 
-## Architecture
+## Conversation model
 
-```
-browser ── GET / ─────────────────────────────┐   (shell, app.js, style.css; ?token=)
-        ── HTTP (Bearer or X-Operator-Token) ──┤
-        └─ WebSocket (?token=) ────────────────┤
-                                               ▼
-                 ┌── src/daemon/console-api.ts ──┐
-                 │  token gate → statics          │──▶ src/console/ (resolve-and-contain)
-                 │  token gate → routes → store   │──▶ Supervisor.post() (wakes agents)
-                 │  live feed (poll while open)   │──▶ RoomStore (durable state)
-                 └────────────────────────────────┘
-```
+The left rail separates destinations with different lifecycles:
 
-- **One seam for writes:** every message the console posts goes through `Supervisor.post()`, never the store directly — that is what wakes subscribed agents. A console that wrote straight to the store would leave agents silent.
-- **Live updates without polling from the browser:** the browser holds a WebSocket; the server polls the durable store (only while a console is connected) and pushes diffs. An unattended daemon does no console work.
-- **The human is `@you`:** the console posts as the human sentinel, and any write claiming an agent's name is refused (403) — a transcript where a browser can impersonate an agent is untrustworthy.
+- **Chats** are independent native OMP RPC subprocesses. Creating one requires an existing workspace directory, which becomes the subprocess `cwd`; OMP performs its normal configuration and agent discovery from there. These sessions are not registered persistent agents. Each chat exposes its own native model catalog, and changing the model affects that chat only.
+- **Rooms** are shared `#` channels. Messages, threads, reactions, agent membership, and plans are stored by the daemon and survive browser and daemon restarts.
+- **Direct messages** are durable `@` channels routed through the same room store and supervisor delivery path. They are not independent native OMP chats. Opening a DM to a stopped or defined-but-not-running agent persists its membership and messages, but does not launch it; delivery waits until the agent starts.
 
-## Authentication
+Conversation, Plans, and Changes views retain the selected destination. Plans are durable room artifacts with revision checks; independent chats use native OMP todo state instead of a second plan store. Changes reads real Git status and bounded diffs for the selected workspace.
 
-All routes require the operator token, the client's own files included. HTTP takes `Authorization: Bearer <token>` or `X-Operator-Token: <token>`; the client sends the latter, and the server accepts both. `?token=` is honored only where a browser can set no header at all — the WebSocket handshake and the static client — and is refused on `/api/*`, where it would plant the token in browser history. Errors are `{"error": {"code", "message"}}` with statuses 400/401/403/404/405/500.
+The workspace is execution location metadata, not an authorization boundary. Local console control has the daemon's OS filesystem authority. An independent chat can therefore reach files available to that OS identity, including files outside the selected workspace when its OMP tools permit it.
 
-### The client
+### Attachments and temporary data
+
+Existing files on the daemon's machine are attached as absolute paths. The daemon-backed file picker and path entry browse the machine and pass those paths to OMP; files are read in place, not uploaded or copied into the workspace.
+
+Clipboard images are the exception. Supported pasted PNG, JPEG, WebP, or GIF images are written under the web chat's OS temporary root, then attached by generated path. A clipboard image is limited to 12 MiB. A prompt accepts at most 20 attachment paths; every path must resolve to a file.
+
+Independent chat metadata, native session JSONL, and clipboard-created images all live under OS temporary storage. OS cleanup can remove chat history and pasted images without warning. Original workspace files are never copied into that temporary root. Agent definitions, room and DM history, reactions, memberships, and room plans remain in daemon-owned durable storage.
+
+## Client layout and behavior
+
+The conversation-first frame has a compact destination rail, main transcript and composer, and contextual sheets or overlays. Threads use a side split where space allows and an overlay on narrow screens. Cmd/Ctrl+K searches destinations and actions. Enter sends; Shift+Enter inserts a line. Failed sends preserve the draft and attachments.
+
+Agent management is in the Agent sheet: membership, steering, logs, stop, account ceiling, and soul/definition editing. New chat, room, and agent actions open dialogs. The human posts to rooms and DMs as `@you`; a request claiming an agent author is refused.
+
+Definition reads use `GET /api/agents/:name/definition`; edits use `PATCH /api/agents/:name`. Room membership changes are applied to a running peer immediately. Other definition policy changes are saved and rebuild the worker on its next delivered turn.
+
+Room updates use `/api/events` WebSocket frames. Frames missed while disconnected are not replayed; the client refetches after reconnect. Closing the tab stops no daemon agent or room activity. Independent chat events also travel over this socket, while native session JSONL remains canonical.
+
+## Authentication and remote control
+
+Every static asset and API route requires the operator token. Loopback HTTP accepts `Authorization: Bearer <token>` or `X-Operator-Token: <token>`. `?token=` is accepted only for initial static navigation and the loopback WebSocket handshake; `/api/*` rejects query-token authentication. No cookie is set.
+
+Remote mode uses the external HTTPS origin, token entry, and short-lived path-bound tickets described in [Remote console exposure](remote-exposure.md). The proxy secret authenticates forwarded request metadata; it does not replace the operator token.
+
+Remote access increases impact because an authenticated operator can control agents that use local credentials. Machine-wide web operations add direct access to native OMP sessions, filesystem browsing, clipboard-image writes, and Git inspection. For authenticated remote requests, these routes return 403 unless `OMA_REMOTE_FULL_CONTROL=1` was set when starting the daemon:
+
+- `/api/chats*`
+- `/api/workspace/*`
+- `/api/clipboard`
+
+`GET /api/capabilities` reports whether full control is available to that request. Rooms, DMs, plans, and existing agent controls remain under the remote operator trust model without this extra flag. There is no browser shell-command endpoint; Git inspection invokes fixed read-only commands with bounded output.
+
+## HTTP API
+
+Errors use `{"error":{"code","message"}}`. Static serving is restricted to the three production assets; other non-API paths return 404.
+
+### Client assets
+
+| Route | Method | Behavior |
+|---|---|---|
+| `/`, `/index.html` | GET | Authenticated HTML shell |
+| `/app.js` | GET | Built browser application |
+| `/style.css` | GET | Built stylesheet |
+
+### Chats, files, and workspace
 
 | Route | Methods | Behavior |
 |---|---|---|
-| `/`, `/index.html` | GET | The shell. Its `<link>` and `<script>` are rewritten to carry `?token=`, so the browser can fetch them on a gated server |
-| `/app.js`, `/style.css` | GET | Served from `src/console/`, with `text/javascript` and `text/css` |
+| `/api/capabilities` | GET | Reports `fullControl` for this request |
+| `/api/chats` | GET / POST | Lists chats or creates a native OMP chat with required `cwd` and optional title/model |
+| `/api/chats/:id` | DELETE | Closes the native chat and removes its metadata |
+| `/api/chats/:id/state` | GET | Current native session state |
+| `/api/chats/:id/messages` | GET | Projected native transcript; tool-result bodies are not exposed |
+| `/api/chats/:id/models` | GET | Model catalog from that chat session |
+| `/api/chats/:id/model` | POST | Selects provider and model for that chat |
+| `/api/chats/:id/prompt` | POST | Sends text and optional absolute attachment paths; returns 202 |
+| `/api/chats/:id/abort` | POST | Aborts the active native turn |
+| `/api/workspace/files?path=` | GET | Lists up to 1,000 entries in an absolute directory for the daemon picker |
+| `/api/workspace/changes?cwd=` | GET | Reads repository context and Git status |
+| `/api/workspace/diff?cwd=&path=&staged=` | GET | Reads a bounded diff for a reported changed path |
+| `/api/clipboard` | POST | Stores one supported clipboard image in OS temporary storage |
 
-Paths are decoded, resolved, and required to stay inside `src/console/` (the peer-store standard), then matched against those three published files. Anything else under a non-`/api/` path is 404, and a write to one of them is 405.
-
-### API routes
+### Rooms, DMs, plans, and agents
 
 | Route | Methods | Behavior |
 |---|---|---|
-| `/api/agents` | GET | Registered peers (name, state, account, model, rooms) plus defined-but-not-running agents |
-| `/api/agents` | POST | Create a definition in the peer store — parser-validated, atomic write; 409 on an existing name or path; 400 with the parser's message on an invalid definition |
-| `/api/agents/:name` | PATCH | Edit a definition; answers `rebuildRequired` when the change restarts the worker on next delivery |
-| `/api/agents/:name/rooms[/:room]` | POST / DELETE | Membership; live for a running peer (no rebuild), durable in the definition file |
-| `/api/channels` | GET / POST | List channels; create one (`#`-prefixed id → channel, `@` → DM); 201 |
-| `/api/channels/:id/messages` | GET | Transcript with `parentId`, `threadRootId`, `replyCount`, `reactions`; `?afterId=&limit=` (1–500) |
-| `/api/channels/:id/messages` | POST | Post as `@you` through the supervisor — wakes subscribers; 403 if `author` names an agent |
-| `/api/messages/:id/reactions/toggle` | POST | Toggle the operator's reaction on a message |
-| `/api/events` | WebSocket | Live feed (below) |
+| `/api/channels` | GET / POST | Lists or creates a `#` room or `@` DM |
+| `/api/channels/:id/messages` | GET / POST | Reads a transcript or posts as `@you`; supports `afterId`, `limit`, and thread `parentId` |
+| `/api/channels/:id/plans` | GET / POST | Lists or creates durable plans for a room |
+| `/api/channels/:id/plans/:planId` | PATCH | Updates a plan using `expectedRevision` |
+| `/api/messages/:id/reactions/toggle` | POST | Toggles the operator's reaction |
+| `/api/agents` | GET / POST | Lists registered and defined agents, or creates a validated definition |
+| `/api/agents/:name/definition` | GET | Reads the editable definition wire shape |
+| `/api/agents/:name` | PATCH | Validates and edits the definition; the agent name is immutable |
+| `/api/agents/:name/rooms[/:room]` | POST / DELETE | Adds or removes durable, live-applied membership |
+| `/api/agents/:name/kill` | POST | Stops an agent, cascading by default unless `keepChildren` is true |
+| `/api/agents/:name/inject` | POST | Sends a steering message |
+| `/api/agents/:name/logs?lines=` | GET | Reads a bounded log tail |
+| `/api/accounts/:id/bump` | POST | Sets a positive metered account ceiling |
+| `/api/events` | WebSocket | Room, reaction, agent, membership, plan, and native-chat events |
 
-## WebSocket events
+## Development and build
 
-```json
-{"type": "message",  "message": { "id": 1, "room": "#reviews", "author": "…", "body": "…", "createdAt": 0, "parentId": null, "threadRootId": null, "replyCount": 0, "reactions": [] }}
-{"type": "reaction", "room": "#reviews", "messageId": 1, "actor": "@you", "emoji": "👀"}
+The editable React/shadcn source is under `web/`. Production output is exactly:
+
+```
+src/console/index.html
+src/console/app.js
+src/console/style.css
 ```
 
-The feed sends new messages and reaction changes. Frames missed while disconnected are not replayed — the client **refetches on `open`** after a reconnect (event-driven, with backoff), so a dropped socket never leaves a stale transcript. Closing the tab stops nothing on the daemon: the console is a viewer.
+Use the root scripts so output lands where the daemon serves it:
 
-## The client (`src/console/`)
+```sh
+bun run console:dev
+bun run console:build
+bun run --cwd web typecheck
+```
 
-Dependency-free plain JS (`app.js` with JSDoc types), HTML shell, CSS — no build step, so the daemon serves these files as they are. Three panes: channels, transcript with composer, and a side thread pane (replies never crowd the channel root). Reactions render as `emoji ×count` chips and toggle the operator's own on click. Management forms (T-605): create an agent, create a channel, manage a running agent's room membership.
+`console:dev` starts Vite. `console:build` compiles the web project and writes the three production assets. `bun run --cwd web typecheck` is the focused web typecheck; root `bun run typecheck` also runs the daemon TypeScript check.
 
-## Security model
+For the component/state catalog without a daemon:
 
-- Loopback-only; the operator token gates every route, the client's own files included, and comparison is constant-time over digests.
-- The token is stored 0600 and never written anywhere else. A token file with looser permissions fails the boot rather than being silently replaced.
-- No cookie is set. Cookies are scoped by host and ignore the port, so one issued here would ride along to every other service on `127.0.0.1` — handing the operator token to any unrelated local dev server the browser later visits. The token travels in the URL the operator pasted and in the asset URLs rewritten from it, and nowhere else.
-- Static paths are decoded, resolved, and contained under `src/console/`, then matched against the three published files; writes to them are refused.
-- Agent-authored writes refused; the human posts as `@you`.
-- Agent hierarchy (`parent`/`children`) is display metadata — **nothing is enforced off it** (ADR-011). If the console ever binds beyond loopback or parentage needs authority, [T-1004](delivery/tasks/T-1004-control-socket-identity.md) (connection identity) is the named precondition.
+```sh
+bun run storybook
+```
 
-## Testing
-
-`tests/daemon-console-mount.test.ts` boots the real daemon and exercises what an operator touches: the token lifecycle (0600, reuse across restart, rotation by deletion, refusal on loose permissions), the shell and the API on one listener, traversal refusals, the shutdown that frees the port, `OMA_CONSOLE=0`, and the `omp-agent daemon` launcher relaying a URL that actually answers.
-
-`tests/console-client.test.ts` drives a real headless Chrome (puppeteer-core + `chrome-headless-shell`) against a running daemon API: rendering, browser-posted messages waking a subscribed stub worker, thread-pane behavior, WS drop→reconnect convergence, and tab-closed-still-works. CI installs the browser; locally it resolves from `PUPPETEER_EXECUTABLE_PATH`, the puppeteer cache, or a system Chrome. `tests/console-api.test.ts` covers the routes, the token gate, and the author refusal without a browser.
-
-## Where things live
-
-| Path | What it is |
-|---|---|
-| `src/daemon/console-api.ts` | The HTTP + WebSocket server (token gate, routes, live feed) |
-| `src/console/index.html` `app.js` `style.css` | The browser client, no build step |
-| `src/rooms/store.ts` | Durable messages, threads, reactions, subscriptions |
-| `src/daemon/supervisor.ts` | Posting path that wakes agents; membership of live peers |
-| `tests/console-api.test.ts` | Route-level suite |
-| `tests/console-client.test.ts` | Real-browser suite |
-| `tests/daemon-console-mount.test.ts` | Boot-level suite: token lifecycle, statics, shutdown |
-
-Design decisions live in [ADR-009](delivery/adr/ADR-009-threads-and-reactions.md) (threads/reactions) and [ADR-011](delivery/adr/ADR-011-agent-hierarchy.md) (hierarchy's cooperative metadata). The tasks that built it: T-601, T-602, T-603, T-605; the one that serves it for real: T-1001.
+Open `http://127.0.0.1:6006/catalog.html`. The catalog server uses the built `src/console/` assets and isolated demo data.

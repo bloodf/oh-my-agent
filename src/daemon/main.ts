@@ -45,7 +45,7 @@ import {
 import { join } from "node:path";
 
 import { getAgentDir, postmortem } from "@oh-my-pi/pi-utils";
-
+import { RoomPlans } from "../rooms/plans";
 import { RoomStore } from "../rooms/store";
 import type {
 	Automation,
@@ -83,6 +83,8 @@ import type {
 import { HUMAN_AUTHOR, InvalidParamsError, startControlSocket } from "./socket";
 import type { SupervisedWorker } from "./supervisor";
 import { Supervisor } from "./supervisor";
+import { WebAttachments } from "./web-attachments";
+import { createWebChats } from "./web-chats";
 
 /** Everything the daemon owns lives under this directory in the agent dir. */
 const STATE_DIR = "oh-my-agent";
@@ -424,6 +426,16 @@ export async function bootDaemon(
 	// and refusing after the pidfile would leave a dead daemon's claim behind
 	// for the operator to clean up by hand.
 	const remoteMode = env.OMA_REMOTE === "1";
+	const fullControlSetting = env.OMA_REMOTE_FULL_CONTROL;
+	if (
+		fullControlSetting !== undefined &&
+		fullControlSetting !== "0" &&
+		fullControlSetting !== "1"
+	)
+		throw new Error("OMA_REMOTE_FULL_CONTROL must be 0 or 1");
+	const remoteFullControl = fullControlSetting === "1";
+	if (remoteFullControl && !remoteMode)
+		throw new Error("OMA_REMOTE_FULL_CONTROL requires OMA_REMOTE=1");
 	// Whether the console listens at all in this boot, decided here rather
 	// than at the point of use: the origin requirement below has to see the
 	// same value the console-startup branch checks later, or a boot could
@@ -558,6 +570,8 @@ export async function bootDaemon(
 
 		const rooms = await RoomStore.open(join(stateDir, "rooms.db"));
 		started.push(() => rooms.close());
+		const plans = await RoomPlans.open(rooms.path);
+		started.push(async () => plans.close());
 
 		const db = await DaemonDb.open(join(stateDir, "daemon.db"));
 		started.push(async () => db.close());
@@ -633,6 +647,18 @@ export async function bootDaemon(
 		 * (nobody is connected) and every one after it reaches the sockets.
 		 */
 		let consoleApi: ConsoleApi | undefined;
+		const chats = await createWebChats({
+			stateDir,
+			onEvent: (chatId, event) =>
+				consoleApi?.publish({ type: "chat", chatId, event }),
+		});
+		started.push(() => chats.close());
+		const web = {
+			chats,
+			plans,
+			clipboard: new WebAttachments(join(chats.storageDir, "clipboard")),
+			remoteFullControl,
+		};
 
 		const supervisor = new Supervisor({
 			rooms,
@@ -1534,6 +1560,8 @@ export async function bootDaemon(
 
 		const context: DaemonContext = {
 			rooms,
+			plans,
+			onPlanChanged: (room) => consoleApi?.publish({ type: "plan", room }),
 			supervisor,
 			peers,
 			knownRooms,
@@ -1603,6 +1631,7 @@ export async function bootDaemon(
 				consolePort = parsed;
 			}
 			consoleApi = await startConsoleApi({
+				web,
 				rooms,
 				supervisor,
 				peers,
@@ -1744,6 +1773,8 @@ export async function bootDaemon(
 			// handle.
 			await consoleApi?.close();
 			await socket.close();
+			await chats.close();
+			plans.close();
 			await supervisor.settled();
 			for (const record of peers.values()) {
 				try {

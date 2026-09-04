@@ -1199,6 +1199,18 @@ describe("bootDaemon — protocol errors", () => {
 			},
 			rooms_list: {},
 			rooms_post: { room: "#reviews", body: "hello again" },
+			room_plans_list: { room: "#reviews" },
+			room_plan_create: {
+				room: "#reviews",
+				title: "Review findings",
+				body: "Resolve findings before merge.",
+			},
+			room_plan_update: {
+				room: "#reviews",
+				id: "missing-plan",
+				status: "active",
+				expectedRevision: 1,
+			},
 			schedules_list: {},
 			logs_tail: { name: "reviewer" },
 			inject: { name: "reviewer", message: "focus" },

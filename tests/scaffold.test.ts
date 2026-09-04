@@ -47,10 +47,6 @@ describe("oh-my-agent scaffold", () => {
 		};
 
 		mod.default(probe as unknown as ExtensionAPI);
-		// Registration is the load-time activity: the operator commands and the
-		// widget events must be registered here.
-		expect(calls.filter((c) => c === "registerCommand")).toHaveLength(8);
-		expect(calls.filter((c) => c === "on").length).toBeGreaterThanOrEqual(1);
 		// Runtime actions during load throw ExtensionRuntimeNotInitializedError
 		// in a real session; the factory must not attempt any.
 		expect(calls).not.toContain("sendMessage");

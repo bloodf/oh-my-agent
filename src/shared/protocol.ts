@@ -45,6 +45,9 @@ export const METHOD_NAMES = [
 	"task_handoff",
 	"rooms_list",
 	"rooms_post",
+	"room_plans_list",
+	"room_plan_create",
+	"room_plan_update",
 	"schedules_list",
 	"schedules_arm",
 	"kill",
@@ -87,6 +90,21 @@ export interface RoomInfo {
 	id: string;
 	kind: "channel" | "dm";
 	name: string;
+}
+
+export type PlanStatus = "draft" | "active" | "completed";
+
+export interface RoomPlan {
+	id: string;
+	room: string;
+	title: string;
+	body: string;
+	status: PlanStatus;
+	revision: number;
+	author: string;
+	updatedBy: string;
+	createdAt: number;
+	updatedAt: number;
 }
 
 export interface ScheduleInfo {
@@ -243,6 +261,34 @@ export interface RoomsListResult {
 
 export type RoomsPostParams = ChatSendParams;
 export type RoomsPostResult = ChatSendResult;
+
+export interface RoomPlansListParams {
+	room: string;
+}
+export interface RoomPlansListResult {
+	plans: RoomPlan[];
+}
+
+export interface RoomPlanCreateParams {
+	room: string;
+	title: string;
+	body: string;
+}
+export interface RoomPlanCreateResult {
+	plan: RoomPlan;
+}
+
+export interface RoomPlanUpdateParams {
+	room: string;
+	id: string;
+	title?: string;
+	body?: string;
+	status?: PlanStatus;
+	expectedRevision: number;
+}
+export interface RoomPlanUpdateResult {
+	plan: RoomPlan;
+}
 
 export type SchedulesListParams = Record<string, never>;
 export interface SchedulesListResult {

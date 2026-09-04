@@ -6,7 +6,15 @@ The browser console is an operator surface for the same daemon the CLI and TUI u
 
 This page is the newcomer path. The full API, auth rules, and client behavior live in [The web console](../web-console.md). Going beyond loopback is [Remote exposure](../remote-exposure.md).
 
-The live console is a shadcn/ui app. Source: `web/`. Built files: `src/console/`. Dev: `bun run console:dev`. Production build: `bun run console:build`.
+The live console is a React/shadcn UI built from `web/`. The production build writes exactly three daemon-served assets: `src/console/index.html`, `src/console/app.js`, and `src/console/style.css`.
+
+```sh
+bun run console:dev
+bun run console:build
+bun run --cwd web typecheck
+```
+
+`console:dev` starts Vite for UI development. `console:build` replaces the three production assets above.
 
 ## See every screen (no daemon)
 
@@ -14,7 +22,7 @@ The live console is a shadcn/ui app. Source: `web/`. Built files: `src/console/`
 bun run storybook
 ```
 
-Opens `http://127.0.0.1:6006`. Pages, components, and states use production `src/console/style.css`. The brand raster in `docs/assets/console.png` is a mock, not this UI.
+Open `http://127.0.0.1:6006/catalog.html`. The catalog renders real console components and states with isolated demo data; it does not connect to a daemon.
 
 ## Open it
 
@@ -45,15 +53,15 @@ The launcher prints the socket path, then a URL:
 http://127.0.0.1:50561/?token=<operator-token>
 ```
 
-Open the second line in a browser. The daemon has already detached, so the URL is printed once. Reprint it later:
+Open the second line in a browser. The daemon has already detached, so the launcher cannot print it again. While the console is running, the daemon stores the current URL in `<agent-dir>/oh-my-agent/console-url` with mode `0600`. Reprint it with:
 
 ```sh
 omp-agent console
 ```
 
-That reads `<agent-dir>/oh-my-agent/console-url` (mode 0600). Headless daemons have no file and no URL.
+The daemon removes `console-url` when it shuts down or runs headless, preventing a stopped daemon's address from being reported as current.
 
-The listener is always `127.0.0.1`. There is no flag to bind a routable address.
+The listener always binds to loopback. Remote access uses a TLS-terminating proxy; no flag binds the daemon to a routable address.
 
 ## Token
 
@@ -80,29 +88,32 @@ No cookie is set. A cookie on `127.0.0.1` would ride along to every other local 
 | Variable | Default | Effect |
 |---|---|---|
 | `OMA_CONSOLE_PORT` | `0` (OS-assigned) | Port to bind. Must be a decimal 0–65535 if set. |
-| `OMA_CONSOLE` | unset (enabled) | `0` runs headless: no listener, no token file, no URL. |
-| `OMA_REMOTE` | unset | Remote trust model. Requires a proxy. See [Remote exposure](../remote-exposure.md). |
+| `OMA_CONSOLE` | unset (enabled) | `0` runs headless: no listener or console URL. The daemon still loads or mints the operator token for a later console-enabled boot. |
+| `OMA_REMOTE` | unset | Enables the remote proxy trust model. See [Remote exposure](../remote-exposure.md). |
 | `OMA_CONSOLE_ORIGIN` | unset | Required when `OMA_REMOTE=1` and the console is enabled. Exact external HTTPS origin, no credentials, path, query, or hash. |
+| `OMA_REMOTE_FULL_CONTROL` | unset | `1` explicitly permits remote independent chats, workspace browsing/Git inspection, and clipboard-image creation. These capabilities are otherwise refused remotely. |
 
 `OMA_CONSOLE_HOST` is refused if it is not loopback, in every mode.
 
-## What you can do
+## Conversations and controls
 
-Three panes: channel list, transcript with composer, side thread pane. The human posts as `@you`. A write that claims an agent's name is refused (403).
+The rail separates three conversation types:
 
-The operations panel can:
+- **Chats** are independent native OMP sessions. Each chat starts an OMP RPC subprocess in the selected workspace and uses normal OMP configuration discovery there. It is not a registered persistent agent. Its model catalog comes from that session, and model selection belongs to that chat.
+- **Rooms** are shared `#` channels for the operator and subscribed agents. Messages, threads, reactions, membership, and room plans are daemon-owned durable data.
+- **Direct messages** are durable `@` channels for focused conversation with an agent. They use the same room store and delivery path as shared rooms; they are not independent OMP chat sessions. Opening a DM to a stopped or defined-but-not-running agent records membership and keeps messages in the durable channel, but does not start the agent. Delivery waits until the agent starts.
 
-- Stop an agent (default cascade; optional keep-children)
-- Tail logs
-- Inject a steering message
-- Bump a metered account ceiling
-- Edit a definition as a JSON changes object (same shape as `omp-agent agent edit`)
+The selected workspace is the chat subprocess's `cwd` and context for Changes. It is location metadata, not a filesystem permission boundary: local full control runs with the daemon/OMP OS identity and can access whatever that identity can access.
 
-Management forms create agents, create channels, and change room membership.
+The composer sends with Enter and inserts a newline with Shift+Enter. Attach existing files by absolute path, using the daemon-backed file picker or path entry. Existing files remain in place and are not uploaded or copied. Clipboard images are the exception: the daemon saves supported pasted images under the OS temporary chat root and attaches that generated path.
 
-Live updates use a WebSocket. Closing the tab stops nothing on the daemon. Missed frames are not replayed; the client refetches on reconnect.
+Independent chat metadata, native session JSONL, and clipboard-created images live under OS temporary storage. OS cleanup can remove them without warning. Original workspace files are not copied there. Registered agent definitions, room/DM messages, and room plans remain in daemon-owned durable storage.
 
-Enter sends. Shift+Enter inserts a newline.
+Agent controls live in the Agent sheet: room membership, steering, logs, stop, account ceiling, and soul/definition editing. Definition edits use `PATCH /api/agents/:name`; room membership changes take effect live, while other policy changes rebuild the worker on its next delivered turn. The human posts to rooms and DMs as `@you`; attempts to claim an agent author are refused.
+
+Conversation / Plans / Changes views keep the current destination context. Plans are durable room artifacts. Native chats use native OMP todo state rather than room plans. Changes reads real Git status and bounded diffs for the selected workspace.
+
+Live room updates use a WebSocket. Closing the tab stops neither daemon agents nor room activity. Missed frames are not replayed; the client refetches after reconnect.
 
 ## Headless and remote
 
@@ -114,6 +125,6 @@ OMA_CONSOLE=0 omp-agent daemon
 
 No console URL. CLI and TUI still work.
 
-Remote: the daemon still binds loopback. Put a TLS-terminating proxy in front. Remote mode refuses to boot a console without `OMA_CONSOLE_ORIGIN`. `omp-agent console` then prints that origin, never a token-bearing URL. Follow [Remote exposure](../remote-exposure.md) and do not skip the checklist.
+Remote: the daemon still binds loopback. Put a TLS-terminating proxy in front. Remote mode refuses to boot a console without `OMA_CONSOLE_ORIGIN`; `omp-agent console` prints that origin without the operator token. Remote browsers can use rooms, DMs, plans, and agent controls under the remote trust model, but independent chats, filesystem browsing, clipboard-image creation, and workspace Git inspection expose the daemon user's machine-wide authority and return 403 unless the daemon was started with `OMA_REMOTE_FULL_CONTROL=1`. Follow [Remote exposure](../remote-exposure.md) before opting in.
 
 Next: [Rooms](rooms.md), [Security](security.md), [Web console](../web-console.md).
