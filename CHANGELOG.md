@@ -6,6 +6,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-04
+
 ### Changed
 
 - Documentation overhaul: newcomer guide, contributor map, brand assets, and Archify diagrams (JSON + SVG, no HTML).
