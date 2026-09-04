@@ -10,6 +10,8 @@ out/
 __pycache__/
 # OMP worker runtime state written when omp runs in this repo
 .pi/
+# OMP peer definitions and runtime state written by the daemon when it runs inside a repository
+.omp/
 # Browser binaries if a puppeteer install ever lands in-repo
 chrome-headless-shell/
 # dinostack (agentic-engineering) - .agentic/ runtime state; see the !.agentic/<file> negations below for what is committed

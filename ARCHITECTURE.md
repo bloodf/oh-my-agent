@@ -43,7 +43,7 @@ Status: shipped architecture. Every implementation claim below names production 
 | **Register-then-run constraint** — action methods throw `ExtensionRuntimeNotInitializedError` during load | All runtime behavior lives in event/command/tool handlers |
 | **SDK** — `createAgentSession`, `SessionManager`, `Settings`, `AuthStorage`, `ModelRegistry`, `AgentRegistry`, discovery helpers; `session.subscribe(event)`, `session.prompt(...)`, `session.dispose()`; requires Bun ≥ 1.3.14 | The daemon embeds agent sessions in-process |
 | **RPC mode** — typed client (`dist/types/modes/rpc/rpc-client.d.ts`), frame protocol, subagent subscription levels (`RpcSubagentLifecycleFrame`, `RpcSubagentProgressFrame`, `setSubagentSubscription`) | Subprocess workers when crash isolation matters |
-| **Task agent discovery** — `~/.omp/agent/agents/*.md` with frontmatter: `name`, `description`, `model` (incl. `@role` aliases via `modelRoles`), `tools`, `prewalk`, `advisor`; overridable via `task.agentModelOverrides` | We reuse the exact same format + roots for agent definitions |
+| **Task agent discovery** — `~/.omp/agent/agents/*.md` with frontmatter: `name`, `description`, `model` (incl. `@role` aliases via `modelRoles`), `tools`, `prewalk`, `advisor`; overridable via `task.agentModelOverrides` | We reuse the format for peer definitions, but materialized peer workers require `provider/id` for credential-gateway routing |
 | **Extension loading roots** — `<cwd>/.omp/extensions`, active agent dir `extensions/`, `package.json#omp.extensions` plugin manifests, `config.yml` `extensions:` | How oh-my-agent installs |
 | **Task isolation** — `task.isolation.mode`: `none` / `worktree` / `fuse-overlay` / `overlayfs` / `rcopy` / `projfs`; copy-on-write workspace, merge back on completion | **Write** isolation for agent workspaces (not a security boundary) |
 
@@ -162,7 +162,7 @@ Definitions use OMP's task-agent format verbatim — but they are **not** stored
 ---
 name: reviewer
 description: Reviews PRs and posts findings to #reviews.
-model: "@review"          # resolved via modelRoles, e.g. review: openai/gpt-5.4:high
+model: "anthropic/claude-sonnet-4-5" # provider/id lets the credential gateway route this worker
 tools: [task, read, grep, chat_send, chat_read]   # keep `task` — see §5.1
 spawns: [scout, implementor]                      # in-run delegation allowlist
 workspace: ~/work/acme    # cwd for the worker — see §7 for what this does and does NOT mean

@@ -15,7 +15,7 @@ A peer definition is one markdown file: YAML frontmatter plus a body. The body i
 |---|---|---|
 | `name` | string | Required. The peer's identity. |
 | `description` | string | Required. One line, what it does. |
-| `model` | string | e.g. `"anthropic/claude-sonnet-4-5"`, `"@review"` (model-role alias), or `"@task"`. |
+| `model` | string | Fully qualified `provider/id`, e.g. `"anthropic/claude-sonnet-4-5"`; the provider determines credential-gateway routing for the worker. |
 | `tools` | string[] | **Replaces** the default set. A restricted list gets `task` appended automatically by the parser, so delegation always survives. |
 | `spawns` | `"*"` \| string \| string[] | **Required** by oh-my-agent. In-run subagent allowlist. `"*"` = any; a CSV string or array = allowlist. Missing → `MISSING_SPAWNS`; empty string/array → `EMPTY_SPAWNS`. |
 | `thinking` / `thinkingLevel` | string | Reasoning effort override. |
@@ -48,7 +48,7 @@ Anything else at top level or inside a nested object → `UNKNOWN_KEY`. Malforme
 ---
 name: reviewer
 description: Reviews PRs and posts findings to #reviews.
-model: "@review"
+model: "anthropic/claude-sonnet-4-5"
 tools: [read, grep, chat_send, chat_read]   # parser appends "task"
 spawns: [scout, implementor]
 workspace: /home/user/work/acme             # absolute, no ~
