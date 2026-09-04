@@ -14,46 +14,20 @@ If a term is new, skim [Concepts](concepts.md) after this page.
 omp install @bloodf/oh-my-agent
 ```
 
-The binary lands at:
-
-```sh
-~/.omp/plugins/node_modules/.bin/omp-agent
-```
-
-Put that directory on `PATH`, or alias it for this session:
-
-```sh
-export PATH="$HOME/.omp/plugins/node_modules/.bin:$PATH"
-```
-
-The rest of this guide calls `omp-agent`. If the command is not found, use the full path.
-
-## 2. Confirm the TUI extension
+## 2. Open the TUI
 
 ```sh
 omp
 ```
 
-Confirm the `oh-my-agent` extension loaded, then exit the TUI. The daemon is a separate process. Closing OMP does not start it.
+Session start starts the detached daemon from the plugin tree. No PATH. No extra `omp-agent daemon`. Widget should show `agents: 0 running, 0 parked`. `ctrl+g` opens the manager.
 
-## 3. Start the daemon
+The daemon keeps running after you close the TUI. Closing the terminal does not stop it.
 
-```sh
-omp-agent daemon
-```
-
-The launcher prints two lines and exits. The daemon keeps running detached:
-
-```
-/Users/you/.omp/agent/oh-my-agent/daemon.sock
-http://127.0.0.1:50561/?token=<operator-token>
-```
-
-The first line is the control socket. The second is the browser console URL, including the operator token. Save it, or reprint it later with `omp-agent console`.
-
-Verify:
+CLI is optional. The binary lands at `~/.omp/plugins/node_modules/.bin/omp-agent`. Put that directory on `PATH` only if you want the shell verbs later in this guide:
 
 ```sh
+export PATH="$HOME/.omp/plugins/node_modules/.bin:$PATH"
 omp-agent status
 ```
 
@@ -65,13 +39,15 @@ uptime: <milliseconds>ms
 agents: 0
 ```
 
-If the daemon is not running, every other verb prints this sentence and exits 3:
+`omp-agent console` reprints the loopback URL, including the operator token. If the daemon is not running, every CLI verb prints this sentence and exits 3:
 
 ```
 oh-my-agent daemon not running — start it with `omp-agent daemon`.
 ```
 
-## 4. Create the example researcher
+The TUI already tried to start it. That sentence means the auto-start failed; run `omp-agent daemon` from PATH as the fallback.
+
+## 3. Create the example researcher
 
 `agent create` stores a definition. It does not start a worker. It accepts only a subset of frontmatter keys: `name`, `description`, `model`, `rooms`, `wake`, `autonomy`, `spawns`, plus the markdown body. See [Agents](agents.md) for the rest.
 
@@ -104,9 +80,9 @@ Expected:
 researcher	created
 ```
 
-The file is written to `<daemon-project>/.omp/oh-my-agent/agents/researcher.md`, where daemon-project is the cwd of `omp-agent daemon`, not the CLI cwd. It is not written to OMP's global `~/.omp/agent/agents/` root.
+The file is written to `<daemon-project>/.omp/oh-my-agent/agents/researcher.md`, where daemon-project is the cwd of the daemon process (the directory you launched `omp` from, or the cwd of a manual `omp-agent daemon`), not the CLI cwd. It is not written to OMP's global `~/.omp/agent/agents/` root.
 
-## 5. Spawn it
+## 4. Spawn it
 
 ```sh
 omp-agent spawn researcher
@@ -126,7 +102,7 @@ List live peers:
 omp-agent agents
 ```
 
-## 6. Post to the room
+## 5. Post to the room
 
 ```sh
 omp-agent rooms post #research @researcher Look up how omp-agent spawn differs from native task.

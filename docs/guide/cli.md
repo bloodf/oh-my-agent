@@ -1,8 +1,8 @@
 # CLI
 
-`omp-agent` talks JSON-RPC over the daemon's unix socket. It does not need an OMP session or TUI.
+`omp-agent` talks JSON-RPC over the daemon's unix socket. It does not need an OMP session or TUI. The TUI already auto-starts the daemon on session start; this binary is the shell surface.
 
-Binary: `src/daemon/main.ts`, installed as `omp-agent` at `~/.omp/plugins/node_modules/.bin/omp-agent`. Put that directory on `PATH`. Override the profile with `PI_CODING_AGENT_DIR`.
+Binary: `src/daemon/main.ts`, installed as `omp-agent` at `~/.omp/plugins/node_modules/.bin/omp-agent`. Put that directory on `PATH` to use these verbs. Override the profile with `PI_CODING_AGENT_DIR`.
 
 Related: [Getting started](getting-started.md), [Concepts](concepts.md), [Agents](agents.md).
 

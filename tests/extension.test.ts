@@ -775,6 +775,8 @@ describe("status widget", () => {
 		expect(text).toContain("1 running");
 		expect(text).toContain("1 parked");
 		expect(text).toContain("2 unread");
+		expect(text).toContain("ctrl+g manager");
+		expect(text).not.toContain("token=");
 	});
 });
 
@@ -813,6 +815,7 @@ describe("extension factory", () => {
 	test("registers the operator commands without touching the runtime", () => {
 		const registered: string[] = [];
 		const shortcuts: string[] = [];
+		const events: string[] = [];
 		const fakePi = {
 			registerCommand(name: string) {
 				registered.push(name);
@@ -820,7 +823,9 @@ describe("extension factory", () => {
 			registerShortcut(shortcut: string) {
 				shortcuts.push(shortcut);
 			},
-			on() {},
+			on(event: string) {
+				events.push(event);
+			},
 		};
 		// Load-time work is registration only: the OMP runtime actions throw
 		// before session start, so the factory must not call them here.
@@ -835,6 +840,8 @@ describe("extension factory", () => {
 		expect(registered).toContain("inject");
 		expect(registered).toContain("manage");
 		expect(shortcuts).toHaveLength(1);
+		expect(events).toContain("session_start");
+		expect(events).toContain("turn_end");
 	});
 
 	test("the manager host adapter binds ctx.ui.custom, not ctx.custom", async () => {

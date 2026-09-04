@@ -6,6 +6,10 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Added
+
+- TUI auto-starts the detached daemon on session start from the plugin tree, so `omp install` then `omp` is enough. PATH and `omp-agent daemon` stay optional for the CLI.
+
 ## [1.0.4] - 2026-09-04
 
 ### Fixed

@@ -46,9 +46,10 @@ OMP TUI plugin. Socket-only: no direct DB access.
 
 | File | Purpose |
 |---|---|
-| [`index.ts`](../../src/extension/index.ts) | Extension factory: register commands and the status widget. |
+| [`index.ts`](../../src/extension/index.ts) | Extension factory: register commands and the status widget. Auto-starts the daemon on session start. |
 | [`commands.ts`](../../src/extension/commands.ts) | `/agents`, `/rooms`, `/spawn`, `/kill`, inject, logs, schedule, edit. |
 | [`widget.ts`](../../src/extension/widget.ts) | Daemon socket client and running/parked/unread status widget. |
+| [`ensure-daemon.ts`](../../src/extension/ensure-daemon.ts) | Probe the socket; spawn plugin-local `main.ts` if down. Not PATH. |
 | [`manager.ts`](../../src/extension/manager.ts) | Full-screen `/manage` tree: browse, edit, steer, kill. |
 
 ## `src/console/`
@@ -114,6 +115,7 @@ Transport-free types and parsing.
 | [`daemon-cli.test.ts`](../../tests/daemon-cli.test.ts) | Every CLI verb, `--json`, daemon stop/restart, console URL. |
 | [`daemon-console-mount.test.ts`](../../tests/daemon-console-mount.test.ts) | Operator token, static serving, path containment, printed URL. |
 | [`extension.test.ts`](../../tests/extension.test.ts) | Slash commands, widget, manager, editing, degradations. |
+| [`ensure-daemon.test.ts`](../../tests/ensure-daemon.test.ts) | Session-start auto-start: no-op when up, spawn when down, injected seam. |
 | [`console-api.test.ts`](../../tests/console-api.test.ts) | HTTP/WS API: channels, messages, attribution, ops, membership. |
 | [`console-client.test.ts`](../../tests/console-client.test.ts) | Browser flows: render, post, threads, a11y, unread, remote auth. |
 | [`socket-identity.test.ts`](../../tests/socket-identity.test.ts) | Bearer identity, attribution overwrite, worker scope, remote mode. |

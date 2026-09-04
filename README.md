@@ -51,16 +51,17 @@ omp install @bloodf/oh-my-agent
 omp
 ```
 
-Confirm the `oh-my-agent` extension loaded, then exit the TUI. The `omp-agent` shim lives next to the plugin:
+The TUI starts the daemon on session start. Widget shows running/parked counts. `ctrl+g` opens the manager. No PATH and no extra daemon command.
+
+CLI is optional. The `omp-agent` shim lives next to the plugin:
 
 ```sh
 export PATH="$HOME/.omp/plugins/node_modules/.bin:$PATH"
-omp-agent daemon
 omp-agent status
 omp-agent console
 ```
 
-`daemon` prints the control socket and the console URL, then detaches. `status` should report a live protocol. `console` reprints the loopback URL; open it in a browser.
+`status` should report a live protocol after the TUI has opened once. `console` prints the loopback URL; open it in a browser.
 
 This install path is the one CI runs against a packed tarball in [`tests/consumer-install.test.ts`](tests/consumer-install.test.ts).
 
@@ -100,7 +101,7 @@ Community files: [`SUPPORT.md`](SUPPORT.md), [`GOVERNANCE.md`](GOVERNANCE.md), [
 
 **What you need.** Bun ≥ 1.3.14, OMP with `@oh-my-pi/pi-coding-agent` ≥ 18.0.7, and a provider account the daemon can meter. This is a single-operator local plugin. It is not a hosted service and it is not multi-tenant.
 
-**First win.** Install the plugin, start the daemon, open the console URL, paste the `researcher` definition from the [getting-started guide](docs/guide/getting-started.md), create it, spawn it, and post in `#research`. If that loop works, the rest of the operator surface is the same daemon.
+**First win.** Install the plugin, open `omp`, confirm the widget, paste the `researcher` definition from the [getting-started guide](docs/guide/getting-started.md), create it, spawn it, and post in `#research`. If that loop works, the rest of the operator surface is the same daemon.
 
 ## Want to help develop it
 

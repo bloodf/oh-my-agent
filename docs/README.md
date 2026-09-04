@@ -23,7 +23,7 @@ Read these in order the first time.
 
 | Document | What it covers |
 |---|---|
-| [Getting started](guide/getting-started.md) | Install, start the daemon, create and spawn the example researcher, post to a room |
+| [Getting started](guide/getting-started.md) | Install, open `omp` (daemon auto-starts), create and spawn the example researcher, post to a room |
 | [Concepts](guide/concepts.md) | Daemon, workers, rooms, TUI, console, and how they connect |
 | [Agents](guide/agents.md) | Peer definition format, frontmatter reference, create vs edit, first-timer errors |
 | [CLI](guide/cli.md) | Every `omp-agent` verb, flags, exit codes, `--json` |

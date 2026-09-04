@@ -20,7 +20,9 @@ A human can see and steer running agents from inside the OMP TUI.
 - `src/extension/index.ts`
 - `src/extension/commands.ts`
 - `src/extension/widget.ts`
+- `src/extension/ensure-daemon.ts`
 - `tests/extension.test.ts`
+- `tests/ensure-daemon.test.ts`
 
 ## Modules and assets in play
 
@@ -29,7 +31,9 @@ A human can see and steer running agents from inside the OMP TUI.
 | [`src/extension/index.ts`](../../../src/extension/index.ts) | Edited | Currently a no-op factory. |
 | [`src/extension/commands.ts`](../../../src/extension/commands.ts) | New | `/agents`, `/rooms`, `/schedule`, `/spawn`, `/kill`. Steering verbs (`/logs`, `/inject`) are T-511, which owns the protocol additions they need. |
 | [`src/extension/widget.ts`](../../../src/extension/widget.ts) | New | Status line. |
+| [`src/extension/ensure-daemon.ts`](../../../src/extension/ensure-daemon.ts) | New | Session-start auto-start of the detached daemon from the plugin tree, not PATH. |
 | [`tests/extension.test.ts`](../../../tests/extension.test.ts) | New | Command output and no-daemon degradation. |
+| [`tests/ensure-daemon.test.ts`](../../../tests/ensure-daemon.test.ts) | New | Probe no-op when up; spawn when down; injected spawn seam. |
 | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Read | The methods the commands call. |
 | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Read | Data source. |
 

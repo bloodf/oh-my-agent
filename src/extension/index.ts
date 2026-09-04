@@ -7,16 +7,18 @@
  * Public API: the default-exported `ExtensionFactory`.
  *
  * Upstream deps: `./commands` (command logic), `./widget` (client +
- * refresh). Both are socket-only; nothing here touches daemon state or the
- * database directly (§4.5).
+ * refresh), `./ensure-daemon` (session-start auto-start). Socket calls and
+ * the daemon spawn live inside handlers, never at load.
  *
  * Downstream consumers: OMP's extension loader (`omp.extensions` in
  * package.json).
  *
  * Failure modes: command handlers render errors as notices through the
- * `ExtensionIO` adapter; nothing throws into the TUI. The widget refreshes
- * on session start and after every turn, so a daemon that comes up late is
- * picked up without a reload.
+ * `ExtensionIO` adapter; nothing throws into the TUI. Session start starts
+ * the detached daemon from the plugin tree if the socket is down, then
+ * paints the widget. A spawn that fails still paints the shared daemon-down
+ * sentence. Turn-end refreshes only — it does not restart a daemon the
+ * operator just stopped.
  */
 
 import { join } from "node:path";
@@ -39,6 +41,7 @@ import {
 	scheduleListCommand,
 	spawnCommand,
 } from "./commands";
+import { ensureDaemon } from "./ensure-daemon";
 import type { ManagerHostContext } from "./manager";
 import { openManager } from "./manager";
 import { createDaemonClient, refreshWidget } from "./widget";
@@ -172,7 +175,16 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 
 	// The widget is a runtime surface: first paint on session start, then a
 	// refresh after every turn so counts track the daemon without polling.
+	// Auto-start lives here, not at load, because OMP's runtime is not
+	// initialized until session start. Spawn uses the plugin-local main.ts
+	// so PATH is never required.
 	pi.on("session_start", async (_event, ctx) => {
+		try {
+			await ensureDaemon(client);
+		} catch {
+			// Probe/spawn surprises must not throw into the TUI; the widget
+			// still paints whatever the socket looks like after this attempt.
+		}
 		await refreshWidget(client, ioFrom(ctx.ui));
 	});
 	pi.on("turn_end", async (_event, ctx) => {
