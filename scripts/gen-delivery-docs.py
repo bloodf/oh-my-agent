@@ -2589,12 +2589,13 @@ TASKS += [
         epic="EP-06", sprint="SP-07", status="Done",
         goal="A human can watch and join agent conversations in a browser.",
         read_first=[ARCH, ("Console API", "docs/delivery/tasks/T-602-console-api.md"), ("ADR-009: threads and reactions", "docs/delivery/adr/ADR-009-threads-and-reactions.md")],
-        files=["src/console/index.html", "src/console/app.js", "src/console/style.css", "tests/console-client.test.ts"],
+        files=["src/console/index.html", "src/console/app.js", "src/console/style.css", "tests/console-client.test.ts", "tests/console-storybook.test.ts"],
         assets=[
             ("src/console/app.js", "New", "Client logic. Plain JS with JSDoc types: browsers do not parse TS annotations and there is no build step."),
             ("src/console/index.html", "New", "Shell."),
             ("src/console/style.css", "New", "Styling."),
             ("tests/console-client.test.ts", "New", "Drives a real browser against a running daemon."),
+            ("tests/console-storybook.test.ts", "New", "Storybook catalog: pages, components, states, against production CSS."),
             ("src/daemon/console-api.ts", "Read", "The API it consumes."),
         ],
         steps=[

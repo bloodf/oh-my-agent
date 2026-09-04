@@ -119,6 +119,7 @@ Transport-free types and parsing.
 | [`ensure-daemon.test.ts`](../../tests/ensure-daemon.test.ts) | Session-start auto-start: no-op when up, spawn when down, injected seam. |
 | [`console-api.test.ts`](../../tests/console-api.test.ts) | HTTP/WS API: channels, messages, attribution, ops, membership. |
 | [`console-client.test.ts`](../../tests/console-client.test.ts) | Browser flows: render, post, threads, a11y, unread, remote auth. |
+| [`console-storybook.test.ts`](../../tests/console-storybook.test.ts) | Storybook catalog coverage and workshop server. |
 | [`socket-identity.test.ts`](../../tests/socket-identity.test.ts) | Bearer identity, attribution overwrite, worker scope, remote mode. |
 | [`remote-exposure.test.ts`](../../tests/remote-exposure.test.ts) | Bind refusal, forwarded headers, origin, tickets, audit. |
 | [`usage-meter.test.ts`](../../tests/usage-meter.test.ts) | Broker usage polling drives warn/park. |

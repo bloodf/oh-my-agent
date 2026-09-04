@@ -6,6 +6,14 @@ The browser console is an operator surface for the same daemon the CLI and TUI u
 
 This page is the newcomer path. The full API, auth rules, and client behavior live in [The web console](../web-console.md). Going beyond loopback is [Remote exposure](../remote-exposure.md).
 
+## See every screen (no daemon)
+
+```sh
+bun run storybook
+```
+
+Opens `http://127.0.0.1:6006`. Pages, components, and states use production `src/console/style.css`. The brand raster in `docs/assets/console.png` is a mock, not this UI.
+
 ## Open it
 
 From the OMP TUI after install:

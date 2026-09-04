@@ -738,6 +738,97 @@ button {
 	color: var(--accent);
 }
 
+/* ── Operator auth (remote) ────────────────────────────────────────────── */
+
+#operator-auth {
+	position: fixed;
+	inset: 0;
+	z-index: 10;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	gap: var(--space-2);
+	background: var(--surface-0);
+	padding: var(--space-4);
+}
+
+#operator-auth[hidden] {
+	display: none;
+}
+
+#operator-auth h1 {
+	margin: 0;
+	font-size: var(--font-size-2);
+}
+
+#operator-auth p {
+	margin: 0;
+	color: var(--text-muted);
+	max-width: var(--measure);
+	text-align: center;
+}
+
+#operator-auth-form {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	width: 22rem;
+	max-width: 100%;
+}
+
+#operator-auth-form input,
+#new-channel input,
+#new-agent input,
+#new-agent textarea {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-1);
+	background: var(--surface-0);
+	color: var(--text-primary);
+	padding: var(--space-1);
+	font: inherit;
+}
+
+#operator-auth-form button,
+#new-channel button,
+#new-agent button {
+	border: 1px solid var(--accent);
+	border-radius: var(--radius-1);
+	background: var(--accent);
+	color: var(--surface-0);
+	padding: var(--space-1) var(--space-2);
+	cursor: pointer;
+	font-weight: 600;
+}
+
+#operator-auth-error,
+#new-channel-error,
+#new-agent-error {
+	color: var(--danger);
+	font-size: var(--font-size-0);
+	min-height: var(--space-2);
+}
+
+#new-channel,
+#new-agent {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	padding: 0 var(--space-1);
+}
+
+#notice {
+	margin: 0;
+	padding: var(--space-1) var(--space-2);
+	color: var(--text-muted);
+	font-size: var(--font-size-0);
+	border-bottom: 1px solid var(--border);
+}
+
+#notice:empty {
+	display: none;
+}
+
 /* ── Reduced motion ────────────────────────────────────────────────────── */
 
 /* Hover fades and any future animation are decoration, not meaning. */

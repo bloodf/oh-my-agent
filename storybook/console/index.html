@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>oh-my-agent console storybook</title>
+		<link rel="stylesheet" href="/workshop.css" />
+	</head>
+	<body>
+		<nav id="nav" aria-label="Stories">
+			<h1>Console storybook</h1>
+		</nav>
+		<header id="header">
+			<span id="crumb">Pages</span>
+			<span id="title">Loading…</span>
+		</header>
+		<div id="canvas-wrap">
+			<iframe id="canvas" title="Story canvas"></iframe>
+		</div>
+		<section id="docs" aria-label="Story notes"></section>
+		<script type="module">
+			import { STORIES } from "/stories.js";
+
+			const nav = document.getElementById("nav");
+			const iframe = document.getElementById("canvas");
+			const title = document.getElementById("title");
+			const crumb = document.getElementById("crumb");
+			const docs = document.getElementById("docs");
+
+			const groups = [];
+			for (const story of STORIES) {
+				if (!groups.includes(story.group)) groups.push(story.group);
+			}
+			for (const group of groups) {
+				const heading = document.createElement("h2");
+				heading.textContent = group;
+				nav.append(heading);
+				for (const story of STORIES.filter((item) => item.group === group)) {
+					const link = document.createElement("a");
+					link.href = `#${story.id}`;
+					link.textContent = story.title;
+					link.dataset.id = story.id;
+					nav.append(link);
+				}
+			}
+
+			const show = (id) => {
+				const story = STORIES.find((item) => item.id === id) ?? STORIES[0];
+				if (story === undefined) return;
+				location.hash = story.id;
+				iframe.src = `/preview.html?id=${encodeURIComponent(story.id)}`;
+				title.textContent = story.title;
+				crumb.textContent = story.group;
+				docs.innerHTML = `<strong>${story.title}.</strong> ${story.docs}`;
+				for (const link of nav.querySelectorAll("a")) {
+					link.setAttribute(
+						"aria-current",
+						link.dataset.id === story.id ? "page" : "false",
+					);
+				}
+			};
+
+			window.addEventListener("hashchange", () =>
+				show(location.hash.slice(1)),
+			);
+			show(location.hash.slice(1) || "page-populated");
+		</script>
+	</body>
+</html>

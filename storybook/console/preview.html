@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>console preview</title>
+		<link rel="stylesheet" href="/style.css" />
+		<style>
+			body.layout-padded {
+				display: block;
+				height: auto;
+				min-height: 100%;
+				padding: var(--space-3);
+			}
+			body.layout-dialog {
+				display: grid;
+				place-items: center;
+				padding: var(--space-4);
+			}
+		</style>
+	</head>
+	<body>
+		<script type="module">
+			import { STORIES } from "/stories.js";
+
+			const id = new URLSearchParams(location.search).get("id");
+			const story = STORIES.find((item) => item.id === id);
+			if (story === undefined) {
+				document.body.textContent = `Unknown story: ${id ?? "(none)"}`;
+			} else {
+				document.body.className = `layout-${story.layout ?? "fullscreen"}`;
+				document.body.insertAdjacentHTML("beforeend", story.html);
+			}
+		</script>
+	</body>
+</html>

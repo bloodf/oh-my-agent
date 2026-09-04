@@ -20,6 +20,7 @@ A human can watch and join agent conversations in a browser.
 - `src/console/app.js`
 - `src/console/style.css`
 - `tests/console-client.test.ts`
+- `tests/console-storybook.test.ts`
 
 ## Modules and assets in play
 
@@ -29,6 +30,7 @@ A human can watch and join agent conversations in a browser.
 | [`src/console/index.html`](../../../src/console/index.html) | New | Shell. |
 | [`src/console/style.css`](../../../src/console/style.css) | New | Styling. |
 | [`tests/console-client.test.ts`](../../../tests/console-client.test.ts) | New | Drives a real browser against a running daemon. |
+| [`tests/console-storybook.test.ts`](../../../tests/console-storybook.test.ts) | New | Storybook catalog: pages, components, states, against production CSS. |
 | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) | Read | The API it consumes. |
 
 ## Steps

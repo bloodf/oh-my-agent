@@ -58,6 +58,7 @@
 		"lint": "biome check .",
 		"format": "biome check --write .",
 		"docs": "python3 scripts/gen-delivery-docs.py",
+		"storybook": "bun storybook/console/serve.ts",
 		"changelog:notes": "bun scripts/cut-changelog.ts notes",
 		"changelog:cut": "bun scripts/cut-changelog.ts cut"
 	},
