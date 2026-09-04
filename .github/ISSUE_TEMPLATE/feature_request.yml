@@ -9,12 +9,17 @@ body:
         [`docs/delivery/`](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/README.md)
         with explicit acceptance criteria. This form collects what that task would need.
 
+        Read the [user guide](https://github.com/bloodf/oh-my-agent/blob/main/docs/guide/getting-started.md)
+        and [ARCHITECTURE.md](https://github.com/bloodf/oh-my-agent/blob/main/ARCHITECTURE.md)
+        non-goals first. This is a local single-operator daemon, not a cloud or
+        multi-tenant service, and `workspace:` is a cwd, not a sandbox.
+
   - type: textarea
     id: problem
     attributes:
       label: The problem
       description: |
-        What can you not do today? Describe the situation, not the solution — the
+        What can you not do today? Describe the situation, not the solution. The
         problem outlives any particular fix for it.
     validations:
       required: true
@@ -53,3 +58,5 @@ body:
       options:
         - label: This does not require the daemon to bind a routable address (ADR-012 refuses that unconditionally)
         - label: This does not assume multi-tenancy (one operator per daemon is the model)
+        - label: This does not treat `workspace:` as a security sandbox
+        - label: This does not require a cloud or hosted component

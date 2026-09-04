@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Worker lifecycle",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "output": "worker-lifecycle.html",
+    "viewBox": [980, 660]
+  },
+  "lanes": [
+    { "id": "main", "label": "Peer states" },
+    { "id": "waiting", "label": "Idle wait" },
+    { "id": "exceptions", "label": "Quota recovery" },
+    { "id": "terminal", "label": "Stop" }
+  ],
+  "states": [
+    { "id": "defined", "type": "start", "label": "Defined", "sublabel": "peer markdown", "lane": "main", "col": 0, "step": "01", "tag": "create" },
+    { "id": "running", "type": "active", "label": "Running", "sublabel": "RPC worker", "lane": "main", "col": 1, "step": "02", "tag": "spawn" },
+    { "id": "working", "type": "active", "label": "Working", "sublabel": "session.prompt", "lane": "main", "col": 2, "step": "03", "tag": "turn" },
+    { "id": "reviewing", "type": "decision", "label": "Idle check", "sublabel": "budget + mentions", "lane": "main", "col": 3, "step": "04" },
+    { "id": "stopped", "type": "success", "label": "Stopped", "sublabel": "kill or exit", "lane": "main", "col": 4, "step": "05", "tag": "kill" },
+    { "id": "parked", "type": "waiting", "label": "Parked", "sublabel": "await mention", "lane": "waiting", "col": 0, "tag": "wake" },
+    { "id": "quota", "type": "waiting", "label": "Quota parked", "sublabel": "ceiling reached", "lane": "waiting", "col": 1, "tag": "meter" },
+    { "id": "resume", "type": "failure", "label": "Resume armed", "sublabel": "bump or reset", "lane": "exceptions", "col": 0, "yOffset": 78, "tag": "retryable" },
+    { "id": "cascade", "type": "failure", "label": "Children stopped", "sublabel": "parentage", "lane": "terminal", "col": 0, "tag": "terminal" },
+    { "id": "orphan", "type": "failure", "label": "Orphaned", "sublabel": "parent gone", "lane": "terminal", "col": 1, "tag": "terminal" }
+  ],
+  "transitions": [
+    { "id": "to-parked", "from": "working", "to": "parked", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "straight" },
+    { "id": "review-quota", "from": "reviewing", "to": "quota", "variant": "default", "route": "drop" },
+    { "id": "working-resume", "from": "working", "to": "resume", "variant": "security", "fromSide": "left", "toSide": "left", "via": [[320, 157], [320, 385]] },
+    { "id": "resume-work", "from": "resume", "to": "working", "variant": "emphasis", "fromSide": "left", "toSide": "top", "via": [[20, 385], [20, 80], [402, 80]] },
+    { "id": "quota-stopped", "from": "quota", "to": "orphan", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "straight" },
+    { "id": "parked-cascade", "from": "parked", "to": "cascade", "variant": "security", "fromSide": "bottom", "toSide": "top", "via": [[480, 336], [480, 432], [402, 432]] }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Main rail", "items": ["Defined peers spawn into a running RPC worker", "Idle peers park and wait for a mention or room wake"] },
+    { "dot": "amber", "title": "Quota", "items": ["Metered accounts warn at 80% of budgetUsd and park at 100%", "Subscription accounts arm an unattended resume at quota reset"] },
+    { "dot": "rose", "title": "Parentage", "items": ["kill cascades to children unless --keep-children", "A child whose parent is gone is never woken"] }
+  ]
+}

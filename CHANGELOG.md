@@ -6,6 +6,10 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation overhaul: newcomer guide, contributor map, brand assets, and Archify diagrams (JSON + SVG, no HTML).
+
 ## [1.0.1] - 2026-09-04
 
 Fixes found by driving the daemon end to end as a new user would, rather than through the suite. Every defect below was reproduced live before the fix and re-verified after, through the CLI and a real browser.

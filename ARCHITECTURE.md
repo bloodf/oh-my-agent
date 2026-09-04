@@ -1,5 +1,13 @@
 # oh-my-agent — Architecture
 
+## Documentation
+
+Newcomers start at [Getting started](docs/guide/getting-started.md).
+Contributors start at [Developing oh-my-agent](docs/develop/README.md).
+The docs hub is [docs/README.md](docs/README.md).
+Runtime picture: [docs/diagrams/runtime.svg](docs/diagrams/runtime.svg).
+More pictures in [docs/diagrams/](docs/diagrams/).
+
 An [oh-my-pi (OMP)](https://omp.sh/docs) plugin that runs **autonomous, long-lived agents** which keep working while you're away, talk to each other in chat rooms, and are fully observable/steerable from inside the interactive OMP TUI.
 
 Status: shipped architecture. Every implementation claim below names production modules and covering suites.
@@ -143,11 +151,9 @@ loopback HTTP management for agents, channels, memberships, messages, threads,
 and reactions, plus a WebSocket feed for live message and reaction events.
 [`src/console/`](src/console/) supplies the browser client.
 `tests/console-api.test.ts` covers the HTTP and WebSocket API;
-`tests/console-client.test.ts` covers browser management flows. The daemon does
-not yet mount the server or serve the client in production — that boot wiring,
-the operator-token lifecycle, and static serving are
-[T-1001](docs/delivery/tasks/T-1001-console-mounted-at-boot.md). The operator
-guide is [docs/web-console.md](docs/web-console.md).*
+`tests/console-client.test.ts` covers browser management flows. The daemon
+mounts the server and serves the client at boot, behind the operator token.
+The operator guide is [docs/web-console.md](docs/web-console.md).*
 
 ## 5. Agent definitions — [Implemented]
 
@@ -165,7 +171,7 @@ description: Reviews PRs and posts findings to #reviews.
 model: "anthropic/claude-sonnet-4-5" # provider/id lets the credential gateway route this worker
 tools: [task, read, grep, chat_send, chat_read]   # keep `task` — see §5.1
 spawns: [scout, implementor]                      # in-run delegation allowlist
-workspace: ~/work/acme    # cwd for the worker — see §7 for what this does and does NOT mean
+workspace: /home/user/work/acme    # cwd for the worker; `~` is not expanded. See §7 for what this does and does NOT mean.
 rooms: ["#reviews"]       # oh-my-agent additions live under plain keys OMP ignores
 wake: { mention: true }
 autonomy: { maxTurns: 40, budgetUsd: 2.50 }

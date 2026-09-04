@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="oh-my-agent mark">
+  <title>oh-my-agent</title>
+  <desc>A daemon beacon supervising three workers. Rounded tile, cyan diamond, nodes at 0/120/240.</desc>
+  <rect x="2" y="2" width="124" height="124" rx="27" fill="#161a21" stroke="#2a3140" stroke-width="1.5"/>
+  <polygon points="64,45.2 81.6,62.8 64,80.4 46.4,62.8" fill="#58c4dd" fill-opacity=".2"/>
+  <path d="M74.81 31.41 A33.2 33.2 0 0 1 96.59 69.13" fill="none" stroke="#58c4dd" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M85.78 87.86 A33.2 33.2 0 0 1 42.22 87.86" fill="none" stroke="#8ab9ff" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M31.41 69.13 A33.2 33.2 0 0 1 53.19 31.41" fill="none" stroke="#e3b341" stroke-width="2.2" stroke-linecap="round"/>
+  <circle cx="64" cy="29.6" r="7.45" fill="#161a21"/>
+  <circle cx="92.75" cy="79.4" r="7.45" fill="#161a21"/>
+  <circle cx="35.25" cy="79.4" r="7.45" fill="#161a21"/>
+  <circle cx="64" cy="29.6" r="5.9" fill="#58c4dd"/>
+  <circle cx="92.75" cy="79.4" r="5.9" fill="#8ab9ff"/>
+  <circle cx="35.25" cy="79.4" r="5.9" fill="#e3b341"/>
+  <polygon points="64,51.7 75.1,62.8 52.9,62.8" fill="#eefbff"/>
+  <polygon points="64,73.9 75.1,62.8 52.9,62.8" fill="#6ecfe4"/>
+  <polygon points="64,51.7 75.1,62.8 64,73.9 52.9,62.8" fill="none" stroke="#b7ecf6" stroke-width=".9" stroke-linejoin="miter"/>
+  <polygon points="64,59.1 67.7,62.8 64,66.5 60.3,62.8" fill="#eefbff"/>
+</svg>

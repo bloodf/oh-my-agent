@@ -2,7 +2,13 @@ blank_issues_enabled: true
 contact_links:
   - name: Security vulnerability
     url: https://github.com/bloodf/oh-my-agent/security/advisories/new
-    about: Report privately. For vulnerabilities only — not conduct reports, which go to the maintainer per CODE_OF_CONDUCT.md.
+    about: Report privately. For vulnerabilities only, not conduct reports, which go to the maintainer per CODE_OF_CONDUCT.md.
+  - name: User guide
+    url: https://github.com/bloodf/oh-my-agent/blob/main/docs/guide/getting-started.md
+    about: Install, first daemon, first agent.
+  - name: Developer guide
+    url: https://github.com/bloodf/oh-my-agent/blob/main/docs/develop/README.md
+    about: Checkout setup, tests, delivery tree, and how to land a change.
   - name: Contributing guide
     url: https://github.com/bloodf/oh-my-agent/blob/main/CONTRIBUTING.md
     about: Setup, testing standards, and what evidence a PR needs.

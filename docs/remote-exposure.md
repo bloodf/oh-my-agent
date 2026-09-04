@@ -1,5 +1,10 @@
 # Remote console exposure
 
+Newcomers start at [Getting started](guide/getting-started.md).
+The short security model is [Security](guide/security.md).
+This page is the operator runbook for remote mode, threat model, and proxy recipes.
+Pictures live in [diagrams](diagrams/).
+
 Remote mode with the console enabled requires `OMA_CONSOLE_ORIGIN`: the daemon refuses to boot without it, before the pidfile or any listener opens (ADR-012). Set it to the exact external HTTPS origin the console is served behind — no credentials, path, query, or hash. A headless remote daemon (`OMA_CONSOLE=0`) serves no console and needs no origin.
 
 ```sh

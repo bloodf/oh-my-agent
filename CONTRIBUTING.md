@@ -7,6 +7,9 @@ that means and how to produce it.
 
 ## Table of contents
 
+- [Two audiences](#two-audiences)
+- [First hour as a developer](#first-hour-as-a-developer)
+- [Related documents](#related-documents)
 - [Ground rules](#ground-rules)
 - [Getting set up](#getting-set-up)
 - [The delivery tree](#the-delivery-tree)
@@ -14,6 +17,35 @@ that means and how to produce it.
 - [Testing standards](#testing-standards)
 - [Commit and PR conventions](#commit-and-pr-conventions)
 - [Where to start](#where-to-start)
+
+## Two audiences
+
+Two kinds of people land here. They need different documents.
+
+- **You want to run agents.** Start at
+  [`docs/guide/getting-started.md`](docs/guide/getting-started.md). This file is not
+  that path.
+- **You want to change the code.** This file is the contract. Pair it with
+  [`docs/develop/README.md`](docs/develop/README.md), the developer map.
+
+The documentation hub is [`docs/README.md`](docs/README.md). Use it when you are not
+sure which document you need.
+
+## First hour as a developer
+
+Follow [`docs/develop/README.md`](docs/develop/README.md). That page is the first-hour path: clone and install, a green `test:fast`, architecture, modules, then picking work.
+
+Nothing is **Ready**. Remaining work is **Blocked** (T-1202, T-1205, T-1403, T-1503, T-1504). File a bug, or add a task in [`scripts/gen-delivery-docs.py`](scripts/gen-delivery-docs.py).
+
+## Related documents
+
+- [`SUPPORT.md`](SUPPORT.md): how to get help.
+- [`GOVERNANCE.md`](GOVERNANCE.md): how the project is run.
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md): expected behavior, including how
+  technical disagreement works here.
+- [`SECURITY.md`](SECURITY.md): how to report a vulnerability. Do not open a public
+  issue for a security problem.
+- [`docs/assets/README.md`](docs/assets/README.md): brand and documentation assets.
 
 ## Ground rules
 
@@ -56,8 +88,8 @@ Modules and assets in play, Steps, Acceptance, Out of scope, Depends on, Unblock
 
 Two files are worth reading before your first change:
 
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — what the system is and why.
-- [`docs/delivery/adr/`](docs/delivery/adr/) — decisions with the alternatives that lost
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): what the system is and why.
+- [`docs/delivery/adr/`](docs/delivery/adr/): decisions with the alternatives that lost
   and the evidence behind them. If your change contradicts an ADR, the ADR is part of
   the change.
 
@@ -116,13 +148,15 @@ I have no tailnet" is a useful, welcome sentence. A silent gap is not.
 
 ## Where to start
 
+- [`docs/develop/README.md`](docs/develop/README.md) is the developer map.
+  [`docs/develop/modules.md`](docs/develop/modules.md) is the per-module index. Read
+  both before your first change.
 - [`docs/delivery/README.md`](docs/delivery/README.md) lists every task with its status.
-  Anything marked **Ready** is specified and unblocked, and each task file names the
-  files it may change — which makes the scope of the work obvious before you start.
-- Five tasks are **Blocked** on things outside the repo (real-proxy evidence, a
-  live-account session, two upstream releases). Each names its blocker in its
-  `Out of scope` section. If you have the infrastructure one of them needs, that is
-  genuinely valuable help.
+  Nothing is **Ready**. Remaining work is **Blocked** (T-1202, T-1205, T-1403,
+  T-1503, T-1504). Each names its blocker in its `Out of scope` section. If you
+  have the infrastructure one of them needs, that is genuinely valuable help.
+  File a bug, or add a task in
+  [`scripts/gen-delivery-docs.py`](scripts/gen-delivery-docs.py).
 - Found a bug? Open an issue with the reproduction; if it is a security issue, follow
   [`SECURITY.md`](SECURITY.md) instead.
 

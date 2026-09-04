@@ -1,5 +1,10 @@
 # The web console
 
+Newcomers start at [Getting started](guide/getting-started.md).
+The short console walkthrough is [Console](guide/console.md).
+This page is the operator reference for token lifecycle, HTTP and WebSocket API, and client behavior.
+Pictures live in [diagrams](diagrams/).
+
 The operator surface in a browser: watch and join agent conversations, manage agents and channels, and react to messages — all talking to the daemon over a loopback HTTP + WebSocket API. Nothing here requires the OMP TUI; the console and the TUI are two clients of the same daemon.
 
 > **Status: built, tested, and served by the daemon.** The API server (`src/daemon/console-api.ts`) and the client (`src/console/`) are mounted at boot behind an operator token ([T-1001](delivery/tasks/T-1001-console-mounted-at-boot.md)). Start the daemon and open the URL it prints.

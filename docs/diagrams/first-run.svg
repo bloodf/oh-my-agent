@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 895 528" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
+  <style><![CDATA[
+
+svg { background: #020617; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+svg,
+    [data-theme="dark"] {
+      --bg: #020617;
+      --grid: #1e293b;
+      --text: #ffffff;
+      --text-muted: #94a3b8;
+      --text-dim: #475569;
+      
+
+      --text-faint: #7d8da1;
+
+      --panel: rgba(15, 23, 42, 0.5);
+      --panel-border: #1e293b;
+      --lane-fill: rgba(15, 23, 42, 0.22);
+      --lane-stroke: #334155;
+
+      --arrow: #64748b;
+      --arrow-emphasis: #34d399;
+
+      
+
+      --mask: #0f172a;
+
+      --frontend-fill:    rgba(8, 51, 68, 0.4);
+      --frontend-stroke:  #22d3ee;
+      --backend-fill:     rgba(6, 78, 59, 0.4);
+      --backend-stroke:   #34d399;
+      --database-fill:    rgba(76, 29, 149, 0.4);
+      --database-stroke:  #a78bfa;
+      --cloud-fill:       rgba(120, 53, 15, 0.3);
+      --cloud-stroke:     #fbbf24;
+      --security-fill:    rgba(136, 19, 55, 0.4);
+      --security-stroke:  #fb7185;
+      --messagebus-fill:  rgba(251, 146, 60, 0.3);
+      --messagebus-stroke:#fb923c;
+      --external-fill:    rgba(30, 41, 59, 0.5);
+      --external-stroke:  #94a3b8;
+
+      --toolbar-bg:       rgba(15, 23, 42, 0.8);
+      --toolbar-border:   #334155;
+      --toolbar-text:     #e2e8f0;
+      --toolbar-hover:    rgba(15, 23, 42, 0.95);
+      --toolbar-menu-bg:  #0f172a;
+    }
+.card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+.card-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+.card-dot.cyan     { background: var(--frontend-stroke); }
+.card-dot.emerald  { background: var(--backend-stroke); }
+.card-dot.violet   { background: var(--database-stroke); }
+.card-dot.amber    { background: var(--cloud-stroke); }
+.card-dot.rose     { background: var(--security-stroke); }
+.card-dot.orange   { background: var(--messagebus-stroke); }
+.card-dot.slate    { background: var(--external-stroke); }
+.c-grid       { stroke: var(--grid); fill: none; }
+.c-mask       { fill: var(--mask); stroke: none; }
+.c-frontend   { fill: var(--frontend-fill);   stroke: var(--frontend-stroke); }
+.c-backend    { fill: var(--backend-fill);    stroke: var(--backend-stroke); }
+.c-database   { fill: var(--database-fill);   stroke: var(--database-stroke); }
+.c-cloud      { fill: var(--cloud-fill);      stroke: var(--cloud-stroke); }
+.c-security   { fill: var(--security-fill);   stroke: var(--security-stroke); }
+.c-messagebus { fill: var(--messagebus-fill); stroke: var(--messagebus-stroke); }
+.c-external   { fill: var(--external-fill);   stroke: var(--external-stroke); }
+.t-primary { fill: var(--text); }
+.t-muted   { fill: var(--text-muted); }
+.t-dim     { fill: var(--text-dim); }
+.t-frontend   { fill: var(--frontend-stroke); }
+.t-backend    { fill: var(--backend-stroke); }
+.t-database   { fill: var(--database-stroke); }
+.t-cloud      { fill: var(--cloud-stroke); }
+.t-security   { fill: var(--security-stroke); }
+.t-messagebus { fill: var(--messagebus-stroke); }
+.t-external   { fill: var(--external-stroke); }
+svg[data-preset="blueprint"] .brand-mark-badge,
+    svg[data-preset="blueprint"] .brand-mark-frame { rx: 1px; }
+.a-default   { stroke: var(--arrow); fill: none; }
+.a-emphasis  { stroke: var(--arrow-emphasis); fill: none; }
+.a-security  { stroke: var(--security-stroke); fill: none; stroke-dasharray: 5,5; }
+.a-dashed    { stroke: var(--database-stroke); fill: none; stroke-dasharray: 4,4; }
+.m-default   { fill: var(--arrow); }
+.m-emphasis  { fill: var(--arrow-emphasis); }
+.m-security  { fill: var(--security-stroke); }
+.m-dashed    { fill: var(--database-stroke); }
+svg[data-preset="signal-flow"] .source-evidence-beacon { opacity: 0.9; }
+svg[data-preset="blueprint"] .source-evidence-beacon rect {
+      rx: 0.8px;
+      filter: none;
+    }
+svg[data-preset="signal-flow"] [data-legend-kind][data-legend-selected] [data-legend-hit] {
+      filter: drop-shadow(0 0 4px var(--database-stroke));
+    }
+svg[data-preset="blueprint"] [data-legend-hit],
+    svg[data-preset="blueprint"] [data-legend-count-badge] rect { rx: 0; filter: none; }
+svg[data-preset="signal-flow"] .semantic-lens-flow {
+      stroke-width: 3.7;
+      opacity: 1;
+    }
+svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="out"],
+    svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="forward"] {
+      filter: drop-shadow(0 0 6px var(--frontend-stroke));
+    }
+svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="in"],
+    svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="reverse"] {
+      filter: drop-shadow(0 0 6px var(--database-stroke));
+    }
+svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="within"] {
+      filter: drop-shadow(0 0 6px var(--messagebus-stroke));
+    }
+svg[data-preset="blueprint"] .semantic-lens-flow {
+      stroke-width: 2.45;
+      stroke-linecap: square;
+      filter: none;
+      opacity: 0.78;
+    }
+svg[data-preset="blueprint"][data-reach-active] [data-reach-origin],
+    svg[data-preset="blueprint"][data-reach-active] [data-edge-from][data-reach-match] {
+      filter: none;
+    }
+svg[data-preset="blueprint"] .relationship-hit-target:focus-visible .relationship-focus-rail {
+      stroke-linecap: square;
+      filter: none;
+    }
+svg[data-preset="signal-flow"] .relationship-flow-pulse {
+      stroke: var(--frontend-stroke);
+      stroke-width: 3.85;
+      filter: drop-shadow(0 0 7px var(--frontend-stroke));
+    }
+svg[data-preset="blueprint"] .relationship-flow-pulse {
+      stroke-width: 2.5;
+      stroke-linecap: square;
+      filter: none;
+    }
+svg[data-preset="editorial"] .relationship-flow-pulse {
+      stroke: var(--arrow-emphasis);
+      stroke-width: 2.75;
+      filter: none;
+    }
+svg[data-preset="signal-flow"] .semantic-flow-token {
+      filter: drop-shadow(0 0 5px currentColor);
+    }
+svg[data-preset="blueprint"] .semantic-flow-token { filter: none; }
+svg[data-preset="editorial"] .semantic-flow-token { filter: none; }
+svg[data-preset="blueprint"] [data-intent-trace-selected],
+    svg[data-preset="blueprint"] .intent-trace-flow {
+      filter: none;
+      stroke-linecap: square;
+    }
+svg[data-preset="editorial"] [data-intent-trace-selected],
+    svg[data-preset="editorial"] .intent-trace-flow { filter: none; }
+svg[data-preset="blueprint"] [data-route-start],
+    svg[data-preset="blueprint"] [data-route-end],
+    svg[data-preset="blueprint"] [data-route-step],
+    svg[data-preset="blueprint"] .route-probe-flow {
+      filter: none;
+      stroke-linecap: square;
+    }
+svg[data-preset="blueprint"] .route-journey-flow {
+      filter: none;
+      stroke-linecap: square;
+    }
+svg[data-preset="editorial"] [data-route-start],
+    svg[data-preset="editorial"] [data-route-end],
+    svg[data-preset="editorial"] [data-route-step],
+    svg[data-preset="editorial"] .route-probe-flow,
+    svg[data-preset="editorial"] .route-journey-flow { filter: none; }
+svg[data-preset="editorial"] .c-grid {
+      stroke-dasharray: 1 4;
+      opacity: 0.48;
+    }
+svg[data-preset="editorial"] .c-region {
+      fill: color-mix(in srgb, var(--cloud-fill) 48%, transparent);
+      stroke-dasharray: 9 4;
+    }
+svg[data-preset="editorial"] [data-node-id]:hover,
+    svg[data-preset="editorial"] [data-node-id]:focus-visible,
+    svg[data-preset="editorial"][data-focus-active] [data-focus-selected] {
+      filter: drop-shadow(0 2px 2px color-mix(in srgb, var(--text) 18%, transparent));
+    }
+svg[data-preset="blueprint"] .c-grid {
+      stroke-dasharray: 1 3;
+      opacity: 0.78;
+    }
+svg[data-preset="blueprint"] .c-region {
+      fill: color-mix(in srgb, var(--cloud-fill) 58%, transparent);
+      stroke-dasharray: 12 4 2 4;
+    }
+svg[data-preset="blueprint"] .c-security-group,
+    svg[data-preset="blueprint"] .c-lane { stroke-dasharray: 7 3; }
+svg[data-preset="blueprint"] [data-node-id]:hover,
+    svg[data-preset="blueprint"] [data-node-id]:focus-visible {
+      filter: drop-shadow(0 0 3px var(--frontend-stroke));
+    }
+svg[data-preset="blueprint"][data-focus-active] [data-focus-selected] {
+      filter: drop-shadow(0 0 3px var(--frontend-stroke));
+    }
+svg[data-preset="blueprint"][data-focus-active][data-reach-active] [data-focus-selected][data-reach-origin] {
+      filter: none;
+    }
+svg[data-preset="blueprint"][data-relationship-preview-active] [data-relationship-preview],
+    svg[data-preset="blueprint"][data-relationship-preview-active] [data-relationship-preview-source],
+    svg[data-preset="blueprint"][data-relationship-preview-active] [data-relationship-preview-target] {
+      filter: drop-shadow(0 0 3px var(--frontend-stroke));
+    }
+svg[data-preset="blueprint"] .story-trail-flow {
+      stroke-linecap: square;
+      filter: none;
+      opacity: 0.5;
+    }
+svg[data-preset="blueprint"][data-story-beat] [data-story-step][data-story-beat-state="active"] {
+      filter: none;
+      animation: none;
+    }
+svg[data-preset="editorial"] .story-trail-flow { filter: none; }
+svg[data-preset="editorial"][data-story-beat] [data-story-step][data-story-beat-state="active"] {
+      filter: drop-shadow(0 2px 2px color-mix(in srgb, var(--text) 16%, transparent));
+    }
+svg[data-preset="blueprint"][data-chapter-preview] [data-node-id] { filter: none !important; }
+.c-security-group { fill: transparent; stroke: var(--security-stroke); stroke-dasharray: 4,4; }
+.c-region         { fill: rgba(251, 191, 36, 0.05); stroke: var(--cloud-stroke); stroke-dasharray: 8,4; }
+.c-lane           { fill: var(--lane-fill); stroke: var(--lane-stroke); stroke-dasharray: 6,6; }
+svg[data-preset="signal-flow"][data-animation="trace"] [data-animate="edge"] {
+      stroke-linecap: round;
+      filter: drop-shadow(0 0 3px var(--arrow-emphasis));
+      animation-duration: 1.75s;
+    }
+svg[data-preset="signal-flow"][data-animation="trace"] [data-animate="node"] {
+      animation-duration: 3.1s;
+    }
+svg[data-preset="blueprint"][data-animation="trace"] [data-animate="edge"] {
+      stroke-linecap: square;
+      filter: none;
+      animation-duration: 2.15s;
+    }
+svg[data-preset="blueprint"][data-animation="trace"] [data-animate="node"] {
+      animation-name: archify-blueprint-node-pulse;
+      animation-duration: 3.8s;
+    }
+svg[data-preset="editorial"][data-animation="trace"] [data-animate="edge"] {
+      filter: none;
+      animation-duration: 2.2s;
+    }
+svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] {
+      animation-name: archify-editorial-node-pulse;
+      animation-duration: 3.5s;
+    }
+
+]]></style>
+
+        <title id="archify-diagram-title">First run</title>
+        <desc id="archify-diagram-description">A workflow diagram generated by Archify.</desc>
+        <!-- Definitions -->
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-default" />
+          </marker>
+          <marker id="arrowhead-emphasis" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-emphasis" />
+          </marker>
+          <marker id="arrowhead-security" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-security" />
+          </marker>
+          <marker id="arrowhead-dashed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-dashed" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" class="c-grid" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <!-- Background Grid -->
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- Swimlanes -->
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="839" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / Operator</text>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="839" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / OMP</text>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="839" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / oh-my-agent daemon</text>
+
+        <!-- Phase headers -->
+        <line x1="72" y1="35" x2="284" y2="35" class="a-default" stroke-width="1.1"/>
+        <rect x="72" y="27" width="212" height="16" rx="4" class="c-mask"/>
+        <text x="178" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">Install</text>
+        <line x1="312" y1="35" x2="524" y2="35" class="a-emphasis" stroke-width="1.1"/>
+        <rect x="312" y="27" width="212" height="16" rx="4" class="c-mask"/>
+        <text x="418" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">Boot</text>
+        <line x1="552" y1="35" x2="850.8" y2="35" class="a-default" stroke-width="1.1"/>
+        <rect x="552" y="27" width="298.79999999999995" height="16" rx="4" class="c-mask"/>
+        <text x="701.4" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">Run a peer</text>
+
+        <!-- Workflow groups -->
+
+
+        <!-- Edge paths -->
+        <path data-edge-from="create" data-edge-to="spawn" data-edge-label="agent_spawn" data-edge-key="0" data-edge-id="create-spawn" data-composition-points="668,367;738.8,367" d="M 668 367 L 738.8 367" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="pkg" data-edge-to="tui" data-edge-label="plugin" data-edge-key="1" data-edge-id="install-tui" data-composition-points="188,119;238,119;238,217" d="M 188 119 L 238 119 L 238 217" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="start" data-edge-to="status" data-edge-label="prints console URL" data-edge-key="2" data-edge-id="start-status" data-composition-points="358,341;358,228;478,228;478,145" d="M 358 341 L 358 228 L 478 228 L 478 145" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="status" data-edge-to="create" data-edge-label="peer markdown" data-edge-key="3" data-edge-id="status-create" data-composition-points="478,145;478,228;598,228;598,341" d="M 478 145 L 478 228 L 598 228 L 598 341" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="tui" data-edge-to="start" data-edge-label="exit TUI, start daemon" data-edge-key="4" data-edge-id="tui-start" data-composition-points="238,269;238,420;358,420;358,393" d="M 238 269 L 238 420 L 358 420 L 358 393" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+
+        <!-- Nodes -->
+        <g id="node-pkg" data-node-id="pkg" data-node-label="omp install" tabindex="0" role="button" aria-label="Focus omp install, @bloodf/oh-my-agent, Operator › Install" aria-pressed="false" data-node-kind="external" data-node-sublabel="@bloodf/oh-my-agent" data-node-context="Operator › Install">
+          <title>omp install · @bloodf/oh-my-agent · Operator › Install</title>
+          <rect x="48" y="93" width="140" height="52" rx="6" class="c-mask"/>
+          <rect x="48" y="93" width="140" height="52" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(54 99) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="118" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">omp install</text>
+          <text data-detail="context" x="118" y="131" class="t-muted" font-size="8" text-anchor="middle">@bloodf/oh-my-agent</text>
+        </g>
+
+        <g id="node-status" data-node-id="status" data-node-label="omp-agent status" tabindex="0" role="button" aria-label="Focus omp-agent status, daemon up, Operator › Boot" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="daemon up" data-node-context="Operator › Boot">
+          <title>omp-agent status · daemon up · Operator › Boot</title>
+          <rect x="403" y="93" width="150" height="52" rx="6" class="c-mask"/>
+          <rect x="403" y="93" width="150" height="52" rx="6" class="c-frontend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(409 99) scale(0.6875)">
+            <rect x="2" y="3" width="12" height="10" rx="2"/>
+            <path d="M2 6.5h12"/>
+            <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
+            <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="478" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">omp-agent status</text>
+          <text data-detail="context" x="478" y="131" class="t-muted" font-size="8" text-anchor="middle">daemon up</text>
+        </g>
+
+        <g id="node-tui" data-node-id="tui" data-node-label="omp" tabindex="0" role="button" aria-label="Focus omp, load extension, OMP › Install" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="load extension" data-node-context="OMP › Install">
+          <title>omp · load extension · OMP › Install</title>
+          <rect x="172" y="217" width="132" height="52" rx="6" class="c-mask"/>
+          <rect x="172" y="217" width="132" height="52" rx="6" class="c-frontend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(178 223) scale(0.6875)">
+            <rect x="2" y="3" width="12" height="10" rx="2"/>
+            <path d="M2 6.5h12"/>
+            <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
+            <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="238" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">omp</text>
+          <text data-detail="context" x="238" y="255" class="t-muted" font-size="8" text-anchor="middle">load extension</text>
+        </g>
+
+        <g id="node-start" data-node-id="start" data-node-label="omp-agent daemon" tabindex="0" role="button" aria-label="Focus omp-agent daemon, detach + socket, oh-my-agent daemon › Boot" aria-pressed="false" data-node-kind="backend" data-node-sublabel="detach + socket" data-node-context="oh-my-agent daemon › Boot">
+          <title>omp-agent daemon · detach + socket · oh-my-agent daemon › Boot</title>
+          <rect x="283" y="341" width="150" height="52" rx="6" class="c-mask"/>
+          <rect x="283" y="341" width="150" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(289 347) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="358" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">omp-agent daemon</text>
+          <text data-detail="context" x="358" y="379" class="t-muted" font-size="8" text-anchor="middle">detach + socket</text>
+        </g>
+
+        <g id="node-create" data-node-id="create" data-node-label="agent create" tabindex="0" role="button" aria-label="Focus agent create, definition subset, oh-my-agent daemon › Run a peer" aria-pressed="false" data-node-kind="backend" data-node-sublabel="definition subset" data-node-context="oh-my-agent daemon › Run a peer">
+          <title>agent create · definition subset · oh-my-agent daemon › Run a peer</title>
+          <rect x="528" y="341" width="140" height="52" rx="6" class="c-mask"/>
+          <rect x="528" y="341" width="140" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(534 347) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="598" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">agent create</text>
+          <text data-detail="context" x="598" y="379" class="t-muted" font-size="8" text-anchor="middle">definition subset</text>
+        </g>
+
+        <g id="node-spawn" data-node-id="spawn" data-node-label="spawn" tabindex="0" role="button" aria-label="Focus spawn, RPC worker, oh-my-agent daemon › Run a peer" aria-pressed="false" data-node-kind="backend" data-node-sublabel="RPC worker" data-node-context="oh-my-agent daemon › Run a peer">
+          <title>spawn · RPC worker · oh-my-agent daemon › Run a peer</title>
+          <rect x="738.8" y="341" width="132" height="52" rx="6" class="c-mask"/>
+          <rect x="738.8" y="341" width="132" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(744.8 347) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="804.8" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">spawn</text>
+          <text data-detail="context" x="804.8" y="379" class="t-muted" font-size="8" text-anchor="middle">RPC worker</text>
+        </g>
+
+        <!-- Edge labels -->
+        <g data-detail="context" data-edge-from="create" data-edge-to="spawn" data-edge-label="agent_spawn" data-edge-key="0" data-edge-id="create-spawn">
+          <rect x="672" y="347" width="62.8" height="14" rx="3" class="c-mask"/>
+          <text x="703.4" y="357" class="t-backend" font-size="8" text-anchor="middle">agent_spawn</text>
+        </g>
+        <g data-detail="context" data-edge-from="pkg" data-edge-to="tui" data-edge-label="plugin" data-edge-key="1" data-edge-id="install-tui">
+          <rect x="193.6" y="99" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="213" y="109" class="t-muted" font-size="8" text-anchor="middle">plugin</text>
+        </g>
+        <g data-detail="context" data-edge-from="start" data-edge-to="status" data-edge-label="prints console URL" data-edge-key="2" data-edge-id="start-status">
+          <rect x="369.8" y="208" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
+          <text x="418" y="218" class="t-muted" font-size="8" text-anchor="middle">prints console URL</text>
+        </g>
+        <g data-detail="context" data-edge-from="status" data-edge-to="create" data-edge-label="peer markdown" data-edge-key="3" data-edge-id="status-create">
+          <rect x="501.8" y="208" width="72.4" height="14" rx="3" class="c-mask"/>
+          <text x="538" y="218" class="t-muted" font-size="8" text-anchor="middle">peer markdown</text>
+        </g>
+        <g data-detail="context" data-edge-from="tui" data-edge-to="start" data-edge-label="exit TUI, start daemon" data-edge-key="4" data-edge-id="tui-start">
+          <rect x="240.2" y="400" width="115.6" height="14" rx="3" class="c-mask"/>
+          <text x="298" y="410" class="t-backend" font-size="8" text-anchor="middle">exit TUI, start daemon</text>
+        </g>
+
+        <!-- Legend -->
+        <g data-legend="" data-legend-bridge="">
+          <text x="20" y="428" class="t-primary" font-size="12" font-weight="650">Legend</text>
+          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="User UI" data-legend-x="20" data-legend-baseline="448" data-legend-width="74">
+            <rect x="20" y="440" width="14" height="9" rx="2" class="c-frontend" stroke-width="1"/>
+            <text x="42" y="448" class="t-muted" font-size="7.5" font-weight="500">User UI</text>
+          </g>
+          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="Agent logic" data-legend-x="101" data-legend-baseline="448" data-legend-width="91">
+            <rect x="101" y="440" width="14" height="9" rx="2" class="c-backend" stroke-width="1"/>
+            <text x="123" y="448" class="t-muted" font-size="7.5" font-weight="500">Agent logic</text>
+          </g>
+          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="External system" data-legend-x="199" data-legend-baseline="448" data-legend-width="109">
+            <rect x="199" y="440" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
+            <text x="221" y="448" class="t-muted" font-size="7.5" font-weight="500">External system</text>
+          </g>
+        </g>
+      </svg>

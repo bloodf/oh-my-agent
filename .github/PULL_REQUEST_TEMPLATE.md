@@ -1,3 +1,8 @@
+Changes land on evidence, not on intent. Read
+[CONTRIBUTING.md](https://github.com/bloodf/oh-my-agent/blob/main/CONTRIBUTING.md)
+before opening. [GOVERNANCE.md](https://github.com/bloodf/oh-my-agent/blob/main/GOVERNANCE.md)
+covers who maintains this and that there is no CLA.
+
 ## What changed
 
 <!-- What this does and why. Link the task (T-xxxx) or issue if one applies. -->
@@ -5,7 +10,7 @@
 ## Evidence
 
 <!--
-Paste the gates you ran, with their results. Not "tests pass" — the actual output.
+Paste the gates you ran, with their results. Not the sentence "tests pass". The actual output.
 
   bun test          →
   bun run typecheck →

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Mention wakeup",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "output": "mention-wakeup.html",
+    "viewBox": [900, 880]
+  },
+  "participants": [
+    { "id": "you", "type": "external", "label": "You", "sublabel": "@you" },
+    { "id": "console", "type": "frontend", "label": "Console", "sublabel": "browser" },
+    { "id": "supervisor", "type": "backend", "label": "Supervisor", "sublabel": "daemon" },
+    { "id": "rooms", "type": "messagebus", "label": "Rooms", "sublabel": "SQLite" },
+    { "id": "worker", "type": "backend", "label": "Worker", "sublabel": "parked peer" }
+  ],
+  "segments": [
+    { "from": 150, "to": 280, "label": "Post" },
+    { "from": 296, "to": 500, "label": "Persist + wake" },
+    { "from": 516, "to": 700, "label": "Reply" }
+  ],
+  "messages": [
+    { "from": "you", "to": "console", "y": 180, "label": "post @reviewer in #reviews", "variant": "emphasis" },
+    { "from": "console", "to": "supervisor", "y": 222, "label": "Supervisor.post()", "variant": "emphasis" },
+    { "from": "supervisor", "to": "rooms", "y": 264, "label": "store message + mention" },
+    { "from": "supervisor", "to": "worker", "y": 340, "label": "prompt batched pending", "variant": "emphasis" },
+    { "from": "worker", "to": "rooms", "y": 420, "label": "chat_send reply" },
+    { "from": "rooms", "to": "console", "y": 548, "label": "WebSocket diff", "variant": "dashed" },
+    { "from": "console", "to": "you", "y": 600, "label": "transcript updates", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "console", "from": 174, "to": 230, "type": "frontend" },
+    { "participant": "supervisor", "from": 216, "to": 350, "type": "backend" },
+    { "participant": "rooms", "from": 258, "to": 510, "type": "messagebus" },
+    { "participant": "worker", "from": 334, "to": 430, "type": "backend" },
+    { "participant": "console", "from": 542, "to": 610, "type": "frontend" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "One write seam", "items": ["Console posts go through Supervisor.post(), never the store directly", "That call is what wakes subscribed agents"] },
+    { "dot": "emerald", "title": "Parked peers resume", "items": ["Mentions and room wake filters batch into one turn", "A stopped worker keeps the backlog instead of 500"] },
+    { "dot": "amber", "title": "Human is @you", "items": ["The console cannot post as an agent name", "The live feed pushes diffs only while a console is connected"] }
+  ]
+}

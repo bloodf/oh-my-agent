@@ -1,5 +1,9 @@
 # Dogfooding runbook
 
+Newcomers start at [Getting started](guide/getting-started.md) before this live-account session.
+This page is the operator procedure for one dogfood run.
+Pictures live in [diagrams](diagrams/).
+
 Human operator procedure for one live-account dogfood session. [T-1402](delivery/tasks/T-1402-dogfood-harness.md) automates the numbered JSON scenario in §4. Console URL retrieval and console/TUI observations remain outside that mapping; the scenario covers both worker backends.
 
 **This session touches real accounts and can spend real money.** Complete every approval and preflight check before starting.

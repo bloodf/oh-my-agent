@@ -1,0 +1,41 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "First run",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "output": "first-run.html"
+  },
+  "lanes": [
+    { "id": "operator", "label": "Operator" },
+    { "id": "omp", "label": "OMP" },
+    { "id": "daemon", "label": "oh-my-agent daemon" }
+  ],
+  "phases": [
+    { "id": "install", "label": "Install", "fromCol": 0, "toCol": 1 },
+    { "id": "boot", "label": "Boot", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "run", "label": "Run a peer", "fromCol": 4, "toCol": 5 }
+  ],
+  "mainPath": ["pkg", "tui", "start", "status", "create", "spawn"],
+  "nodes": [
+    { "id": "pkg", "lane": "operator", "col": 0, "type": "external", "label": "omp install", "sublabel": "@bloodf/oh-my-agent", "width": 140 },
+    { "id": "tui", "lane": "omp", "col": 1, "type": "frontend", "label": "omp", "sublabel": "load extension", "width": 132 },
+    { "id": "start", "lane": "daemon", "col": 2, "type": "backend", "label": "omp-agent daemon", "sublabel": "detach + socket", "width": 150 },
+    { "id": "status", "lane": "operator", "col": 3, "type": "frontend", "label": "omp-agent status", "sublabel": "daemon up", "width": 150 },
+    { "id": "create", "lane": "daemon", "col": 4, "type": "backend", "label": "agent create", "sublabel": "definition subset", "width": 140 },
+    { "id": "spawn", "lane": "daemon", "col": 5, "type": "backend", "label": "spawn", "sublabel": "RPC worker", "width": 132 }
+  ],
+  "edges": [
+    { "id": "install-tui", "from": "pkg", "to": "tui", "label": "plugin" },
+    { "id": "tui-start", "from": "tui", "to": "start", "label": "exit TUI, start daemon", "variant": "emphasis" },
+    { "id": "start-status", "from": "start", "to": "status", "label": "prints console URL" },
+    { "id": "status-create", "from": "status", "to": "create", "label": "peer markdown" },
+    { "id": "create-spawn", "from": "create", "to": "spawn", "label": "agent_spawn", "variant": "emphasis" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Install", "items": ["omp install @bloodf/oh-my-agent", "Confirm the extension loads, then leave the TUI"] },
+    { "dot": "emerald", "title": "Boot", "items": ["omp-agent daemon detaches and prints the console URL", "omp-agent status proves the socket is live"] },
+    { "dot": "amber", "title": "First peer", "items": ["agent create accepts only the definition subset", "spawn starts the RPC worker"] }
+  ]
+}

@@ -1,111 +1,134 @@
-# oh-my-agent
+<p align="center">
+  <img src="docs/assets/logo.png" width="128" alt="oh-my-agent mark: a glowing diamond on a dark rounded tile, orbited by cyan and gold nodes">
+</p>
 
-[![CI](https://github.com/bloodf/oh-my-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/bloodf/oh-my-agent/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Bun](https://img.shields.io/badge/Bun-%E2%89%A5%201.3.14-black)](https://bun.sh)
+<p align="center">
+  <img src="docs/assets/banner.png" width="720" alt="oh-my-agent wordmark: hexagonal mark beside the name, tagline autonomous agents that keep working">
+</p>
 
-An [oh-my-pi (OMP)](https://omp.sh/docs) plugin that runs **autonomous, long-lived
-agents**. They keep working while you're away, talk to each other in persistent chat
-rooms, and stay observable and steerable from the OMP TUI, a browser console, or a shell.
+<p align="center">
+  <a href="https://github.com/bloodf/oh-my-agent/actions/workflows/ci.yml"><img src="https://github.com/bloodf/oh-my-agent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-%E2%89%A5%201.3.14-black" alt="Bun greater than or equal to 1.3.14"></a>
+  <a href="https://www.npmjs.com/package/@bloodf/oh-my-agent"><img src="https://img.shields.io/npm/v/@bloodf/oh-my-agent.svg" alt="npm package @bloodf/oh-my-agent"></a>
+</p>
 
-> **1.0.0 release.** `@bloodf/oh-my-agent` packages the complete runtime and operator
-> surfaces for installation through OMP. Development from a checkout remains documented
-> in [Development](#development).
+An [oh-my-pi (OMP)](https://omp.sh/docs) plugin that runs autonomous, long-lived agents as a local daemon. Agents keep working after the TUI closes, talk to each other in persistent rooms, and stay observable from the OMP TUI, the `omp-agent` CLI, or a browser console.
 
-## What it does
+<p align="center">
+  <img src="docs/assets/console.png" alt="Browser console on a dark display: agent list with researcher and reviewer running and ops parked, #reviews transcript, usage meter at 63 percent, and a cron schedule pane">
+</p>
 
-You define an agent as markdown with YAML frontmatter, the same way OMP task agents are
-defined. The daemon then runs it as a supervised process that outlives your terminal.
+## Why it exists
 
-- **Autonomy** — agents run without a TUI attached; closing your terminal does not stop them.
-- **Collaboration** — agents talk in persistent channels and DMs, waking on mentions.
-- **Hierarchy** — agents can author and deploy child agents, with parentage enforced.
-- **Scheduling** — cron-style automations spawn or wake agents on their own.
-- **Quota handling** — a metered account that hits its ceiling parks its agents and
-  arms an unattended resume, rather than failing loudly at 3am.
-- **Isolation** — each worker gets a private root containing only the definitions it is
-  allowed to see, with an opt-in OS sandbox and per-worker scoped credentials.
+OMP task agents live inside the interactive session. Close the TUI, they die. oh-my-agent is the process that does not: a local Bun daemon owns workers, rooms, and schedules, and the TUI, CLI, and browser are clients of that daemon. There is no cloud component and no multi-tenant user model. One operator, one daemon, on your machine.
 
-Three ways to drive it: the OMP TUI extension, the `omp-agent` CLI, and a browser console.
+## Features
 
-## Requirements
+<table>
+<tr>
+<td width="33%" valign="top"><strong>Autonomy.</strong> The daemon detaches from the TTY, so closing the terminal does not stop running agents.</td>
+<td width="33%" valign="top"><strong>Collaboration.</strong> Agents talk in persistent SQLite-backed channels and DMs, and a mention or wake filter resumes a parked peer.</td>
+<td width="33%" valign="top"><strong>Hierarchy.</strong> Agents can author and deploy child agents, with parentage enforced rather than taken from cooperative metadata.</td>
+</tr>
+<tr>
+<td valign="top"><strong>Scheduling.</strong> Cron expressions and one-shot timers persist in SQLite and post into rooms, which may wake subscribers.</td>
+<td valign="top"><strong>Quota handling.</strong> Metered accounts warn at 80% of <code>budgetUsd</code> and park at 100%; a human resumes with <code>omp-agent bump</code>. Subscription accounts park on quota-exhaustion and auto-resume at reset.</td>
+<td valign="top"><strong>Isolation.</strong> Each worker gets a private root of allowed definitions; the OS sandbox is opt-in and fails closed, and <code>workspace:</code> is a cwd, not a security boundary.</td>
+</tr>
+</table>
 
-- [Bun](https://bun.sh) ≥ 1.3.14
-- [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` ≥ 18.0.7) as a peer
+<p align="center">
+  <img src="docs/assets/collaboration.png" alt="Three geometric agents around a glowing table of room messages, with a small gold operator figure at the near edge">
+</p>
 
-## Install and quickstart
+## Quick start
 
-The 1.0.0 release installs into OMP with these five commands, which load its extension,
-start the daemon, verify its status, and print the browser-console URL:
+Needs [Bun](https://bun.sh) ≥ 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` ≥ 18.0.7).
 
 ```sh
 omp install @bloodf/oh-my-agent
 omp
-~/.omp/plugins/node_modules/.bin/omp-agent daemon
-~/.omp/plugins/node_modules/.bin/omp-agent status
-~/.omp/plugins/node_modules/.bin/omp-agent console
 ```
 
-Exit the OMP TUI after confirming the `oh-my-agent` extension loaded, then run the
-remaining commands. Open the URL printed by the final command.
+Confirm the `oh-my-agent` extension loaded, then exit the TUI. The `omp-agent` shim lives next to the plugin:
 
-This path is exercised on every CI run against a packed tarball, in
-[`tests/consumer-install.test.ts`](tests/consumer-install.test.ts) — npm, Bun, and the
-OMP installer, each booting the daemon through the installed shim.
+```sh
+export PATH="$HOME/.omp/plugins/node_modules/.bin:$PATH"
+omp-agent daemon
+omp-agent status
+omp-agent console
+```
+
+`daemon` prints the control socket and the console URL, then detaches. `status` should report a live protocol. `console` reprints the loopback URL; open it in a browser.
+
+This install path is the one CI runs against a packed tarball in [`tests/consumer-install.test.ts`](tests/consumer-install.test.ts).
+
+The published npm package does not ship `agents/`. Paste the create-subset from [`docs/guide/getting-started.md`](docs/guide/getting-started.md), then:
+
+```sh
+omp-agent agent create researcher researcher.md
+omp-agent spawn researcher
+```
+
+Definitions use markdown with YAML frontmatter, the same shape as OMP task agents, with a fully qualified `provider/id` model.
+
+## How it works
+
+The TUI and CLI speak JSON-RPC over a per-profile unix socket. The browser speaks token-gated loopback HTTP and WebSocket. All three hit the same daemon, which owns workers, rooms, schedules, and SQLite.
+
+![oh-my-agent runtime](docs/diagrams/runtime.svg)
+
+The daemon binds loopback only, in every mode. Going beyond loopback is a proxy in front plus an explicit remote mode. Read [`docs/remote-exposure.md`](docs/remote-exposure.md) before exposing anything.
 
 ## Documentation
 
-| Document | What it covers |
+| Audience | Start here |
 |---|---|
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | The design specification, with per-section implementation markers |
-| [`docs/delivery/`](docs/delivery/README.md) | The authoritative task tree: every unit of work, with status and evidence |
-| [`docs/delivery/adr/`](docs/delivery/adr/) | 15 decision records, each with the alternatives that lost |
-| [`docs/web-console.md`](docs/web-console.md) | The browser console |
-| [`docs/remote-exposure.md`](docs/remote-exposure.md) | Threat model, proxy recipes, and the operator checklist for going beyond loopback |
-| [`docs/dogfooding.md`](docs/dogfooding.md) | The live-session runbook |
-| [`CHANGELOG.md`](CHANGELOG.md) | Versioning policy and release history |
+| Newcomers | [`docs/guide/getting-started.md`](docs/guide/getting-started.md) |
+| Operators | [`docs/guide/cli.md`](docs/guide/cli.md), [`docs/web-console.md`](docs/web-console.md) |
+| Developers | [`docs/develop/README.md`](docs/develop/README.md), [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Architecture | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
+| Decisions | [`docs/delivery/adr/`](docs/delivery/adr/) |
+| Security | [`SECURITY.md`](SECURITY.md), [`docs/remote-exposure.md`](docs/remote-exposure.md) |
+
+Community files: [`SUPPORT.md`](SUPPORT.md), [`GOVERNANCE.md`](GOVERNANCE.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). Brand assets: [`docs/assets/README.md`](docs/assets/README.md).
+
+## Newcomers
+
+**Who this is for.** People already using OMP who want agents that outlive a TUI session. Operators who want rooms, schedules, and a browser console on a local daemon. Contributors who will treat claims as things that need tests.
+
+**What you need.** Bun ≥ 1.3.14, OMP with `@oh-my-pi/pi-coding-agent` ≥ 18.0.7, and a provider account the daemon can meter. This is a single-operator local plugin. It is not a hosted service and it is not multi-tenant.
+
+**First win.** Install the plugin, start the daemon, open the console URL, paste the `researcher` definition from the [getting-started guide](docs/guide/getting-started.md), create it, spawn it, and post in `#research`. If that loop works, the rest of the operator surface is the same daemon.
+
+## Want to help develop it
+
+1. **Setup.** Clone, `bun install`, `bun run typecheck`.
+2. **Tests.** `bun test` for the full suite. `bun run test:fast` skips pack, consumer-install, and console-client while you iterate.
+3. **Read.** [`ARCHITECTURE.md`](ARCHITECTURE.md), then [`CONTRIBUTING.md`](CONTRIBUTING.md).
+4. **Pick work.** Nothing is **Ready**. Remaining work is **Blocked**: [T-1202](docs/delivery/tasks/T-1202-tls-termination.md), [T-1205](docs/delivery/tasks/T-1205-exposure-runbook.md), [T-1403](docs/delivery/tasks/T-1403-first-live-session.md), [T-1503](docs/delivery/tasks/T-1503-drop-resolve-walk.md), [T-1504](docs/delivery/tasks/T-1504-drop-rpc-pid-patch.md). File a bug, or add a task in [`scripts/gen-delivery-docs.py`](scripts/gen-delivery-docs.py).
+
+Two rules up front:
+
+- **`docs/delivery/` is generated.** Author in `scripts/gen-delivery-docs.py` and run `bun run docs`. Do not hand-edit the tree.
+- **Every new test needs a non-vacuity proof.** Revert the production line it covers, watch that test fail, restore it. A test that cannot fail is not evidence.
+
+## Status
+
+**1.0.1 is shipped.** Runtime, TUI, CLI, and browser console are in the npm package `@bloodf/oh-my-agent`. See [`CHANGELOG.md`](CHANGELOG.md).
+
+Known limitations, stated in the 1.0.0 notes and still true:
+
+- **npm consumers receive an unpatched `@oh-my-pi/pi-coding-agent` peer ([ADR-013](docs/delivery/adr/ADR-013-release-channel.md)).** `RpcClient.pid` is absent, so worker supervision cannot rely on the OMP patch. The consumer-install smoke asserts this degraded state on purpose. `bun install` from a checkout applies the repo patch; npm consumers do not.
+- **The `tailscale serve` recipe in [`docs/remote-exposure.md`](docs/remote-exposure.md) is UNVERIFIED.** It needs two tailnet devices and has not been run end to end. The Caddy and SSH-tunnel recipes were run against real Caddy-terminated TLS on an internal CA; public ACME issuance and renewal remain unproven.
 
 ## Security
 
-The daemon binds loopback only, in every mode, unconditionally. Going beyond loopback
-means a proxy in front and an explicit remote mode, with an operator token, one-time
-tickets for assets and WebSocket upgrades, and enforced parentage.
+The daemon binds `127.0.0.1` only. Remote mode requires an explicit origin, an operator token, one-time tickets for assets and WebSocket upgrades, and enforced parentage. One operator per daemon: the operator token is not a per-user credential.
 
-Read [`docs/remote-exposure.md`](docs/remote-exposure.md) before exposing anything, and
-[`SECURITY.md`](SECURITY.md) to report a vulnerability. **Do not open a public issue for
-a security problem.**
-
-## Development
-
-```sh
-git clone https://github.com/bloodf/oh-my-agent.git
-cd oh-my-agent
-bun install
-
-bun run typecheck   # tsc --noEmit
-bun test            # unit, integration, browser, and OMP contract suites
-bun run lint        # biome check .
-bun run docs        # regenerate docs/delivery (edit the generator, never the output)
-```
-
-`bun run test:fast` skips the three slowest suites while you iterate.
-
-Working rules: test-first with non-vacuity proofs, tests call production builders, and
-every unit of work is a task file in the delivery tree.
-
-## Contributing
-
-Contributions are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md) covers setup, the
-testing standards, and what evidence a PR needs. Two rules are worth knowing up front:
-
-1. **`docs/delivery/` is generated.** Author in `scripts/gen-delivery-docs.py`.
-2. **Every new test needs a non-vacuity proof** — revert the line it covers, watch it
-   fail, restore it. A test that cannot fail is not evidence.
-
-Anything marked **Ready** in the [delivery tree](docs/delivery/README.md) is specified
-and unblocked. Please read [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) too.
+**Do not open a public issue for a vulnerability.** Use GitHub's private reporting: [Report a vulnerability](https://github.com/bloodf/oh-my-agent/security/advisories/new). Details in [`SECURITY.md`](SECURITY.md).
 
 ## License
 
-[MIT](LICENSE) — see [ADR-010](docs/delivery/adr/ADR-010-mit-license.md) for the
-decision record.
+[MIT](LICENSE). Decision record: [ADR-010](docs/delivery/adr/ADR-010-mit-license.md).

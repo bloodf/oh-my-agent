@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "oh-my-agent isolation layers",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "output": "isolation.html",
+    "viewBox": [1280, 720]
+  },
+  "components": [
+    { "id": "daemon", "type": "backend", "label": "Daemon", "sublabel": "supervisor", "pos": [40, 290], "size": [150, 64] },
+    { "id": "gateway", "type": "security", "label": "Credential gateway", "sublabel": "127.0.0.1", "pos": [40, 480], "size": [150, 60], "tag": "loopback" },
+    { "id": "worker", "type": "backend", "label": "Worker RPC", "sublabel": "subprocess", "pos": [300, 290], "size": [160, 64] },
+    { "id": "sandbox", "type": "security", "label": "OS sandbox", "sublabel": "Seatbelt / bwrap", "pos": [560, 120], "size": [180, 64], "tag": "opt-in" },
+    { "id": "writeiso", "type": "backend", "label": "Write isolation", "sublabel": "task.isolation.mode", "pos": [560, 290], "size": [180, 64] },
+    { "id": "convention", "type": "backend", "label": "Convention scoping", "sublabel": "allowlists + root", "pos": [560, 480], "size": [180, 64] },
+    { "id": "hostfs", "type": "external", "label": "Host filesystem", "sublabel": "~/.ssh", "pos": [860, 120], "size": [170, 60] },
+    { "id": "workspace", "type": "external", "label": "workspace:", "sublabel": "cwd / defaults", "pos": [860, 290], "size": [170, 64], "tag": "not access" }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "Loopback", "wraps": ["gateway"] },
+    { "kind": "security-group", "label": "Layer 1 · real FS boundary", "wraps": ["sandbox"] },
+    { "kind": "region", "label": "Layer 2 · mergeability", "wraps": ["writeiso"] },
+    { "kind": "region", "label": "Layer 3 · bypassable", "wraps": ["convention"] }
+  ],
+  "connections": [
+    { "id": "daemon-worker", "from": "daemon", "to": "worker", "label": "spawn", "variant": "emphasis" },
+    { "id": "daemon-gateway", "from": "daemon", "to": "gateway", "label": "scope", "variant": "security", "labelDy": 24 },
+    { "id": "gateway-worker", "from": "gateway", "to": "worker", "label": "bearer", "variant": "security" },
+    { "id": "worker-sandbox", "from": "worker", "to": "sandbox", "variant": "security" },
+    { "id": "sandbox-hostfs", "from": "sandbox", "to": "hostfs", "label": "FS boundary", "variant": "security" },
+    { "id": "worker-writeiso", "from": "worker", "to": "writeiso" },
+    { "id": "writeiso-workspace", "from": "writeiso", "to": "workspace", "label": "merge-back" },
+    { "id": "worker-convention", "from": "worker", "to": "convention" },
+    { "id": "workspace-hostfs", "from": "workspace", "to": "hostfs", "label": "not access", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "OS sandbox", "items": ["Only real filesystem boundary", "Opt-in; missing adapter fails closed"] },
+    { "dot": "amber", "title": "Write isolation", "items": ["OMP task.isolation.mode", "Mergeability, not a read fence"] },
+    { "dot": "slate", "title": "Convention and workspace:", "items": ["Tool allowlists and materialized roots are bypassable", "workspace: sets cwd and defaults, not access"] }
+  ]
+}

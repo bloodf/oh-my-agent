@@ -5,8 +5,23 @@ body:
   - type: markdown
     attributes:
       value: |
-        Not for security vulnerabilities — see [SECURITY.md](https://github.com/bloodf/oh-my-agent/blob/main/SECURITY.md)
+        Not for security vulnerabilities. See [SECURITY.md](https://github.com/bloodf/oh-my-agent/blob/main/SECURITY.md)
         and report those privately.
+
+        Check [SUPPORT.md](https://github.com/bloodf/oh-my-agent/blob/main/SUPPORT.md) for
+        where conduct reports go, and the
+        [user guide](https://github.com/bloodf/oh-my-agent/blob/main/docs/guide/getting-started.md)
+        before filing an install or first-boot issue.
+
+  - type: checkboxes
+    id: prior
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched existing issues and did not find a duplicate
+          required: true
+        - label: This is not a security vulnerability (those go to the private advisory form)
+          required: true
 
   - type: textarea
     id: what-happened
@@ -27,6 +42,19 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it was installed
+      options:
+        - omp install @bloodf/oh-my-agent
+        - npm
+        - bun
+        - git checkout
+        - Other or not sure
+    validations:
+      required: true
+
   - type: textarea
     id: versions
     attributes:
@@ -39,6 +67,10 @@ body:
         omp --version
         git rev-parse --short HEAD
         ```
+
+        If this is an npm/OMP install rather than a checkout, also paste
+        the `@bloodf/oh-my-agent` version (`npm ls @bloodf/oh-my-agent` or the
+        plugin's `package.json`).
       render: shell
     validations:
       required: true
