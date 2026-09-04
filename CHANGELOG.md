@@ -6,6 +6,12 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-09-04
+
+### Fixed
+
+- Register changelog helpers and release workflows in the delivery tree so the docs gate owns them.
+
 ## [1.0.3] - 2026-09-04
 
 ### Fixed

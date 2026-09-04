@@ -3821,11 +3821,23 @@ TASKS += [
         ],
         files=[
             ".github/workflows/release.yml",
+            ".github/workflows/prepare-release.yml",
+            ".github/workflows/draft-changelog.yml",
             "package.json",
+            "biome.json",
+            "scripts/cut-changelog.ts",
+            "tests/cut-changelog.test.ts",
+            "docs/develop/release.md",
         ],
         assets=[
             (".github/workflows/release.yml", "New", "Manual dispatch with required tag input; always verifies one tarball, then publishes that exact artifact with provenance only when opted in."),
+            (".github/workflows/prepare-release.yml", "New", "Cuts Unreleased, bumps versions, opens a release PR."),
+            (".github/workflows/draft-changelog.yml", "New", "Drafts Unreleased from conventional commits since the last tag."),
             ("package.json", "Edited", "publishConfig and the version/omp.version pair the tag step asserts."),
+            ("biome.json", "Edited", "Ignores Archify diagram JSON/SVG and brand rasters so the release lint gate can pass."),
+            ("scripts/cut-changelog.ts", "New", "Keep-a-Changelog cut, notes extract, commit draft, manifest bump."),
+            ("tests/cut-changelog.test.ts", "New", "Non-vacuity: empty Unreleased refuses to cut."),
+            ("docs/develop/release.md", "New", "Operator ritual and GitHub settings checklist."),
         ],
         steps=[
             "Expose only `workflow_dispatch`, with a required `tag` input and a boolean `publish` input defaulting false; checkout and the version gate use `inputs.tag`, and the gate asserts tag == package.json version == omp.version before publication is possible.",
@@ -3844,7 +3856,7 @@ TASKS += [
             ("Commit 264207d supplies release lifecycle commands", "package.json §scripts"),
         ],
         depends_on=["T-1301", "T-1302", "T-1306"],
-        out_of_scope=["GitHub Releases notes beyond the changelog excerpt."],
+        out_of_scope=["npm Trusted Publishing setup on npmjs.com (operator-owned)."],
     ),
     Task(
         id="T-1304", slug="install-docs", title="README install path for the released artifact",

@@ -7,6 +7,8 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | Path | Exists | Owned by | Read by |
 |---|---|---|---|
 | `.github/workflows/ci.yml` | yes | [T-701](tasks/T-701-ci-workflow.md), [T-705](tasks/T-705-spawn-test-time-budget.md), [T-1302](tasks/T-1302-versioning-policy.md), [T-1305](tasks/T-1305-patch-hygiene-gate.md), [T-1306](tasks/T-1306-consumer-install-smoke.md) | — |
+| `.github/workflows/draft-changelog.yml` | yes | [T-1303](tasks/T-1303-release-ci.md) | — |
+| `.github/workflows/prepare-release.yml` | yes | [T-1303](tasks/T-1303-release-ci.md) | — |
 | `.github/workflows/release.yml` | yes | [T-1303](tasks/T-1303-release-ci.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
 | `.gitignore` | yes | [T-1402](tasks/T-1402-dogfood-harness.md) | — |
 | `ARCHITECTURE.md` | yes | [T-1205](tasks/T-1205-exposure-runbook.md) | [T-703](tasks/T-703-root-readme-and-metadata.md) |
@@ -15,8 +17,9 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `README.md` | yes | [T-703](tasks/T-703-root-readme-and-metadata.md), [T-1205](tasks/T-1205-exposure-runbook.md), [T-1302](tasks/T-1302-versioning-policy.md), [T-1304](tasks/T-1304-install-docs.md) | — |
 | `agents/example-researcher.md` | yes | [T-501](tasks/T-501-peer-store.md) | — |
 | `agents/example-reviewer.md` | yes | [T-501](tasks/T-501-peer-store.md) | — |
-| `biome.json` | yes | [T-702](tasks/T-702-biome-lint.md) | — |
+| `biome.json` | yes | [T-702](tasks/T-702-biome-lint.md), [T-1303](tasks/T-1303-release-ci.md) | — |
 | `bun.lock` | yes | [T-1503](tasks/T-1503-drop-resolve-walk.md) | — |
+| `docs/develop/release.md` | yes | [T-1303](tasks/T-1303-release-ci.md) | — |
 | `docs/dogfooding.md` | yes | [T-1401](tasks/T-1401-dogfood-runbook.md), [T-1403](tasks/T-1403-first-live-session.md), [T-1404](tasks/T-1404-live-session-safety-rails.md), [T-1405](tasks/T-1405-daemon-backend-selector.md) | — |
 | `docs/remote-exposure.md` | yes | [T-1202](tasks/T-1202-tls-termination.md), [T-1205](tasks/T-1205-exposure-runbook.md) | — |
 | `docs/web-console.md` | yes | [T-1001](tasks/T-1001-console-mounted-at-boot.md), [T-1101](tasks/T-1101-console-visual-system.md) | — |
@@ -28,6 +31,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `repro/bun-plugin-memo/package.json` | yes | [T-1501](tasks/T-1501-repro-import-meta-resolve.md) | — |
 | `repro/bun-plugin-memo/repro.ts` | yes | [T-1501](tasks/T-1501-repro-import-meta-resolve.md) | — |
 | `scripts/check-patches.py` | yes | [T-1305](tasks/T-1305-patch-hygiene-gate.md) | — |
+| `scripts/cut-changelog.ts` | yes | [T-1303](tasks/T-1303-release-ci.md) | — |
 | `scripts/dogfood.ts` | yes | [T-1402](tasks/T-1402-dogfood-harness.md), [T-1404](tasks/T-1404-live-session-safety-rails.md), [T-1405](tasks/T-1405-daemon-backend-selector.md) | — |
 | `scripts/gen-delivery-docs.py` | yes | [T-1403](tasks/T-1403-first-live-session.md), [T-1502](tasks/T-1502-file-upstream-issues.md) | [T-701](tasks/T-701-ci-workflow.md) |
 | `skills/omp-agent-authoring/SKILL.md` | yes | [T-804](tasks/T-804-authoring-skills.md) | — |
@@ -76,6 +80,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/contracts/spawn-policy.contract.test.ts` | yes | [T-005](tasks/T-005-spawn-policy-contract.md) | — |
 | `tests/contracts/supervisor-contract.test.ts` | yes | [T-1612](tasks/T-1612-shared-supervisor-contract.md) | — |
 | `tests/credential-gateway.test.ts` | yes | [T-301](tasks/T-301-credential-gateway.md), [T-302](tasks/T-302-shared-disable-recovery.md) | — |
+| `tests/cut-changelog.test.ts` | yes | [T-1303](tasks/T-1303-release-ci.md) | — |
 | `tests/daemon-boot.test.ts` | yes | [T-510](tasks/T-510-broker-hosting-resolution.md) | — |
 | `tests/daemon-cli.test.ts` | yes | [T-1103](tasks/T-1103-cli-management-surface.md), [T-1405](tasks/T-1405-daemon-backend-selector.md), [T-1606](tasks/T-1606-daemon-lifecycle-verbs.md), [T-1607](tasks/T-1607-authoring-parity.md), [T-1611](tasks/T-1611-cli-json-everywhere.md) | — |
 | `tests/daemon-console-mount.test.ts` | yes | [T-1001](tasks/T-1001-console-mounted-at-boot.md) | — |

@@ -17,14 +17,26 @@ An operator dispatches the release workflow with a tag; the workflow always veri
 ## Files this task may change
 
 - `.github/workflows/release.yml`
+- `.github/workflows/prepare-release.yml`
+- `.github/workflows/draft-changelog.yml`
 - `package.json`
+- `biome.json`
+- `scripts/cut-changelog.ts`
+- `tests/cut-changelog.test.ts`
+- `docs/develop/release.md`
 
 ## Modules and assets in play
 
 | Path | Role | Note |
 |---|---|---|
 | [`.github/workflows/release.yml`](../../../.github/workflows/release.yml) | New | Manual dispatch with required tag input; always verifies one tarball, then publishes that exact artifact with provenance only when opted in. |
+| [`.github/workflows/prepare-release.yml`](../../../.github/workflows/prepare-release.yml) | New | Cuts Unreleased, bumps versions, opens a release PR. |
+| [`.github/workflows/draft-changelog.yml`](../../../.github/workflows/draft-changelog.yml) | New | Drafts Unreleased from conventional commits since the last tag. |
 | [`package.json`](../../../package.json) | Edited | publishConfig and the version/omp.version pair the tag step asserts. |
+| [`biome.json`](../../../biome.json) | Edited | Ignores Archify diagram JSON/SVG and brand rasters so the release lint gate can pass. |
+| [`scripts/cut-changelog.ts`](../../../scripts/cut-changelog.ts) | New | Keep-a-Changelog cut, notes extract, commit draft, manifest bump. |
+| [`tests/cut-changelog.test.ts`](../../../tests/cut-changelog.test.ts) | New | Non-vacuity: empty Unreleased refuses to cut. |
+| [`docs/develop/release.md`](../../../docs/develop/release.md) | New | Operator ritual and GitHub settings checklist. |
 
 ## Steps
 
@@ -49,7 +61,7 @@ Evidence:
 
 ## Out of scope
 
-- GitHub Releases notes beyond the changelog excerpt.
+- npm Trusted Publishing setup on npmjs.com (operator-owned).
 
 ## Depends on
 
