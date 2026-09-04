@@ -122,7 +122,11 @@ jobs:
         run: bun test --timeout 30000 tests/pack.test.ts
 
       - name: "Consumer-install smoke (RpcClient.pid contract: absent, degraded supervision)"
-        run: bun run test:consumer-install
+        # Same reason as ci.yml: this smoke drives the real `omp` executable,
+        # which ships as a bin of the pi-coding-agent dev dependency installed
+        # above. Without it on PATH the OMP-installer variant throws before it
+        # can assert the pid contract, and that is the last gate before Publish.
+        run: PATH="$PWD/node_modules/.bin:$PATH" bun run test:consumer-install
 
       - name: Publish
         if: inputs.publish

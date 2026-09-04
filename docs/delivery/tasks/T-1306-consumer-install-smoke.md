@@ -26,7 +26,7 @@ Prove the packed artifact works for a real consumer: npm pack, install the tarba
 |---|---|---|
 | [`tests/consumer-install.test.ts`](../../../tests/consumer-install.test.ts) | New | Packs, installs into a temp project with fresh peer resolution, drives the installed shim, boots the daemon, records the pid contract state. |
 | [`package.json`](../../../package.json) | Edited | A script entry wrapping the smoke test; the bin mapping itself is unchanged. |
-| [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) | Edited | Runs the consumer-install smoke test on changes to package.json, patches/, or src/. |
+| [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) | Edited | Runs the consumer-install smoke test on changes to package.json, patches/, or src/, with the dependency install's node_modules/.bin on PATH so the OMP-installer variant can find the real `omp` executable it drives. |
 
 ## Steps
 
@@ -46,6 +46,7 @@ Evidence:
 |---|---|
 | Commit 6d40f7d installs the packed artifact with npm and Bun, invokes its installed shim, boots the daemon, and asserts the pid contract | [`tests/consumer-install.test.ts`](../../../tests/consumer-install.test.ts) |
 | Commit 6d40f7d exposes the consumer-install smoke command used by release verification | `package.json §scripts` |
+| The OMP-installer variant resolves `omp` from the workflow's own dependency install rather than assuming a preinstalled one | [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) |
 
 ## Out of scope
 

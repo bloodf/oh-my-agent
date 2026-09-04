@@ -41,7 +41,11 @@ jobs:
         run: bun run typecheck
 
       - name: Test
-        run: bun test --timeout 30000
+        # The consumer-install smoke drives the real `omp` executable, which
+        # ships as a bin of the pi-coding-agent dev dependency. Without it on
+        # PATH that suite throws before it can assert anything, so the install
+        # this workflow already performed is what makes the smoke runnable.
+        run: PATH="$PWD/node_modules/.bin:$PATH" bun test --timeout 30000
 
       - name: Lint and format
         run: bunx biome check .
