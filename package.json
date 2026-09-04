@@ -57,7 +57,9 @@
 		"test:consumer-install": "bun test --timeout 30000 tests/consumer-install.test.ts",
 		"lint": "biome check .",
 		"format": "biome check --write .",
-		"docs": "python3 scripts/gen-delivery-docs.py"
+		"docs": "python3 scripts/gen-delivery-docs.py",
+		"changelog:notes": "bun scripts/cut-changelog.ts notes",
+		"changelog:cut": "bun scripts/cut-changelog.ts cut"
 	},
 	"omp": {
 		"name": "oh-my-agent",

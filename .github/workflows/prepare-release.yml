@@ -1,0 +1,95 @@
+name: prepare-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver to cut, without the v prefix (e.g. 1.0.2)"
+        required: true
+        type: string
+      draft_from_commits:
+        description: "If Unreleased is empty, fill it from commits since the last tag"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Validate version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          bun -e '
+            const v = process.env.VERSION ?? "";
+            if (!/^\d+\.\d+\.\d+$/.test(v)) {
+              throw new Error(`version must be X.Y.Z, got ${JSON.stringify(v)}`);
+            }
+            const manifest = await Bun.file("package.json").json();
+            if (v === manifest.version) {
+              throw new Error(`${v} is already package.json version`);
+            }
+          '
+
+      - name: Draft Unreleased from commits when requested
+        if: inputs.draft_from_commits
+        run: |
+          set -euo pipefail
+          LAST=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$LAST" ]; then
+            echo "no previous tag; refusing to draft from the whole history"
+            exit 1
+          fi
+          git log "${LAST}..HEAD" --pretty=%s | bun scripts/cut-changelog.ts draft-commits > "$RUNNER_TEMP/draft.md"
+          bun scripts/cut-changelog.ts merge-draft < "$RUNNER_TEMP/draft.md" > CHANGELOG.md.next
+          mv CHANGELOG.md.next CHANGELOG.md
+
+      - name: Cut changelog and bump manifests
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%F)
+          bun scripts/cut-changelog.ts cut --version "$VERSION" --date "$DATE" > CHANGELOG.md.next
+          mv CHANGELOG.md.next CHANGELOG.md
+          bun scripts/cut-changelog.ts bump-manifest --version "$VERSION" > package.json.next
+          mv package.json.next package.json
+
+      - name: Open release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          BRANCH="release/v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add CHANGELOG.md package.json
+          git commit -m "release: v${VERSION}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "release: v${VERSION}" \
+            --body "$(cat <<EOF
+          Cuts \`v${VERSION}\` from Unreleased.
+
+          After merge:
+          1. Tag the merge commit: \`git tag v${VERSION} && git push origin v${VERSION}\`
+          2. Run **release** with tag \`v${VERSION}\` and publish unchecked (verify).
+          3. Re-run **release** with publish checked.
+
+          Do not squash-merge if you already tagged a specific SHA. Merge commit or rebase is fine, then tag \`main\`.
+          EOF
+          )"

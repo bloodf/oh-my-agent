@@ -54,6 +54,7 @@ These stay the source of truth for running and exposing a live daemon. The guide
 | [Code of conduct](../CODE_OF_CONDUCT.md) | Community rules |
 | [Root README](../README.md) | Install, development commands, license |
 | [Delivery tree](delivery/README.md) | Generated task tree. Author in `scripts/gen-delivery-docs.py`, never hand-edit `docs/delivery/`. |
+| [Release](develop/release.md) | Manual changelog cut, GitHub Release, npm publish |
 | [ADRs](delivery/adr/) | Decision records, including the alternatives that lost |
 | [Diagrams](diagrams/README.md) | Archify JSON sources and rendered SVGs |
 

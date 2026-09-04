@@ -19,6 +19,7 @@ Contributor hub. Operator install and usage live in the [root README](../../READ
 | [modules.md](modules.md) | File-to-purpose map of `src/` and `tests/` |
 | [testing.md](testing.md) | How to run and write tests, non-vacuity, flake rules |
 | [delivery.md](delivery.md) | Picking a task, adding a task, regenerating the tree |
+| [release.md](release.md) | Manual release ritual, changelog cut, GitHub settings |
 
 ## Rules that bite
 

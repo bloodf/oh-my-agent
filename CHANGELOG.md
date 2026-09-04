@@ -9,6 +9,7 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 ### Changed
 
 - Documentation overhaul: newcomer guide, contributor map, brand assets, and Archify diagrams (JSON + SVG, no HTML).
+- Manual release workflows: changelog draft, prepare-release PR, GitHub Release, opt-in npm publish.
 
 ## [1.0.1] - 2026-09-04
 

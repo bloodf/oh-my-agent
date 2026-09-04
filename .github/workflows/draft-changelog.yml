@@ -1,0 +1,61 @@
+name: draft-changelog
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Open a PR that fills an empty Unreleased section (unchecked = print a draft only)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Draft from commits since last tag
+        run: |
+          set -euo pipefail
+          LAST=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$LAST" ]; then
+            echo "no previous tag; cannot draft"
+            exit 1
+          fi
+          echo "Commits since ${LAST}" >> "$GITHUB_STEP_SUMMARY"
+          git log "${LAST}..HEAD" --pretty=%s | bun scripts/cut-changelog.ts draft-commits | tee "$RUNNER_TEMP/draft.md"
+          {
+            echo
+            echo '```markdown'
+            cat "$RUNNER_TEMP/draft.md"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open changelog PR
+        if: inputs.commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bun scripts/cut-changelog.ts merge-draft < "$RUNNER_TEMP/draft.md" > CHANGELOG.md.next
+          mv CHANGELOG.md.next CHANGELOG.md
+          BRANCH="changelog/unreleased-$(date -u +%Y%m%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add CHANGELOG.md
+          git commit -m "docs: draft Unreleased from commits"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "docs: draft Unreleased from commits" \
+            --body "Fills an empty Unreleased section from conventional commits since the last tag. Edit the prose before cutting a release."
