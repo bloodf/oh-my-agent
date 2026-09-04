@@ -14,6 +14,13 @@ import { join, resolve } from "node:path";
 
 const PACKAGE_ROOT = resolve(import.meta.dir, "..");
 const COMMAND_TIMEOUT_MS = 120_000;
+
+/**
+ * `npm pack` runs `prepack` first, which is the typecheck plus the whole fast
+ * suite — minutes, not seconds. It gets its own budget so a slow machine
+ * reports a real packaging failure rather than a timeout wearing one's face.
+ */
+const PACK_TIMEOUT_MS = 600_000;
 const EXPECTED_RPC_CLIENT_PID = "absent" as const;
 
 function extractNpmPackMetadata(stdout: string): { filename: string } {
@@ -413,6 +420,11 @@ test("packed package installs with fresh npm, bun, and OMP consumers and boots t
 		} else {
 			const packDir = join(root, "pack");
 			await mkdir(packDir);
+			// `npm pack` is not a 120-second command like the others: its
+			// `prepack` runs the typecheck and the whole fast suite before a
+			// tarball exists, which is minutes of work on an ordinary machine.
+			// Sharing the default budget made this fail as a timeout that read
+			// like a packaging defect.
 			const pack = await run(
 				["npm", "pack", "--json", "--silent", "--pack-destination", packDir],
 				PACKAGE_ROOT,
@@ -421,6 +433,7 @@ test("packed package installs with fresh npm, bun, and OMP consumers and boots t
 					HOME: join(root, "pack-home"),
 					NO_COLOR: "1",
 				},
+				PACK_TIMEOUT_MS,
 			);
 			expectSuccess(pack, "npm pack");
 			const { filename } = extractNpmPackMetadata(pack.stdout);

@@ -681,6 +681,67 @@ describe("metered budget notifications", () => {
 		]);
 	});
 
+	// The ceiling is a divisor: `main.ts` tracks spend as `burned / budgetUsd`.
+	// Zero divides to Infinity and parks an account that has spent nothing;
+	// negative goes below zero, clamps to 0, and silently stops the account
+	// ever warning or parking — a spend cap that looks configured while
+	// protecting nothing. Both are refused before anything is mutated.
+	test.each([
+		{ label: "zero", budgetUsd: 0 },
+		{ label: "negative", budgetUsd: -10 },
+	])("a $label budget bump is refused", async ({ budgetUsd }) => {
+		const h = await harness();
+		await h.supervisor.register({
+			worker: h.stub.worker,
+			accountId: "acct-metered",
+			mode: "metered",
+			budgetUsd: 10,
+			rooms: ["#budget"],
+		});
+
+		expect(() => h.supervisor.bumpBudget("acct-metered", budgetUsd)).toThrow(
+			"Budget must be a positive number",
+		);
+
+		// The refusal ran before any mutation, so the original ceiling is what
+		// the warning still names.
+		h.supervisor.registry.updateMeter("acct-metered", 0.8);
+		await h.supervisor.settled();
+		const messages = await h.rooms.listMessages("#budget", {});
+		expect(messages.map((message) => message.body)).toEqual([
+			"Metered account acct-metered reached 80% of its $10 budget.",
+		]);
+	});
+
+	// Posting into a room whose member is stopped used to reach
+	// `worker.prompt`, which throws for a stopped worker. The console's POST
+	// handler turns any thrown error into a 500, so the operator was told the
+	// post failed after the room had already stored it — and a retrying browser
+	// duplicated the message. A stopped worker holds its backlog instead,
+	// exactly as a parked one does.
+	test("a stopped worker holds its backlog instead of failing the post", async () => {
+		const h = await harness();
+		await h.supervisor.register({
+			worker: h.stub.worker,
+			accountId: "acct",
+			mode: "subscription",
+			rooms: ["#ops"],
+		});
+		await h.stub.worker.stop();
+
+		await h.rooms.post({ room: "#ops", author: "@you", body: "while stopped" });
+		// The delivery reports "nothing delivered" rather than throwing.
+		expect(await h.supervisor.deliver("reviewer")).toBe(false);
+		expect(h.stub.prompts).toEqual([]);
+
+		// Held, not dropped: the message is still pending, so a resumed worker
+		// receives it rather than losing the turn.
+		const pending = await h.rooms.pendingForAgent("reviewer");
+		expect(
+			pending.flatMap((entry) => entry.messages.map((m) => m.body)),
+		).toContain("while stopped");
+	});
+
 	test.each([
 		{ label: "mode", mode: "subscription" as const, budgetUsd: 10 },
 		{ label: "budget", mode: "metered" as const, budgetUsd: 11 },

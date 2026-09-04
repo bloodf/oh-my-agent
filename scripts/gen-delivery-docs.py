@@ -4795,6 +4795,68 @@ TASKS += [
         ],
         out_of_scope=["Changing the cap itself, or the console API's refusal, which already returned JSON."],
     ),
+    Task(
+        id="T-1617", slug="stopped-worker-backlog", title="A stopped worker holds its backlog instead of failing the post",
+        epic="EP-16", sprint="SP-17", status="Done",
+        goal="Posting into a room whose member agent is stopped stores the message and reports success, exactly as it does for a parked member, rather than throwing an exception that surfaces as a 500 for work the room already accepted.",
+        read_first=[
+            ("Delivery path", "src/daemon/supervisor.ts"),
+            ("The throw a stopped worker raises", "src/worker/lifecycle.ts"),
+            ("The console handler that turns it into a 500", "src/daemon/console-api.ts"),
+        ],
+        files=["src/daemon/supervisor.ts", "tests/supervisor.test.ts"],
+        assets=[
+            ("src/daemon/supervisor.ts", "Edited", "Delivery returns early for a stopped worker, leaving the backlog pending for a later spawn. Parked is deliberately excluded, because waking a parked peer is what delivery is for."),
+            ("tests/supervisor.test.ts", "Edited", "A post to a room with a stopped member delivers nothing, throws nothing, and leaves the message pending rather than acknowledged."),
+        ],
+        steps=[
+            "Reproduce in a browser: post to a channel whose only member is stopped, and watch the console return 500 while the room stores the message.",
+            "Return early from delivery when the worker is stopped, matching how a stale definition is held rather than thrown.",
+            "Assert the hold: nothing prompted, nothing thrown, and the message still pending for the next spawn.",
+        ],
+        acceptance=[
+            "A post to a room whose member is stopped succeeds and is stored, with no 500 and no exception.",
+            "The message stays pending, so a later spawn delivers it rather than losing the turn.",
+            "A parked member is unaffected and is still woken and prompted.",
+        ],
+        evidence=[
+            ("Delivery holds the backlog for a stopped worker", "src/daemon/supervisor.ts"),
+            ("The hold is proven, including that the message stays pending", "tests/supervisor.test.ts"),
+        ],
+        out_of_scope=["The console's blanket 500 mapping for genuinely unexpected errors, which is correct for errors that are actually unexpected."],
+    ),
+    Task(
+        id="T-1618", slug="positive-budget-bump", title="A budget bump must be a positive number",
+        epic="EP-16", sprint="SP-17", status="Done",
+        goal="The metered ceiling a bump installs is validated as strictly positive at both the protocol boundary and the supervisor, because the usage poller divides spend by it.",
+        read_first=[
+            ("The division that makes this load-bearing", "src/daemon/main.ts"),
+            ("Bump params", "src/shared/protocol-schemas.ts"),
+            ("The supervisor entry point", "src/daemon/supervisor.ts"),
+        ],
+        files=["src/shared/protocol-schemas.ts", "src/daemon/supervisor.ts", "tests/supervisor.test.ts"],
+        assets=[
+            ("src/shared/protocol-schemas.ts", "Edited", "A positive-number check for budgetUsd on bump, alongside the existing one on autonomy.budgetUsd."),
+            ("src/daemon/supervisor.ts", "Edited", "bumpBudget refuses a non-positive ceiling before mutating anything, since the method is reachable in-process as well as over the protocol."),
+            ("tests/supervisor.test.ts", "Edited", "Zero and negative bumps are refused, and the original ceiling is what the 80% warning still names."),
+        ],
+        steps=[
+            "Reproduce through the CLI: `bump <account> -5` was accepted and installed a negative ceiling.",
+            "Add the positive check to the bump params and to the supervisor, before any state changes.",
+            "Assert both directions of the arithmetic: zero divides to Infinity and parks immediately, negative clamps to zero and never warns or parks at all.",
+        ],
+        acceptance=[
+            "A zero or negative bump is refused at the protocol boundary and by the supervisor.",
+            "A refused bump leaves the configured ceiling untouched.",
+            "A positive bump still raises the ceiling and resumes parked peers.",
+        ],
+        evidence=[
+            ("budgetUsd must be a positive number on bump", "src/shared/protocol-schemas.ts"),
+            ("The supervisor refuses before mutating", "src/daemon/supervisor.ts"),
+            ("Zero and negative bumps are refused and the ceiling survives", "tests/supervisor.test.ts"),
+        ],
+        out_of_scope=["Changing the 80% warn or 100% park thresholds themselves."],
+    ),
 ]
 
 TASK_FILE = {t.id: f"{t.id}-{t.slug}.md" for t in TASKS}

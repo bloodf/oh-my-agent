@@ -560,6 +560,15 @@ export class Supervisor {
 		// than thrown — a rebuild that cannot happen leaves the backlog pending.
 		if (!(await this.#ensureFresh(peerName, peer))) return false;
 
+		// A stopped worker holds its backlog: the pending rows stay
+		// unacknowledged, so a later `spawn` delivers them. Prompting one throws,
+		// and that exception travels out as a 500 from the console's POST —
+		// telling an operator the message failed when the room already stored it,
+		// which is what made a retrying browser duplicate the post. Parked is
+		// deliberately not included: a parked worker is resumed and prompted,
+		// which is the whole point of waking a parked peer.
+		if (peer.worker.state === "stopped") return false;
+
 		await peer.worker.prompt(batch);
 		await this.#advanceCursors(peerName, pending);
 		await this.deps.rooms.acknowledgeMentions(
@@ -673,6 +682,13 @@ export class Supervisor {
 		if (!config) throw new Error(`Unknown account: ${accountId}`);
 		if (config.mode !== "metered") {
 			throw new Error(`Cannot bump subscription account: ${accountId}`);
+		}
+		// The protocol layer refuses this too, but the ceiling is a divisor in
+		// the usage poller and this method is reachable in-process: a zero
+		// ceiling parks an account that has spent nothing, and a negative one
+		// clamps the ratio to zero so the account never warns or parks at all.
+		if (!Number.isFinite(budgetUsd) || budgetUsd <= 0) {
+			throw new Error(`Budget must be a positive number: ${budgetUsd}`);
 		}
 		this.registry.bumpBudget(accountId, meter);
 		this.#accountConfigs.set(accountId, { ...config, budgetUsd });

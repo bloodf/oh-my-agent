@@ -28,3 +28,5 @@ Close what the two-model review found: threads, reactions, attribution, typed ev
 | [T-1614](../tasks/T-1614-test-timing-hygiene.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Deadline-bounded test timing | Done |
 | [T-1615](../tasks/T-1615-repaint-focus-stability.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Repaint stability: identity-keyed focus, thread-pane restore, and sticky scroll | Done |
 | [T-1616](../tasks/T-1616-control-cap-json-rpc.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | A saturated audit stays readable on the control socket | Done |
+| [T-1617](../tasks/T-1617-stopped-worker-backlog.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | A stopped worker holds its backlog instead of failing the post | Done |
+| [T-1618](../tasks/T-1618-positive-budget-bump.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | A budget bump must be a positive number | Done |

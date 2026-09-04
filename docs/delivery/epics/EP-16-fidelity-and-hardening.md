@@ -58,3 +58,5 @@ The two-model review (sol + m3) found the console advertises thread replies and 
 | [T-1614](../tasks/T-1614-test-timing-hygiene.md) | Deadline-bounded test timing | Done |
 | [T-1615](../tasks/T-1615-repaint-focus-stability.md) | Repaint stability: identity-keyed focus, thread-pane restore, and sticky scroll | Done |
 | [T-1616](../tasks/T-1616-control-cap-json-rpc.md) | A saturated audit stays readable on the control socket | Done |
+| [T-1617](../tasks/T-1617-stopped-worker-backlog.md) | A stopped worker holds its backlog instead of failing the post | Done |
+| [T-1618](../tasks/T-1618-positive-budget-bump.md) | A budget bump must be a positive number | Done |

@@ -476,6 +476,24 @@ function requirePositiveSafeInteger(
 		: { field, message: `${field} must be a positive safe integer` };
 }
 
+/**
+ * A budget ceiling has to be strictly positive, and the reason is arithmetic
+ * rather than taste: the usage poller tracks spend as `burned / ceiling`, so a
+ * zero ceiling divides to `Infinity` and parks an account that has spent
+ * nothing, while a negative one goes negative, clamps to `0`, and silently
+ * stops the account from ever warning or parking. The second is the dangerous
+ * direction, because the spend cap looks configured while protecting nothing.
+ */
+function requirePositiveNumber(
+	record: Record<string, unknown>,
+	field: string,
+): FieldCheck {
+	const value = record[field];
+	return isFiniteNumber(value) && value > 0
+		? null
+		: { field, message: `${field} must be a positive number` };
+}
+
 function requireBoolean(
 	record: Record<string, unknown>,
 	field: string,
@@ -900,7 +918,7 @@ export const METHODS: Record<MethodName, MethodContract> = {
 				v,
 				checkFields(v, [
 					(r) => requireString(r, "account"),
-					(r) => requireNumber(r, "budgetUsd"),
+					(r) => requirePositiveNumber(r, "budgetUsd"),
 				]),
 			),
 		validateResult: (v): Validation<BumpResult> => {
