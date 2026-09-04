@@ -1985,7 +1985,7 @@ describe("operations panel", () => {
  */
 describe("design tokens", () => {
 	const styleSource = async (): Promise<string> =>
-		await readFile(join(import.meta.dir, "../src/console/style.css"), "utf8");
+		await readFile(join(import.meta.dir, "../web/src/index.css"), "utf8");
 
 	/** style.css with comments removed and the :root block(s) cut out. */
 	const outsideRoot = (css: string): string => {
@@ -1993,7 +1993,14 @@ describe("design tokens", () => {
 		let out = "";
 		let index = 0;
 		for (;;) {
-			const start = noComments.indexOf(":root", index);
+			const startRoot = noComments.indexOf(":root", index);
+			const startDark = noComments.indexOf(".dark", index);
+			const start =
+				startRoot === -1
+					? startDark
+					: startDark === -1
+						? startRoot
+						: Math.min(startRoot, startDark);
 			if (start === -1) {
 				out += noComments.slice(index);
 				return out;
@@ -2030,20 +2037,15 @@ describe("design tokens", () => {
 	test("a :root block defines the semantic token vocabulary", async () => {
 		const root = rootBlock(await styleSource());
 		for (const token of [
-			"--surface-0",
-			"--surface-1",
-			"--surface-2",
-			"--text-primary",
-			"--text-muted",
+			"--background",
+			"--foreground",
+			"--card",
+			"--primary",
+			"--destructive",
 			"--accent",
-			"--danger",
-			"--success",
 			"--muted",
-			"--space-1",
-			"--space-2",
-			"--space-3",
-			"--font-size-0",
-			"--font-size-1",
+			"--border",
+			"--surface-0",
 			"--role-agent",
 			"--role-you",
 			"--role-system",

@@ -11,6 +11,7 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 - TUI auto-starts the detached daemon on session start from the plugin tree, so `omp install` then `omp` is enough. PATH and `omp-agent daemon` stay optional for the CLI.
 - `/cli <verb>` and `/console` run the same CLI dispatcher inside the TUI, so shell PATH is not required to print status or the browser console URL.
 - Console storybook at `bun run storybook`: pages, components, and states painted with production `style.css`, no daemon required.
+- Operator console rebuilt with latest shadcn/ui (Radix, Tailwind v4) so the live UI is a usable three-pane app rather than stacked raw forms.
 
 ## [1.0.4] - 2026-09-04
 

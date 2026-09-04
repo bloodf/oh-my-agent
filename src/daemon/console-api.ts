@@ -1529,7 +1529,7 @@ export async function startConsoleApi(
 			const assetTicket = (asset: string): string =>
 				`${asset}?ticket=${encodeURIComponent(mintTicket(asset))}`;
 			html = html
-				.replace('<html lang="en">', '<html lang="en" data-auth-mode="remote">')
+				.replace('<html lang="en"', '<html lang="en" data-auth-mode="remote"')
 				.replace('href="/style.css"', `href="${assetTicket("/style.css")}"`)
 				.replace('src="/app.js"', `src="${assetTicket("/app.js")}"`);
 		} else if (presented !== undefined) {
@@ -1622,14 +1622,14 @@ export async function startConsoleApi(
 							).text();
 							const bootstrap = shell
 								.replace(
-									'<html lang="en">',
-									'<html lang="en" data-auth-mode="remote" data-auth-bootstrap>',
+									'<html lang="en"',
+									'<html lang="en" data-auth-mode="remote" data-auth-bootstrap',
 								)
 								.replace(
-									/\s*<link rel="stylesheet" href="\/style\.css" \/>/,
+									/\s*<link rel="stylesheet"[^>]*href="\/style\.css"[^>]*>/,
 									"",
 								)
-								.replace(/\s*<script src="\/app\.js"><\/script>/, "");
+								.replace(/\s*<script[^>]*src="\/app\.js"[^>]*><\/script>/, "");
 							return new Response(bootstrap, {
 								status: 401,
 								headers: {

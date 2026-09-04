@@ -6,6 +6,8 @@ The browser console is an operator surface for the same daemon the CLI and TUI u
 
 This page is the newcomer path. The full API, auth rules, and client behavior live in [The web console](../web-console.md). Going beyond loopback is [Remote exposure](../remote-exposure.md).
 
+The live console is a shadcn/ui app. Source: `web/`. Built files: `src/console/`. Dev: `bun run console:dev`. Production build: `bun run console:build`.
+
 ## See every screen (no daemon)
 
 ```sh

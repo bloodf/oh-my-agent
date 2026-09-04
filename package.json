@@ -50,8 +50,10 @@
 		"typescript": "latest"
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit",
-		"prepack": "bun run typecheck && bun run test:fast",
+		"typecheck": "tsc --noEmit && bun run --cwd web exec tsc -b --pretty false",
+		"console:dev": "bun run --cwd web dev",
+		"console:build": "bun run --cwd web build",
+		"prepack": "bun run console:build && bun run typecheck && bun run test:fast",
 		"test": "bun test --timeout 30000",
 		"test:fast": "bun test --timeout 30000 --path-ignore-patterns 'tests/pack.test.ts' --path-ignore-patterns 'tests/consumer-install.test.ts' --path-ignore-patterns 'tests/console-client.test.ts'",
 		"test:consumer-install": "bun test --timeout 30000 tests/consumer-install.test.ts",
