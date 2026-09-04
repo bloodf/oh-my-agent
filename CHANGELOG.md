@@ -6,6 +6,18 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-04
+
+Fixes found by driving the daemon end to end as a new user would, rather than through the suite. Every defect below was reproduced live before the fix and re-verified after, through the CLI and a real browser.
+
+### Fixed
+
+- **The shipped example agents could not be created or spawned.** Both `agents/example-*.md` declared `tools:`, which `agent create` refuses because it accepts only the definition subset. Both also used a `model: "@role"` selector that no code resolves — `resolveWorkerModel` requires a literal `provider/id`, so every example we shipped was unspawnable and `ARCHITECTURE.md` documented the broken form as working. The examples and the peer-definition docs now use a fully qualified model.
+- **A post to a room whose member agent is stopped returned 500 after storing the message.** The exception from prompting a stopped worker reached the console's catch-all, so the operator was told the post failed for work the room had already accepted, and a retrying browser duplicated it. Delivery now holds the backlog for a stopped worker, exactly as it already did for a stale definition. A parked member is unaffected.
+- **A budget bump accepted zero and negative ceilings.** The usage poller tracks spend as `burned / ceiling`: zero divides to `Infinity` and parks an account that has spent nothing, and a negative clamps the ratio to zero so the account never warns and never parks — a spend cap that looks configured while protecting nothing. Bumps are now validated as strictly positive at the protocol boundary and again in the supervisor, before any mutation.
+- **`.omp/` is ignored.** The daemon writes project-scoped peer definitions under `<project>/.omp/oh-my-agent/agents/`, so running it inside a repository left untracked state in the tree.
+- **The consumer-install smoke no longer fails as a timeout.** `npm pack` runs the typecheck and the whole fast suite in `prepack`, which needs minutes; it now has its own budget instead of sharing the 120-second default.
+
 ## [1.0.0] - 2026-09-04
 
 First stable release. The `omp-agent` daemon runs autonomous, long-lived agents that keep working after the terminal closes, talk to each other in persistent chat rooms, and stay observable and steerable from the OMP TUI, a browser console, or a shell.
