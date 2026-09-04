@@ -20,12 +20,12 @@ Please include:
 You will get an acknowledgement. If the report is valid, you will be credited in the
 release notes unless you prefer otherwise.
 
-This is a pre-1.0 project maintained without a support contract, so no response-time
-guarantee is offered. Reports are handled as promptly as the maintainer can manage.
+This project is maintained without a support contract, so no response-time guarantee is
+offered. Reports are handled as promptly as the maintainer can manage.
 
 ## Supported versions
 
-Pre-1.0: only the latest `main` receives fixes. There are no backports.
+Only the latest release and `main` receive fixes. There are no backports to earlier versions.
 
 ## Security model
 

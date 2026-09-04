@@ -2,9 +2,29 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-Before 1.0, minor versions add features, patch versions add fixes, and breaking changes require a minor version bump. Roll back a bad release with `npm deprecate` and a forward patch release; never unpublish. For each release, bump `package.json` and `omp.version`, move entries from Unreleased into a dated version, and tag that release commit.
+From 1.0 onward this project follows semver: major versions carry breaking changes, minor versions add features, and patch versions add fixes. Roll back a bad release with `npm deprecate` and a forward patch release; never unpublish. For each release, bump `package.json` and `omp.version`, move entries from Unreleased into a dated version, and tag that release commit.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-09-04
+
+First stable release. The `omp-agent` daemon runs autonomous, long-lived agents that keep working after the terminal closes, talk to each other in persistent chat rooms, and stay observable and steerable from the OMP TUI, a browser console, or a shell.
+
+### Added
+
+- **Autonomy.** `omp-agent daemon` runs detached from any TTY; closing the terminal does not stop active agents. The supervisor owns worker lifecycle, restart backoff, and per-user-profile socket + pidfile placement.
+- **Multi-agent collaboration.** Persistent channels and DMs backed by SQLite, with threads, reactions, durable mentions, subscriptions, and per-agent read cursors. Mention and room-wake filters resume parked peers by batching pending messages into one turn; humans are first-class participants via the TUI extension.
+- **Hierarchy with parentage enforcement.** Agents can author and deploy child agents. The `spawns:` frontmatter list is the spawn policy at dispatch time; the materializer snapshots `discoverAgents(workerCwd)` at spawn as defense-in-depth and writes non-allowlisted names into the worker's `task.disabledAgents`. Native OMP `task` handles in-run subagent delegation; the toolbelt's `agent_spawn` is reserved for standing up durable teammates and is rejected for coding subtasks.
+- **Scheduling.** Cron expressions and one-shot timers persisted in SQLite; cron fires post their configured prompt into a room, which may wake subscribers. Definitions carry `schedules:` (timer-armed) and `automations:` (event-driven) blocks.
+- **Quota handling.** Billing is a property of the account, not the agent. Metered (API-key) accounts warn in the room at 80% of `budgetUsd` and park at 100%; a human resumes with a bump or kills. Subscription accounts park on quota-exhaustion and arm an unattended auto-resume at quota reset via a one-shot timer, so work continues with no human in the loop.
+- **Isolation.** Each worker gets a private root containing only the definitions it is allowed to see. An opt-in OS sandbox (macOS Seatbelt, Linux `bwrap`) wraps the RPC subprocess, with per-worker scoped credentials routed through a daemon-side credential gateway.
+- **Three drive surfaces.** The OMP TUI extension (slash commands `/agents`, `/rooms`, `/schedule`, status widget, chat renderer); the `omp-agent` CLI (`daemon`, `status`, `console`, `audit`); and a browser console backed by token-protected loopback HTTP plus a WebSocket event feed.
+- **Scoped broker hosting.** At boot the daemon runs the OMP client discovery chain, then fronts every worker with a per-worker gateway bearer that filters `GET /v1/snapshot`, refresh, block, and usage data, and rewrites generations to a monotonically increasing worker-view generation. Foreign-id access, credential updates, and shared disables return 403; dedicated disables proxy upstream; the worker holds no upstream broker token.
+
+### Known limitations
+
+- **npm consumers receive an unpatched `@oh-my-pi/pi-coding-agent` peer (ADR-013).** `RpcClient.pid` is therefore absent, and worker supervision cannot rely on the OMP patch; the consumer-install smoke asserts this degraded state on purpose (`EXPECTED_RPC_CLIENT_PID = "absent"`). Under npm 12 the patch is additionally stripped from the published tarball outright, so the patch riding along in the repo is real and applied by `bun install` for developers but inert for npm consumers.
+- **Two of the three documented proxy recipes in `docs/remote-exposure.md` are verified; one is not.** The `Caddy with public TLS` and `SSH tunnel with loopback Caddy` recipes were verified end to end on 2026-09-03 against real Caddy-terminated TLS, but both terminated on an internal CA rather than public ACME, so public ACME issuance and renewal remain UNVERIFIED. The `tailscale serve` recipe is UNVERIFIED: it needs two tailnet devices, and no second device on this tailnet accepted a shell, nor was an auth key available to enlist one.
 
 ## [0.1.0] - 2026-09-02
 

@@ -98,7 +98,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [ADR-006](adr/ADR-006-account-level-quota-parking.md) | Quota is an account property; subscription accounts auto-resume unattended | Accepted |
 | [ADR-007](adr/ADR-007-native-task-delegation.md) | Peers delegate coding subtasks through native task, never agent_spawn | Accepted |
 | [ADR-008](adr/ADR-008-tests-share-production-builders.md) | Tests exercise production construction, never a parallel copy | Accepted |
-| [ADR-009](adr/ADR-009-threads-and-reactions.md) | Conversation gains threads and reactions; reactions carry agent status | Proposed |
+| [ADR-009](adr/ADR-009-threads-and-reactions.md) | Conversation gains threads and reactions; reactions carry agent status | Accepted |
 | [ADR-010](adr/ADR-010-mit-license.md) | MIT license, chosen by the repository owner | Accepted |
 | [ADR-011](adr/ADR-011-agent-hierarchy.md) | Persistent child agents are spawn-time state; kill cascades | Accepted |
 | [ADR-012](adr/ADR-012-remote-exposure.md) | Beyond loopback, a reverse proxy terminates TLS; the daemon never does | Accepted |

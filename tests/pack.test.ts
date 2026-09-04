@@ -6,19 +6,37 @@ import { join, resolve } from "node:path";
 
 const PACKAGE_ROOT = resolve(import.meta.dir, "..");
 
-function extractNpmPackMetadata(stdout: string): { filename: string } {
-	// npm pack --json output can be preceded by prepack lifecycle logs
-	// (typecheck/test output), so scan backward from the end for the
-	// final valid JSON value that carries pack metadata.
+export function extractNpmPackMetadata(stdout: string): { filename: string } {
+	// npm has emitted both array and package-keyed object payloads across
+	// supported versions. Lifecycle scripts can write before either payload,
+	// so scan backward for the final valid JSON value carrying pack metadata.
 	for (let i = stdout.length - 1; i >= 0; i--) {
 		const ch = stdout[i];
 		if (ch !== "[" && ch !== "{") continue;
 		try {
-			const parsed = JSON.parse(stdout.slice(i));
-			const entry = Array.isArray(parsed) ? parsed[0] : parsed;
-			if (entry && typeof entry.filename === "string") return entry;
+			const parsed: unknown = JSON.parse(stdout.slice(i));
+			const entries = Array.isArray(parsed)
+				? parsed
+				: parsed &&
+						typeof parsed === "object" &&
+						"filename" in parsed &&
+						typeof parsed.filename === "string"
+					? [parsed]
+					: parsed && typeof parsed === "object"
+						? Object.values(parsed)
+						: [];
+			for (const entry of entries) {
+				if (
+					entry &&
+					typeof entry === "object" &&
+					"filename" in entry &&
+					typeof entry.filename === "string"
+				) {
+					return { filename: entry.filename };
+				}
+			}
 		} catch {
-			// not a valid JSON start here; keep scanning backward
+			// This is not a valid JSON start, so keep scanning backward.
 		}
 	}
 	throw new Error(`npm pack JSON not found in stdout:\n${stdout}`);
@@ -79,6 +97,23 @@ async function packedPaths(): Promise<Set<string>> {
 	}
 }
 
+test("extractNpmPackMetadata supports npm pack JSON output shapes", () => {
+	expect(extractNpmPackMetadata('[{"filename":"x.tgz"}]')).toEqual({
+		filename: "x.tgz",
+	});
+	expect(
+		extractNpmPackMetadata('{"@bloodf/oh-my-agent":{"filename":"x.tgz"}}'),
+	).toEqual({ filename: "x.tgz" });
+	expect(
+		extractNpmPackMetadata('prepack: bun test\n{"filename":"x.tgz"}'),
+	).toEqual({
+		filename: "x.tgz",
+	});
+	expect(() => extractNpmPackMetadata("no pack metadata")).toThrow(
+		"npm pack JSON not found in stdout:\nno pack metadata",
+	);
+});
+
 test("npm package contains runtime assets and excludes repository-only paths", async () => {
 	const paths = await packedPaths();
 	const skillManifests = await Array.fromAsync(
@@ -91,7 +126,6 @@ test("npm package contains runtime assets and excludes repository-only paths", a
 		"README.md",
 		"CHANGELOG.md",
 		"LICENSE",
-		"patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch",
 		"src/daemon/main.ts",
 		"src/console/index.html",
 		"src/console/style.css",
@@ -104,6 +138,12 @@ test("npm package contains runtime assets and excludes repository-only paths", a
 	for (const prefix of ["tests/", "docs/", ".github/"]) {
 		expect([...paths].filter((path) => path.startsWith(prefix))).toEqual([]);
 	}
+
+	// npm 12 strips the file named by patchedDependencies from packed tarballs,
+	// so this patch cannot ship through npm. ADR-013 established it could never
+	// affect consumers anyway: Bun honors patchedDependencies only from the
+	// consumer's root manifest, and a tarball cannot alter a resolved peer dependency.
+	expect([...paths].filter((path) => path.startsWith("patches/"))).toEqual([]);
 	expect(
 		[...paths].filter((path) =>
 			path.split("/").some((segment) => segment.startsWith(".")),

@@ -22,7 +22,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `docs/web-console.md` | yes | [T-1001](tasks/T-1001-console-mounted-at-boot.md), [T-1101](tasks/T-1101-console-visual-system.md) | — |
 | `node_modules/@oh-my-pi/pi-ai/src/auth-broker/remote-store.ts` | yes | — | [T-303](tasks/T-303-client-integration.md) |
 | `package.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-502](tasks/T-502-daemon-entry-point.md), [T-702](tasks/T-702-biome-lint.md), [T-703](tasks/T-703-root-readme-and-metadata.md), [T-705](tasks/T-705-spawn-test-time-budget.md), [T-804](tasks/T-804-authoring-skills.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1301](tasks/T-1301-packable-artifact.md), [T-1303](tasks/T-1303-release-ci.md), [T-1306](tasks/T-1306-consumer-install-smoke.md), [T-1503](tasks/T-1503-drop-resolve-walk.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | [T-701](tasks/T-701-ci-workflow.md), [T-1613](tasks/T-1613-build-hygiene-test.md) |
-| `patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch` | yes | [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
+| `patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch` | yes | [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | [T-1301](tasks/T-1301-packable-artifact.md) |
 | `repro/bun-plugin-memo/README.md` | yes | [T-1501](tasks/T-1501-repro-import-meta-resolve.md) | — |
 | `repro/bun-plugin-memo/bun.lock` | yes | [T-1501](tasks/T-1501-repro-import-meta-resolve.md) | — |
 | `repro/bun-plugin-memo/package.json` | yes | [T-1501](tasks/T-1501-repro-import-meta-resolve.md) | — |

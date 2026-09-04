@@ -1,6 +1,6 @@
 # ADR-009 — Conversation gains threads and reactions; reactions carry agent status
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 

@@ -541,7 +541,7 @@ ADRS = [
         id="ADR-009",
         slug="threads-and-reactions",
         title="Conversation gains threads and reactions; reactions carry agent status",
-        status="Proposed",
+        status="Accepted",
         context=(
             "The room store is a flat append-only log with per-agent read cursors, which is "
             "enough for one agent answering one human. It stops being enough once several "
@@ -3757,27 +3757,28 @@ TASKS += [
         ],
         assets=[
             ("package.json", "Edited", "The files allowlist and a prepack script that runs the gates."),
+            ("patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch", "Read-only", "Reapplied by bun install for anyone working from a checkout. It does not travel in the npm tarball: npm 12 strips the file a patchedDependencies entry names, and ADR-013 had already established the patch cannot reach a consumer through a tarball."),
             ("tests/pack.test.ts", "New", "Parses `npm pack --dry-run --json` and asserts both directions: expected paths present, private paths absent."),
         ],
         steps=[
-            "Author the files allowlist: src, skills, patches, LICENSE, README — skills/ is load-bearing (the materializer throws Unknown skill without it) and is in the manifest today. Tests, docs, and .github stay out.",
+            "Author the files allowlist: src, skills, patches, LICENSE, README — skills/ is load-bearing (the materializer throws Unknown skill without it) and is in the manifest today. Tests, docs, and .github stay out. patches/ stays in the allowlist for developers installing from a checkout, but npm 12 strips the patched file from the tarball regardless.",
             "prepack runs typecheck and the fast suites; packing a broken tree fails before the tarball exists.",
             "The pack test asserts the dry-run manifest both ways — expected paths present, nothing under tests/, docs/, or .github/ ships — with explicit presence asserts for the console assets (src/console/*.html/css/js), every skills/*/SKILL.md, and LICENSE, so a future src/ restructure cannot drop them silently.",
         ],
         acceptance=[
-            "The dry-run manifest contains src/ (the src/console/*.html/css/js assets included), skills/ with every SKILL.md, patches/, LICENSE, and README.md, and nothing under tests/, docs/, or .github/.",
+            "The dry-run manifest contains src/ (the src/console/*.html/css/js assets included), skills/ with every SKILL.md, LICENSE, and README.md, and nothing under tests/, docs/, or .github/. Nothing under patches/ ships either: npm 12 strips the file a patchedDependencies entry names, and per ADR-013 that patch could never have taken effect for a consumer anyway, because Bun honors patchedDependencies only from the consumer's root manifest.",
             "CI runs the pack test; a manifest regression fails the build.",
         ],
         evidence=[
             ("Commit 3c3f611 defines the published package allowlist", "package.json § files"),
-            ("Commit 3c3f611 proves the packed manifest; the pack test passes 2/2 today", "tests/pack.test.ts"),
+            ("Commit 3c3f611 proves the packed manifest; the pack test asserts presence and absence in both directions", "tests/pack.test.ts"),
         ],
         out_of_scope=["Publishing itself (T-1303), the consumer-install smoke test (T-1306), and removing the patch (T-1504)."],
     ),
     Task(
         id="T-1302", slug="versioning-policy", title="Semver policy and the changelog",
         epic="EP-13", sprint="SP-14", status="Done",
-        goal="The repo has a written versioning policy and a changelog the release workflow consumes: semver semantics for a pre-1.0 plugin and the release-commit ritual.",
+        goal="The repo has a written versioning policy and a changelog the release workflow consumes: semver semantics and the release-commit ritual.",
         read_first=[
             ("ADR-013: release channel", "docs/delivery/adr/ADR-013-release-channel.md"),
             ("Package manifest", "package.json"),
@@ -3794,7 +3795,7 @@ TASKS += [
             (".github/workflows/ci.yml", "Edited", "Runs the version/changelog comparison alongside the existing gates."),
         ],
         steps=[
-            "CHANGELOG.md in keep-a-changelog format; the header states the policy (pre-1.0: minor is features, patch is fixes, breaking is minor until 1.0) and the rollback policy: a bad release is `npm deprecate` plus a patch-bump forward, never unpublish.",
+            "CHANGELOG.md in keep-a-changelog format; the header states the policy (from 1.0 onward: major is breaking, minor is features, patch is fixes) and the rollback policy: a bad release is `npm deprecate` plus a patch-bump forward, never unpublish.",
             "The ritual: version bump, changelog move from Unreleased, and tag in one commit; T-1303's workflow consumes the tag.",
             "Add the version/changelog comparison to CI: package.json's version and omp.version must equal the top non-Unreleased changelog entry; T-1303's tag step reuses the check.",
             "README gains a pointer paragraph and nothing more — one home for the policy.",

@@ -8,9 +8,9 @@ An [oh-my-pi (OMP)](https://omp.sh/docs) plugin that runs **autonomous, long-liv
 agents**. They keep working while you're away, talk to each other in persistent chat
 rooms, and stay observable and steerable from the OMP TUI, a browser console, or a shell.
 
-> **Pre-release.** Every runtime subsystem and operator surface is built and tested, but
-> `@bloodf/oh-my-agent` is not on npm yet. Install from a checkout today — see
-> [Development](#development).
+> **1.0.0 release.** `@bloodf/oh-my-agent` packages the complete runtime and operator
+> surfaces for installation through OMP. Development from a checkout remains documented
+> in [Development](#development).
 
 ## What it does
 
@@ -35,8 +35,7 @@ Three ways to drive it: the OMP TUI extension, the `omp-agent` CLI, and a browse
 
 ## Install and quickstart
 
-**Availability:** `@bloodf/oh-my-agent` is not published yet. After its first npm
-release, these five commands install the released package into OMP, load its extension,
+The 1.0.0 release installs into OMP with these five commands, which load its extension,
 start the daemon, verify its status, and print the browser-console URL:
 
 ```sh

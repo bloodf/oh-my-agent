@@ -17,16 +17,32 @@ const COMMAND_TIMEOUT_MS = 120_000;
 const EXPECTED_RPC_CLIENT_PID = "absent" as const;
 
 function extractNpmPackMetadata(stdout: string): { filename: string } {
-	// npm pack --json output can be preceded by prepack lifecycle logs
-	// (typecheck/test output), so scan backward from the end for the
-	// final valid JSON value that carries pack metadata.
+	// npm pack --json returns an array on older npm releases and an object
+	// keyed by package name on npm 12. Prepack lifecycle logs can precede either
+	// shape, so scan backward for the final valid JSON value with pack metadata.
 	for (let i = stdout.length - 1; i >= 0; i--) {
 		const ch = stdout[i];
 		if (ch !== "[" && ch !== "{") continue;
 		try {
 			const parsed = JSON.parse(stdout.slice(i));
-			const entry = Array.isArray(parsed) ? parsed[0] : parsed;
-			if (entry && typeof entry.filename === "string") return entry;
+			const candidates = Array.isArray(parsed)
+				? parsed
+				: parsed &&
+						typeof parsed === "object" &&
+						typeof parsed.filename === "string"
+					? [parsed]
+					: parsed && typeof parsed === "object"
+						? Object.values(parsed)
+						: [];
+			for (const candidate of candidates) {
+				if (
+					candidate &&
+					typeof candidate === "object" &&
+					typeof candidate.filename === "string"
+				) {
+					return { filename: candidate.filename };
+				}
+			}
 		} catch {
 			// not a valid JSON start here; keep scanning backward
 		}

@@ -6,7 +6,7 @@
 
 ## Goal
 
-The repo has a written versioning policy and a changelog the release workflow consumes: semver semantics for a pre-1.0 plugin and the release-commit ritual.
+The repo has a written versioning policy and a changelog the release workflow consumes: semver semantics and the release-commit ritual.
 
 ## Read first
 
@@ -30,7 +30,7 @@ The repo has a written versioning policy and a changelog the release workflow co
 
 ## Steps
 
-1. CHANGELOG.md in keep-a-changelog format; the header states the policy (pre-1.0: minor is features, patch is fixes, breaking is minor until 1.0) and the rollback policy: a bad release is `npm deprecate` plus a patch-bump forward, never unpublish.
+1. CHANGELOG.md in keep-a-changelog format; the header states the policy (from 1.0 onward: major is breaking, minor is features, patch is fixes) and the rollback policy: a bad release is `npm deprecate` plus a patch-bump forward, never unpublish.
 2. The ritual: version bump, changelog move from Unreleased, and tag in one commit; T-1303's workflow consumes the tag.
 3. Add the version/changelog comparison to CI: package.json's version and omp.version must equal the top non-Unreleased changelog entry; T-1303's tag step reuses the check.
 4. README gains a pointer paragraph and nothing more — one home for the policy.
