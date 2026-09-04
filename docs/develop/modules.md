@@ -50,6 +50,7 @@ OMP TUI plugin. Socket-only: no direct DB access.
 | [`commands.ts`](../../src/extension/commands.ts) | `/agents`, `/rooms`, `/spawn`, `/kill`, inject, logs, schedule, edit. |
 | [`widget.ts`](../../src/extension/widget.ts) | Daemon socket client and running/parked/unread status widget. |
 | [`ensure-daemon.ts`](../../src/extension/ensure-daemon.ts) | Probe the socket; spawn plugin-local `main.ts` if down. Not PATH. |
+| [`cli.ts`](../../src/extension/cli.ts) | `/cli` and `/console`: in-process `runCli`, no PATH. |
 | [`manager.ts`](../../src/extension/manager.ts) | Full-screen `/manage` tree: browse, edit, steer, kill. |
 
 ## `src/console/`

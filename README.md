@@ -51,25 +51,23 @@ omp install @bloodf/oh-my-agent
 omp
 ```
 
-The TUI starts the daemon on session start. Widget shows running/parked counts. `ctrl+g` opens the manager. No PATH and no extra daemon command.
+The TUI starts the daemon on session start. Widget shows running/parked counts. `ctrl+g` opens the manager. `/cli status` and `/console` are the same verbs as the shell binary, with no PATH.
 
-CLI is optional. The `omp-agent` shim lives next to the plugin:
+Open `/console`, paste the printed loopback URL in a browser. That is the full operator web UI.
+
+Shell CLI is optional. Full path, no export:
 
 ```sh
-export PATH="$HOME/.omp/plugins/node_modules/.bin:$PATH"
-omp-agent status
-omp-agent console
+~/.omp/plugins/node_modules/.bin/omp-agent status
 ```
-
-`status` should report a live protocol after the TUI has opened once. `console` prints the loopback URL; open it in a browser.
 
 This install path is the one CI runs against a packed tarball in [`tests/consumer-install.test.ts`](tests/consumer-install.test.ts).
 
 The published npm package does not ship `agents/`. Paste the create-subset from [`docs/guide/getting-started.md`](docs/guide/getting-started.md), then:
 
-```sh
-omp-agent agent create researcher researcher.md
-omp-agent spawn researcher
+```
+/cli agent create researcher researcher.md
+/spawn researcher
 ```
 
 Definitions use markdown with YAML frontmatter, the same shape as OMP task agents, with a fully qualified `provider/id` model.

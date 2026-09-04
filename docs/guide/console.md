@@ -8,6 +8,22 @@ This page is the newcomer path. The full API, auth rules, and client behavior li
 
 ## Open it
 
+From the OMP TUI after install:
+
+```
+/console
+```
+
+That prints the loopback URL, including the operator token. Paste it in a browser.
+
+From a shell, if the daemon is already up (the TUI auto-starts it):
+
+```sh
+~/.omp/plugins/node_modules/.bin/omp-agent console
+```
+
+A manual start still prints the URL once and detaches:
+
 ```sh
 omp-agent daemon
 ```

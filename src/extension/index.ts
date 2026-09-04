@@ -16,9 +16,10 @@
  * Failure modes: command handlers render errors as notices through the
  * `ExtensionIO` adapter; nothing throws into the TUI. Session start starts
  * the detached daemon from the plugin tree if the socket is down, then
- * paints the widget. A spawn that fails still paints the shared daemon-down
- * sentence. Turn-end refreshes only — it does not restart a daemon the
- * operator just stopped.
+ * paints the widget. `/cli` and `/console` run the same dispatcher as the
+ * shell binary, so PATH is never required. A spawn that fails still paints
+ * the shared daemon-down sentence. Turn-end refreshes only — it does not
+ * restart a daemon the operator just stopped.
  */
 
 import { join } from "node:path";
@@ -29,6 +30,7 @@ import type {
 } from "@oh-my-pi/pi-coding-agent";
 /** `getAgentDir()` from pi-utils resolves the active profile's agent dir. */
 import { getAgentDir } from "@oh-my-pi/pi-utils";
+import { cliCommand } from "./cli";
 import type { ExtensionIO } from "./commands";
 import {
 	agentsCommand,
@@ -83,6 +85,21 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 	// at load is safe because it is pure path math, not a runtime action.
 	const socketPath = join(getAgentDir(), "oh-my-agent", "daemon.sock");
 	const client = createDaemonClient(socketPath);
+
+	pi.registerCommand("cli", {
+		description:
+			"Run an omp-agent CLI verb without PATH: /cli status, /cli console.",
+		handler: async (args, ctx) => {
+			await cliCommand(ioFrom(ctx.ui), args);
+		},
+	});
+
+	pi.registerCommand("console", {
+		description: "Print the browser console URL (same as /cli console).",
+		handler: async (_args, ctx) => {
+			await cliCommand(ioFrom(ctx.ui), "console");
+		},
+	});
 
 	pi.registerCommand("agents", {
 		description: "List oh-my-agent peers with live state from the daemon.",

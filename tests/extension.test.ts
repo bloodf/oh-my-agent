@@ -34,6 +34,7 @@ import type {
 import { startControlSocket } from "../src/daemon/socket";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
 import { Supervisor } from "../src/daemon/supervisor";
+import { cliCommand } from "../src/extension/cli";
 import type { ExtensionIO } from "../src/extension/commands";
 import {
 	agentsCommand,
@@ -168,6 +169,8 @@ interface TestDaemon {
 	supervisor: Supervisor;
 	workers: Map<string, ReturnType<typeof stubWorker>>;
 	rooms: RoomStore;
+	/** Profile root `runCli` resolves `<agentDir>/oh-my-agent/daemon.sock` from. */
+	agentDir: string;
 	/** Every `killPeer` call, in order, when `options.trackKills` is set. */
 	kills: { name: string; keepChildren: boolean }[];
 	/** Live parentage, so a reparenting cascade is observable. */
@@ -359,7 +362,9 @@ async function startDaemon(
 				}),
 	};
 
-	const socketPath = join(dir, "daemon.sock");
+	const stateDir = join(dir, "oh-my-agent");
+	await mkdir(stateDir, { recursive: true });
+	const socketPath = join(stateDir, "daemon.sock");
 	const socket = await startControlSocket({
 		socketPath,
 		context,
@@ -368,13 +373,14 @@ async function startDaemon(
 	cleanups.push(() => socket.close());
 	// `createDaemonClient` reads the operator bearer from a `console-token`
 	// file next to the socket, the same layout `bootDaemon` mints at boot.
-	await writeFile(join(dir, "console-token"), TEST_OPERATOR_TOKEN, "utf8");
+	await writeFile(join(stateDir, "console-token"), TEST_OPERATOR_TOKEN, "utf8");
 	return {
 		socket,
 		client: createDaemonClient(socketPath),
 		supervisor,
 		workers,
 		rooms,
+		agentDir: dir,
 		kills,
 		parents,
 	};
@@ -798,14 +804,72 @@ describe("daemon unavailable", () => {
 		await injectCommand(missing, io, "x hi");
 		await scheduleListCommand(missing, io, "");
 		await scheduleArmCommand(missing, io, "x on");
+		await cliCommand(io, "status", {
+			agentDir: join(tmpdir(), "oma-ext-no-such-profile"),
+			ensure: async () => {},
+		});
 		await refreshWidget(missing, io);
 
-		expect(io.notices.length).toBeGreaterThanOrEqual(9);
+		expect(io.notices.length).toBeGreaterThanOrEqual(10);
 		for (const notice of io.notices) {
 			expect(notice).toContain(DAEMON_UNAVAILABLE);
 		}
 		// The widget reports the daemon's absence on the status line too.
 		expect(io.widgets[WIDGET_KEY]?.join(" ")).toContain(DAEMON_UNAVAILABLE);
+	});
+});
+
+// ── /cli ─────────────────────────────────────────────────────────────────────
+
+describe("/cli", () => {
+	test("runs status against the real socket without PATH", async () => {
+		const daemon = await startDaemon([]);
+		const io = fakeIo();
+		await cliCommand(io, "status", {
+			agentDir: daemon.agentDir,
+			ensure: async () => {},
+		});
+		const text = io.notices.join("\n");
+		expect(text).toContain("protocol:");
+		expect(text).toContain("agents: 0");
+	});
+
+	test("empty args prints usage", async () => {
+		const io = fakeIo();
+		await cliCommand(io, "", {
+			agentDir: join(tmpdir(), "oma-cli-usage"),
+			ensure: async () => {},
+		});
+		expect(io.notices.join("\n")).toContain("Usage: omp-agent");
+	});
+
+	test("console prints the loopback URL from the state file", async () => {
+		const daemon = await startDaemon([]);
+		await writeFile(
+			join(daemon.agentDir, "oh-my-agent", "console-url"),
+			"http://127.0.0.1:50561/?token=test-operator\n",
+			"utf8",
+		);
+		const io = fakeIo();
+		await cliCommand(io, "console", {
+			agentDir: daemon.agentDir,
+			ensure: async () => {},
+		});
+		expect(io.notices.join("\n")).toContain(
+			"http://127.0.0.1:50561/?token=test-operator",
+		);
+	});
+
+	test("ensure runs before the verb", async () => {
+		let ensured = 0;
+		const daemon = await startDaemon([]);
+		await cliCommand(fakeIo(), "status", {
+			agentDir: daemon.agentDir,
+			ensure: async () => {
+				ensured += 1;
+			},
+		});
+		expect(ensured).toBe(1);
 	});
 });
 
@@ -839,6 +903,8 @@ describe("extension factory", () => {
 		expect(registered).toContain("logs");
 		expect(registered).toContain("inject");
 		expect(registered).toContain("manage");
+		expect(registered).toContain("cli");
+		expect(registered).toContain("console");
 		expect(shortcuts).toHaveLength(1);
 		expect(events).toContain("session_start");
 		expect(events).toContain("turn_end");

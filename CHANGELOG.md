@@ -9,6 +9,7 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 ### Added
 
 - TUI auto-starts the detached daemon on session start from the plugin tree, so `omp install` then `omp` is enough. PATH and `omp-agent daemon` stay optional for the CLI.
+- `/cli <verb>` and `/console` run the same CLI dispatcher inside the TUI, so shell PATH is not required to print status or the browser console URL.
 
 ## [1.0.4] - 2026-09-04
 

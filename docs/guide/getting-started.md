@@ -22,13 +22,21 @@ omp
 
 Session start starts the detached daemon from the plugin tree. No PATH. No extra `omp-agent daemon`. Widget should show `agents: 0 running, 0 parked`. `ctrl+g` opens the manager.
 
+Inside the TUI:
+
+```
+/cli status
+/console
+```
+
+`/cli` is every `omp-agent` verb. `/console` prints the browser URL. Paste it. That is the full operator web UI.
+
 The daemon keeps running after you close the TUI. Closing the terminal does not stop it.
 
-CLI is optional. The binary lands at `~/.omp/plugins/node_modules/.bin/omp-agent`. Put that directory on `PATH` only if you want the shell verbs later in this guide:
+Shell CLI is optional. No PATH export required if you use the full path:
 
 ```sh
-export PATH="$HOME/.omp/plugins/node_modules/.bin:$PATH"
-omp-agent status
+~/.omp/plugins/node_modules/.bin/omp-agent status
 ```
 
 Expected shape:
@@ -74,6 +82,8 @@ Create it. The command name must match `name:` in the frontmatter. `-` reads std
 omp-agent agent create researcher researcher.md
 ```
 
+Same from the TUI: `/cli agent create researcher researcher.md`.
+
 Expected:
 
 ```
@@ -87,6 +97,8 @@ The file is written to `<daemon-project>/.omp/oh-my-agent/agents/researcher.md`,
 ```sh
 omp-agent spawn researcher
 ```
+
+Same from the TUI: `/spawn researcher` or `/cli spawn researcher`.
 
 Expected:
 
