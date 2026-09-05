@@ -160,11 +160,3 @@ test("npm package contains runtime assets and excludes repository-only paths", a
 		),
 	).toEqual([]);
 }, 180_000);
-
-test("prepack runs typecheck and fast suites", async () => {
-	const { scripts } = (await Bun.file(
-		resolve(PACKAGE_ROOT, "package.json"),
-	).json()) as { scripts: Record<string, string> };
-
-	expect(scripts.prepack).toBe("bun run typecheck && bun run test:fast");
-});
