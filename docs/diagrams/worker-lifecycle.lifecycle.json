@@ -9,13 +9,13 @@
     "viewBox": [980, 660]
   },
   "lanes": [
-    { "id": "main", "label": "Peer states" },
+    { "id": "main", "label": "Agent states" },
     { "id": "waiting", "label": "Idle wait" },
     { "id": "exceptions", "label": "Quota recovery" },
     { "id": "terminal", "label": "Stop" }
   ],
   "states": [
-    { "id": "defined", "type": "start", "label": "Defined", "sublabel": "peer markdown", "lane": "main", "col": 0, "step": "01", "tag": "create" },
+    { "id": "defined", "type": "start", "label": "Defined", "sublabel": "agent definition", "lane": "main", "col": 0, "step": "01", "tag": "create" },
     { "id": "running", "type": "active", "label": "Running", "sublabel": "RPC worker", "lane": "main", "col": 1, "step": "02", "tag": "spawn" },
     { "id": "working", "type": "active", "label": "Working", "sublabel": "session.prompt", "lane": "main", "col": 2, "step": "03", "tag": "turn" },
     { "id": "reviewing", "type": "decision", "label": "Idle check", "sublabel": "budget + mentions", "lane": "main", "col": 3, "step": "04" },
@@ -35,7 +35,7 @@
     { "id": "parked-cascade", "from": "parked", "to": "cascade", "variant": "security", "fromSide": "bottom", "toSide": "top", "via": [[480, 336], [480, 432], [402, 432]] }
   ],
   "cards": [
-    { "dot": "emerald", "title": "Main rail", "items": ["Defined peers spawn into a running RPC worker", "Idle peers park and wait for a mention or room wake"] },
+    { "dot": "emerald", "title": "Main rail", "items": ["Defined agents start a running RPC worker", "Idle agents park and wait for a mention or channel wake"] },
     { "dot": "amber", "title": "Quota", "items": ["Metered accounts warn at 80% of budgetUsd and park at 100%", "Subscription accounts arm an unattended resume at quota reset"] },
     { "dot": "rose", "title": "Parentage", "items": ["kill cascades to children unless --keep-children", "A child whose parent is gone is never woken"] }
   ]

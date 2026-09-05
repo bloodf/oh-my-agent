@@ -1,109 +1,56 @@
 import { useState } from "react";
+import { Folder } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-/**
- * Purpose: Collect and create one durable room without clearing failed input.
- * Public API: CreateChannelDialog and CreateChannelDialogProps.
- * Upstream deps: shadcn Dialog/form primitives and the console request seam.
- * Downstream consumers: the console shell room rail.
- * Failure modes: API errors stay inline and keep the draft for correction/retry.
- * Performance: one request per submit.
- */
-
-export type ConsoleCall = (
-  path: string,
-  init?: { method?: string; body?: unknown },
-) => Promise<Record<string, unknown>>;
-
+export type ConsoleCall = (path: string, init?: { method?: string; body?: unknown }) => Promise<Record<string, unknown>>;
 export type CreateChannelDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   call: ConsoleCall;
   onCreated: (id: string) => void;
+  onPickWorkspace?: (initialPath: string) => Promise<string>;
 };
 
-export function CreateChannelDialog({
-  open,
-  onOpenChange,
-  call,
-  onCreated,
-}: CreateChannelDialogProps) {
-  const [draft, setDraft] = useState("");
+export function CreateChannelDialog({ open, onOpenChange, call, onCreated, onPickWorkspace }: CreateChannelDialogProps) {
+  const [draft, setDraft] = useState({ id: "", workspace: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create room</DialogTitle>
-          <DialogDescription>
-            Use a channel ID such as #engineering.
-          </DialogDescription>
+          <DialogTitle>Create channel</DialogTitle>
+          <DialogDescription>Make a durable shared conversation. Workspace is context for agents, not an access boundary.</DialogDescription>
         </DialogHeader>
-        <form
-          id="new-channel"
-          className="grid gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const id = draft.trim();
-            if (!id || busy) return;
-            setError("");
-            setBusy(true);
-            void call("/api/channels", { method: "POST", body: { id } })
-              .then(() => {
-                setDraft("");
-                onOpenChange(false);
-                onCreated(id);
-              })
-              .catch((cause) =>
-                setError(
-                  cause instanceof Error ? cause.message : String(cause),
-                ),
-              )
-              .finally(() => setBusy(false));
-          }}
-        >
-          <div className="grid gap-2">
-            <Label htmlFor="new-channel-input">Room ID</Label>
-            <Input
-              id="new-channel-input"
-              placeholder="#new-channel"
-              autoComplete="off"
-              required
-              autoFocus
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-            />
+        <form id="new-channel" className="grid gap-4" onSubmit={(event) => {
+          event.preventDefault();
+          const id = draft.id.trim();
+          if (!id || busy) return;
+          setError(""); setBusy(true);
+          void call("/api/channels", { method: "POST", body: { id, ...(draft.workspace.trim() ? { workspace: draft.workspace.trim() } : {}) } })
+            .then(() => { setDraft({ id: "", workspace: "" }); onOpenChange(false); onCreated(id); })
+            .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+            .finally(() => setBusy(false));
+        }}>
+          <div className="grid gap-1.5">
+            <Label htmlFor="new-channel-input">Channel name</Label>
+            <Input id="new-channel-input" placeholder="#new-channel" autoComplete="off" required autoFocus value={draft.id} onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} />
           </div>
-          <p
-            id="new-channel-error"
-            role="alert"
-            className="min-h-5 text-xs text-destructive"
-          >
-            {error}
-          </p>
+          <div className="grid gap-1.5">
+            <Label htmlFor="new-channel-workspace">Working directory <span className="font-normal text-muted-foreground">(optional)</span></Label>
+            <div className="flex gap-2">
+              <Input id="new-channel-workspace" placeholder="/Users/you/project" value={draft.workspace} onChange={(event) => setDraft((current) => ({ ...current, workspace: event.target.value }))} />
+              {onPickWorkspace && <Button type="button" variant="outline" aria-label="Browse channel workspace" onClick={() => void onPickWorkspace(draft.workspace).then((workspace) => setDraft((current) => ({ ...current, workspace })))}><Folder /></Button>}
+            </div>
+            <p className="text-xs text-muted-foreground">Agents without an explicit workspace use this directory for channel work.</p>
+          </div>
+          <p id="new-channel-error" role="alert" className="min-h-5 text-xs text-destructive">{error}</p>
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancel
-            </Button>
-            <Button id="new-channel-create" type="submit" disabled={busy}>
-              {busy ? "Creating…" : "Create room"}
-            </Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button id="new-channel-create" type="submit" disabled={busy}>{busy ? "Creating…" : "Create channel"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

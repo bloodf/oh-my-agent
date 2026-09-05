@@ -90,6 +90,8 @@ export interface RoomInfo {
 	id: string;
 	kind: "channel" | "dm";
 	name: string;
+	/** Canonical absolute directory inherited by agents without an explicit workspace. */
+	workspace?: string;
 }
 
 export type PlanStatus = "draft" | "active" | "completed";
@@ -184,16 +186,11 @@ export interface AgentStatusResult {
 
 export type DefinitionData = Omit<PeerDefinition, "filePath">;
 
-export interface AgentCreateParams {
-	name: string;
-	description: string;
-	model?: string[];
-	rooms?: string[];
-	wake?: PeerDefinition["wake"];
-	autonomy?: PeerDefinition["autonomy"];
-	spawns?: PeerDefinition["spawns"];
-	body: string;
-}
+export type AgentCreateParams = Pick<
+	DefinitionData,
+	"name" | "description" | "body"
+> &
+	Partial<Omit<DefinitionData, "name" | "description" | "body" | "sha256">>;
 export interface AgentCreateResult {
 	name: string;
 	created: boolean;

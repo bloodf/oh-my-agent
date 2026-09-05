@@ -4,6 +4,7 @@ export type RoomInfo = {
 	id: string;
 	kind: "channel" | "dm";
 	name?: string;
+	workspace?: string;
 };
 
 export type MessageReaction = {
@@ -30,6 +31,10 @@ export type AgentInfo = {
 	account?: string;
 	parent?: string;
 	rooms?: string[];
+	automation?: {
+		wakeRooms: boolean;
+		schedules: string[];
+	};
 };
 
 export type ConsoleEvent =

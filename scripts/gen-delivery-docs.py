@@ -2589,7 +2589,7 @@ TASKS += [
         epic="EP-06", sprint="SP-07", status="Done",
         goal="A human can watch and join agent conversations in a browser.",
         read_first=[ARCH, ("Console API", "docs/delivery/tasks/T-602-console-api.md"), ("ADR-009: threads and reactions", "docs/delivery/adr/ADR-009-threads-and-reactions.md")],
-        files=["src/console/index.html", "src/console/app.js", "src/console/style.css", "tests/console-client.test.ts", "tests/console-storybook.test.ts", "src/daemon/web-attachments.ts", "src/daemon/web-chats.ts", "src/daemon/web-files.ts", "src/daemon/web-routes.ts", "src/daemon/workspace-changes.ts", "src/rooms/plans.ts", "src/shared/web-workspace.ts", "tests/web-workspace-security.test.ts", "tests/workspace-changes.test.ts"],
+        files=["src/console/index.html", "src/console/app.js", "src/console/style.css", "tests/console-client.test.ts", "tests/console-storybook.test.ts", "src/daemon/web-attachments.ts", "src/daemon/web-chats.ts", "src/daemon/web-files.ts", "src/daemon/web-routes.ts", "src/daemon/workspace-changes.ts", "src/rooms/plans.ts", "src/shared/web-workspace.ts", "tests/web-workspace-security.test.ts", "tests/workspace-changes.test.ts", "tests/web-attachments.test.ts"],
         assets=[
             ("src/console/app.js", "Generated", "Vite-built React conversation workspace; source lives in web/src."),
             ("src/console/index.html", "New", "Shell."),
@@ -2597,7 +2597,7 @@ TASKS += [
             ("tests/console-client.test.ts", "New", "Drives a real browser against a running daemon."),
             ("tests/console-storybook.test.ts", "New", "Storybook catalog: pages, components, states, against production CSS."),
             ("src/daemon/console-api.ts", "Read", "The API it consumes."),
-            ("src/daemon/web-attachments.ts", "New", "Temporary clipboard image storage; existing files remain path references."),
+            ("src/daemon/web-attachments.ts", "Edited", "Bounded-memory temporary file uploads, cancellation cleanup, ownership-safe deletion and 24-hour retention; originals remain path references."),
             ("src/daemon/web-chats.ts", "New", "Independent native OMP RPC sessions with temporary session metadata."),
             ("src/daemon/web-files.ts", "New", "Operator filesystem picker and validated path references."),
             ("src/daemon/web-routes.ts", "New", "Authenticated chat, plan, and workspace HTTP routes."),
@@ -2606,6 +2606,7 @@ TASKS += [
             ("src/shared/web-workspace.ts", "New", "Transport-safe native chat contracts."),
             ("tests/web-workspace-security.test.ts", "New", "Remote opt-in HTTP and WebSocket authority regressions."),
             ("tests/workspace-changes.test.ts", "New", "Git filter execution, literal paths, and symlink regressions."),
+            ("tests/web-attachments.test.ts", "New", "Streaming upload, abort/failure cleanup, permissions, expiry, deletion and remote-denial behavior."),
         ],
         steps=[
             "Render a channel list, a transcript, and a composer.",

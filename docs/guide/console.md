@@ -91,7 +91,7 @@ No cookie is set. A cookie on `127.0.0.1` would ride along to every other local 
 | `OMA_CONSOLE` | unset (enabled) | `0` runs headless: no listener or console URL. The daemon still loads or mints the operator token for a later console-enabled boot. |
 | `OMA_REMOTE` | unset | Enables the remote proxy trust model. See [Remote exposure](../remote-exposure.md). |
 | `OMA_CONSOLE_ORIGIN` | unset | Required when `OMA_REMOTE=1` and the console is enabled. Exact external HTTPS origin, no credentials, path, query, or hash. |
-| `OMA_REMOTE_FULL_CONTROL` | unset | `1` explicitly permits remote independent chats, workspace browsing/Git inspection, and clipboard-image creation. These capabilities are otherwise refused remotely. |
+| `OMA_REMOTE_FULL_CONTROL` | unset | `1` explicitly permits remote independent chats, workspace changes, agent Start, filesystem/Git inspection, and temporary uploads. These capabilities are otherwise refused remotely. |
 
 `OMA_CONSOLE_HOST` is refused if it is not loopback, in every mode.
 
@@ -103,13 +103,13 @@ The rail separates three conversation types:
 - **Rooms** are shared `#` channels for the operator and subscribed agents. Messages, threads, reactions, membership, and room plans are daemon-owned durable data.
 - **Direct messages** are durable `@` channels for focused conversation with an agent. They use the same room store and delivery path as shared rooms; they are not independent OMP chat sessions. Opening a DM to a stopped or defined-but-not-running agent records membership and keeps messages in the durable channel, but does not start the agent. Delivery waits until the agent starts.
 
-The selected workspace is the chat subprocess's `cwd` and context for Changes. It is location metadata, not a filesystem permission boundary: local full control runs with the daemon/OMP OS identity and can access whatever that identity can access.
+Choose a working directory for each channel, agent/bot, or independent OMP chat. Channel directories persist across restarts. On explicit Start, an agent's own workspace takes precedence; otherwise it inherits the sole configured workspace among its channels. Conflicting channel workspaces require an explicit agent workspace. Running workers keep their working directory until restart; explicit definition changes apply through the existing rebuild policy. Workspace is location metadata, not a filesystem permission boundary.
 
-The composer sends with Enter and inserts a newline with Shift+Enter. Attach existing files by absolute path, using the daemon-backed file picker or path entry. Existing files remain in place and are not uploaded or copied. Clipboard images are the exception: the daemon saves supported pasted images under the OS temporary chat root and attaches that generated path.
+The composer sends with Enter and inserts a newline with Shift+Enter. **Reference local files** uses the daemon picker or absolute-path entry: originals remain in place and are never uploaded, copied, or deleted. **Upload files** accepts browser-selected, dropped, or pasted files of any type into private OS temporary storage. Transfers stream without an application file-size cap; disk space, browser, and proxy limits still apply. Progress and Cancel stay visible; cancellation preserves the message draft and removes partial uploads.
 
-Independent chat metadata, native session JSONL, and clipboard-created images live under OS temporary storage. OS cleanup can remove them without warning. Original workspace files are not copied there. Registered agent definitions, room/DM messages, and room plans remain in daemon-owned durable storage.
+Temporary uploads expire after 24 hours; cleanup runs on daemon startup and hourly. Removing an unsent upload deletes only its managed copy. Sending retains it until expiry, so a durable room message may eventually reference an expired file. Keep permanent source files as local path references instead. Independent chat metadata and native session JSONL also live in OS temporary storage and can disappear under OS cleanup. Agent definitions, room/DM history, membership, and plans remain durable.
 
-Agent controls live in the Agent sheet: room membership, steering, logs, stop, account ceiling, and soul/definition editing. Definition edits use `PATCH /api/agents/:name`; room membership changes take effect live, while other policy changes rebuild the worker on its next delivered turn. The human posts to rooms and DMs as `@you`; attempts to claim an agent author are refused.
+**Create agent** makes a durable native OMP peer. **Create automated bot** uses the same peer lifecycle with message wake rules, turn/budget bounds, and optional cron instruction; it is not a separate launcher. Set a usable model before Start. The Agent sheet provides membership, explicit Start, steering, logs, Stop, account ceilings, and soul/definition editing. Definition edits use `PATCH /api/agents/:name`; membership takes effect live, while other policy changes rebuild on the next delivered turn. Stopped-agent DMs wait for explicit Start.
 
 Conversation / Plans / Changes views keep the current destination context. Plans are durable room artifacts. Native chats use native OMP todo state rather than room plans. Changes reads real Git status and bounded diffs for the selected workspace.
 
@@ -125,6 +125,6 @@ OMA_CONSOLE=0 omp-agent daemon
 
 No console URL. CLI and TUI still work.
 
-Remote: the daemon still binds loopback. Put a TLS-terminating proxy in front. Remote mode refuses to boot a console without `OMA_CONSOLE_ORIGIN`; `omp-agent console` prints that origin without the operator token. Remote browsers can use rooms, DMs, plans, and agent controls under the remote trust model, but independent chats, filesystem browsing, clipboard-image creation, and workspace Git inspection expose the daemon user's machine-wide authority and return 403 unless the daemon was started with `OMA_REMOTE_FULL_CONTROL=1`. Follow [Remote exposure](../remote-exposure.md) before opting in.
+Remote: the daemon still binds loopback. Put a TLS-terminating proxy in front. Remote mode refuses to boot a console without `OMA_CONSOLE_ORIGIN`; `omp-agent console` prints that origin without the operator token. Basic rooms, DMs, and plans remain available under the remote trust model. Starting agents, changing workspaces, independent OMP chats, filesystem browsing, uploads, and Git inspection require `OMA_REMOTE_FULL_CONTROL=1`. Follow [Remote exposure](../remote-exposure.md) before opting in.
 
 Next: [Rooms](rooms.md), [Security](security.md), [Web console](../web-console.md).

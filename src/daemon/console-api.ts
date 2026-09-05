@@ -47,6 +47,7 @@
  */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { realpath, stat } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join, resolve, sep } from "node:path";
 
@@ -55,7 +56,12 @@ import {
 	fingerprintPeerDefinition,
 	type PeerDefinition,
 } from "../shared/agent-definition";
-import type { AgentStatus, RoomInfo } from "../shared/protocol";
+import type {
+	AgentCreateParams,
+	AgentSpawnResult,
+	AgentStatus,
+	RoomInfo,
+} from "../shared/protocol";
 import { METHODS } from "../shared/protocol-schemas";
 import type { Operations } from "./operations";
 import { HUMAN_AUTHOR, InvalidParamsError } from "./operations";
@@ -140,6 +146,9 @@ export function normalizeRequestUrl(
 
 /** How often the live feed re-reads rooms while a console is connected. */
 const DEFAULT_POLL_INTERVAL_MS = 250;
+
+/** JSON metadata stays bounded even though attachment streaming lifts Bun's global cap. */
+const MAX_JSON_BODY_BYTES = 1024 * 1024;
 
 /**
  * How far back a tick looks for reaction changes, in message ids per room.
@@ -233,14 +242,15 @@ export interface StartConsoleApiOptions {
 	peers: Map<string, PeerRecord>;
 	/** Rooms the daemon knows about; the store does not enumerate them. */
 	knownRooms: Map<string, RoomInfo>;
-	/**
-	 * Definitions on disk. A peer created or edited here becomes a file in the
-	 * private store, so the UI and a hand-written definition produce the same
-	 * thing and neither becomes a second source of truth.
-	 */
+	/** Definitions persist in the native private agent store. */
 	peerStore: PeerStore;
-	/** Create the room if it does not exist yet, and index it. */
+	/** Create the room if absent and add it to the live room index. */
 	ensureRoom(id: string): Promise<void>;
+	/** Explicitly start a durable definition. Creation and DMs never call this. */
+	spawnPeer?(
+		name: string,
+		options?: { parent?: string; cwd?: string },
+	): Promise<AgentSpawnResult>;
 	/**
 	 * Kill, inject, logs-tail, and budget-bump, shared with the control
 	 * socket (T-1605).
@@ -376,6 +386,7 @@ export async function startConsoleApi(
 		peerStore,
 		knownRooms,
 		ensureRoom,
+		spawnPeer,
 		operations,
 		token,
 	} = options;
@@ -768,15 +779,45 @@ export async function startConsoleApi(
 		return undefined;
 	};
 
-	/** JSON body, or `undefined` when it is not an object. */
+	/** JSON body capped independently of Bun's server-wide attachment allowance. */
+	const readJson = async (request: Request): Promise<unknown> => {
+		const declared = request.headers.get("content-length");
+		if (declared !== null && Number(declared) > MAX_JSON_BODY_BYTES) {
+			throw new InvalidParamsError("body", "JSON body exceeds 1 MiB");
+		}
+		if (request.body === null) return undefined;
+		const reader = request.body.getReader();
+		const decoder = new TextDecoder();
+		let bytes = 0;
+		let text = "";
+		try {
+			while (true) {
+				const chunk = await reader.read();
+				if (chunk.done) break;
+				bytes += chunk.value.byteLength;
+				if (bytes > MAX_JSON_BODY_BYTES) {
+					await reader.cancel();
+					throw new InvalidParamsError("body", "JSON body exceeds 1 MiB");
+				}
+				text += decoder.decode(chunk.value, { stream: true });
+			}
+			text += decoder.decode();
+			return JSON.parse(text) as unknown;
+		} finally {
+			reader.releaseLock();
+		}
+	};
+
+	/** Read a bounded JSON object, or `undefined` for malformed/non-object input. */
 	const readBody = async (
 		request: Request,
 	): Promise<Record<string, unknown> | undefined> => {
 		try {
-			const payload: unknown = await request.json();
+			const payload = await readJson(request);
 			if (typeof payload !== "object" || payload === null) return undefined;
 			return payload as Record<string, unknown>;
-		} catch {
+		} catch (error) {
+			if (error instanceof InvalidParamsError) throw error;
 			return undefined;
 		}
 	};
@@ -792,6 +833,53 @@ export async function startConsoleApi(
 		if (room.length < 2) return undefined;
 		if (!room.startsWith("#") && !room.startsWith("@")) return undefined;
 		return room;
+	};
+
+	/** Canonicalize an operator-selected cwd and reject non-directories. */
+	const workspaceFrom = async (value: unknown): Promise<string | undefined> => {
+		if (value === undefined) return undefined;
+		if (typeof value !== "string" || !value.startsWith("/")) {
+			throw new InvalidParamsError(
+				"workspace",
+				"workspace must be an absolute directory",
+			);
+		}
+		let canonical: string;
+		try {
+			canonical = await realpath(value);
+			if (!(await stat(canonical)).isDirectory())
+				throw new Error("not directory");
+		} catch {
+			throw new InvalidParamsError(
+				"workspace",
+				`workspace is not a real directory: ${value}`,
+			);
+		}
+		return canonical;
+	};
+
+	/**
+	 * Resolve stopped-peer cwd without changing any running worker. A definition
+	 * workspace always wins. Otherwise all subscribed channel workspaces must
+	 * agree; choosing one of several would make room iteration order policy.
+	 */
+	const startWorkspace = async (
+		definition: PeerDefinition,
+	): Promise<string | undefined> => {
+		if (definition.workspace !== undefined)
+			return await workspaceFrom(definition.workspace);
+		const inherited = new Set(
+			(definition.rooms ?? [])
+				.map((room) => knownRooms.get(room)?.workspace)
+				.filter((workspace): workspace is string => workspace !== undefined),
+		);
+		if (inherited.size > 1) {
+			throw new InvalidParamsError(
+				"workspace",
+				`Agent ${definition.name} belongs to channels with different workspaces; set its explicit workspace before Start`,
+			);
+		}
+		return inherited.values().next().value;
 	};
 
 	/** The definition's fields, ready to be rewritten with an override. */
@@ -871,7 +959,11 @@ export async function startConsoleApi(
 	};
 
 	// ── Routes ────────────────────────────────────────────────────────────────
-	const handle = async (request: Request, url: URL): Promise<Response> => {
+	const handle = async (
+		request: Request,
+		url: URL,
+		fullControl: boolean,
+	): Promise<Response> => {
 		const path = url.pathname;
 		if (path === "/api/capabilities" && request.method === "GET")
 			return json(200, { fullControl: false });
@@ -892,33 +984,48 @@ export async function startConsoleApi(
 
 		if (path === "/api/agents") {
 			if (request.method === "GET") {
-				const agents: (AgentStatus & { rooms: string[] })[] = [...peers].map(
-					([name, record]) => ({
-						name,
-						state: record.worker.state,
-						account: record.accountId,
-						...(record.model === undefined ? {} : { model: record.model }),
-						// Parentage rides along because the kill confirmation has
-						// to name the children a cascade will take: counting them
-						// ("and 3 children") is not something an operator can
-						// check before an irreversible operation.
-						...(record.parent === undefined ? {} : { parent: record.parent }),
-						// Membership rides along with status so the console's
-						// per-channel toggle renders from one read.
-						rooms: [...record.rooms],
-					}),
-				);
+				const agents: (AgentStatus & {
+					rooms: string[];
+					automation?: { wakeRooms: boolean; schedules: string[] };
+				})[] = [...peers].map(([name, record]) => ({
+					name,
+					state: record.worker.state,
+					account: record.accountId,
+					...(record.model === undefined ? {} : { model: record.model }),
+					// Parentage rides along because the kill confirmation has
+					// to name the children a cascade will take: counting them
+					// ("and 3 children") is not something an operator can
+					// check before an irreversible operation.
+					...(record.parent === undefined ? {} : { parent: record.parent }),
+					// Membership rides along with status so the console's
+					// per-channel toggle renders from one read.
+					rooms: [...record.rooms],
+				}));
 				// A definition with no worker is an agent that starts on the next
 				// daemon start. Omitting it would make an agent the operator just
 				// created vanish from the UI that created it.
 				const { definitions } = await peerStore.list();
 				for (const definition of definitions) {
+					const automation =
+						definition.wake?.rooms || definition.schedules?.length
+							? {
+									wakeRooms: definition.wake?.rooms === true,
+									schedules: (definition.schedules ?? []).map(
+										(schedule) => schedule.cron,
+									),
+								}
+							: undefined;
+					const existing = agents.find(
+						(agent) => agent.name === definition.name,
+					);
+					if (existing && automation) existing.automation = automation;
 					if (peers.has(definition.name)) continue;
 					agents.push({
 						name: definition.name,
 						state: "stopped",
 						account: "",
 						rooms: definition.rooms ?? [],
+						...(automation ? { automation } : {}),
 					});
 				}
 				return json(200, { agents });
@@ -929,26 +1036,43 @@ export async function startConsoleApi(
 				if (!payload) {
 					return fail(400, "invalid_request", "Body is not valid JSON");
 				}
+				if ("workspace" in payload && !fullControl) {
+					return fail(
+						403,
+						"remote_control_disabled",
+						"Full OMP control is disabled remotely",
+					);
+				}
 				const name =
 					typeof payload.name === "string" ? payload.name.trim() : "";
 				if (name.length === 0) {
 					return fail(400, "invalid_request", "Agent name is required");
 				}
+				const validated = METHODS.agent_create.validateParams({
+					...payload,
+					name,
+				});
+				if (!validated.ok) {
+					return fail(
+						400,
+						"invalid_definition",
+						`${validated.field}: ${validated.message}`,
+					);
+				}
 				if (await peerStore.get(name)) {
 					return fail(409, "conflict", `Agent ${name} already exists`);
 				}
 
-				const { name: _name, ...rest } = payload;
+				const creation = validated.value as AgentCreateParams;
+				const { name: _name, ...rest } = creation;
 				let created: PeerDefinition;
 				try {
-					// The parser is the gate: `write` renders, parses, and only
-					// then lands the file, so an invalid definition is refused
-					// in the operator's own words and nothing reaches disk.
+					const workspace = await workspaceFrom(creation.workspace);
 					created = await peerStore.write(
 						{
-							...(rest as Omit<PeerDefinitionFields, "name" | "body">),
+							...rest,
+							...(workspace === undefined ? {} : { workspace }),
 							name,
-							body: typeof payload.body === "string" ? payload.body : "",
 						},
 						{ overwrite: false },
 					);
@@ -996,6 +1120,46 @@ export async function startConsoleApi(
 			return fail(405, "method_not_allowed", `${request.method} not allowed`);
 		}
 
+		const startRoute = /^\/api\/agents\/([^/]+)\/start$/.exec(path);
+		if (startRoute?.[1] !== undefined) {
+			if (request.method !== "POST") {
+				return fail(405, "method_not_allowed", `${request.method} not allowed`);
+			}
+			if (!fullControl) {
+				return fail(
+					403,
+					"remote_control_disabled",
+					"Full OMP control is disabled remotely",
+				);
+			}
+			if (spawnPeer === undefined) {
+				return fail(503, "unavailable", "Agent lifecycle is unavailable");
+			}
+			const peerName = decodeURIComponent(startRoute[1]);
+			const definition = await peerStore.get(peerName);
+			if (!definition) {
+				return fail(404, "not_found", `Unknown agent: ${peerName}`);
+			}
+			if (
+				peers.get(peerName)?.worker.state !== undefined &&
+				peers.get(peerName)?.worker.state !== "stopped"
+			) {
+				return fail(409, "conflict", `Agent ${peerName} is already running`);
+			}
+			try {
+				const cwd = await startWorkspace(definition);
+				const started = await spawnPeer(
+					peerName,
+					cwd === undefined ? {} : { cwd },
+				);
+				return json(200, { agent: started });
+			} catch (error) {
+				if (error instanceof InvalidParamsError) {
+					return fail(400, "invalid_request", error.message);
+				}
+				throw error;
+			}
+		}
 		// ── Operations (T-1605) ───────────────────────────────────────────────
 		//
 		// Four thin handlers over the shared `operations.ts`: the console runs
@@ -1237,6 +1401,13 @@ export async function startConsoleApi(
 			if (!payload) {
 				return fail(400, "invalid_request", "Body is not valid JSON");
 			}
+			if ("workspace" in payload && !fullControl) {
+				return fail(
+					403,
+					"remote_control_disabled",
+					"Full OMP control is disabled remotely",
+				);
+			}
 			// The name identifies the file; renaming through an edit would
 			// orphan the old definition and the running peer with it. A
 			// *matching* name is tolerated and dropped — a client that echoes
@@ -1363,37 +1534,83 @@ export async function startConsoleApi(
 				return json(200, { channels: [...knownRooms.values()] });
 			}
 			if (request.method === "POST") {
-				let payload: unknown;
-				try {
-					payload = await request.json();
-				} catch {
+				const payload = await readBody(request);
+				if (!payload) {
 					return fail(400, "invalid_request", "Body is not valid JSON");
 				}
-				const id =
-					typeof payload === "object" &&
-					payload !== null &&
-					"id" in payload &&
-					typeof payload.id === "string"
-						? payload.id.trim()
-						: "";
+				if (payload.workspace !== undefined && !fullControl) {
+					return fail(
+						403,
+						"remote_control_disabled",
+						"Full OMP control is disabled remotely",
+					);
+				}
+				const id = typeof payload.id === "string" ? payload.id.trim() : "";
 				if (id.length === 0) {
 					return fail(400, "invalid_request", "Channel id is required");
 				}
-				// `ensureRoom` is idempotent, so a repeated create is not a
-				// transition: a frame for it would have every console repaint
-				// a channel list that did not change.
+				let workspace: string | undefined;
+				try {
+					workspace = await workspaceFrom(payload.workspace);
+				} catch (error) {
+					return fail(400, "invalid_workspace", (error as Error).message);
+				}
 				const existed = knownRooms.has(id);
 				await ensureRoom(id);
-				const channel = knownRooms.get(id);
-				if (!channel) {
+				let room = knownRooms.get(id);
+				if (!room)
 					return fail(500, "internal", `Channel ${id} was not indexed`);
+				if (workspace !== undefined) {
+					const stored = await rooms.setWorkspace(id, workspace);
+					room = { ...room, workspace: stored.workspace };
+					knownRooms.set(id, room);
 				}
-				// After the room exists and is indexed, so a console acting on
-				// the frame finds it on the very next read.
-				if (!existed) publish({ type: "channel", channel });
-				return json(201, { channel });
+				if (!existed) publish({ type: "channel", channel: room });
+				return json(201, { channel: room });
 			}
 			return fail(405, "method_not_allowed", `${request.method} not allowed`);
+		}
+
+		const channelRoute = /^\/api\/channels\/([^/]+)$/.exec(path);
+		if (channelRoute?.[1] !== undefined) {
+			if (!fullControl) {
+				return fail(
+					403,
+					"remote_control_disabled",
+					"Full OMP control is disabled remotely",
+				);
+			}
+			if (request.method !== "PATCH") {
+				return fail(405, "method_not_allowed", `${request.method} not allowed`);
+			}
+			const id = decodeURIComponent(channelRoute[1]);
+			if (!knownRooms.has(id))
+				return fail(404, "not_found", `Unknown channel: ${id}`);
+			const payload = await readBody(request);
+			if (!payload || !("workspace" in payload)) {
+				return fail(400, "invalid_request", "workspace is required");
+			}
+			let workspace: string | null;
+			try {
+				workspace =
+					payload.workspace === null
+						? null
+						: ((await workspaceFrom(payload.workspace)) as string);
+			} catch (error) {
+				return fail(400, "invalid_workspace", (error as Error).message);
+			}
+			const stored = await rooms.setWorkspace(id, workspace);
+			const channel: RoomInfo = {
+				id: stored.id,
+				kind: stored.kind,
+				name: stored.id,
+				...(stored.workspace === undefined
+					? {}
+					: { workspace: stored.workspace }),
+			};
+			knownRooms.set(id, channel);
+			publish({ type: "channel", channel });
+			return json(200, { channel });
 		}
 
 		const messagesRoute = /^\/api\/channels\/([^/]+)\/messages$/.exec(path);
@@ -1423,22 +1640,16 @@ export async function startConsoleApi(
 				}
 				return json(200, { messages: await rooms.listMessages(roomId, opts) });
 			}
-
 			if (request.method === "POST") {
-				let payload: unknown;
-				try {
-					payload = await request.json();
-				} catch {
+				const payload = await readBody(request);
+				if (!payload) {
 					return fail(400, "invalid_request", "Body is not valid JSON");
 				}
-				const fields =
-					typeof payload === "object" && payload !== null
-						? (payload as {
-								body?: unknown;
-								author?: unknown;
-								parentId?: unknown;
-							})
-						: {};
+				const fields = payload as {
+					body?: unknown;
+					author?: unknown;
+					parentId?: unknown;
+				};
 				const body = typeof fields.body === "string" ? fields.body.trim() : "";
 				if (body.length === 0) {
 					return fail(400, "invalid_request", "Message body is required");
@@ -1563,6 +1774,8 @@ export async function startConsoleApi(
 	const server = Bun.serve<SocketData>({
 		hostname,
 		port: options.port ?? 0,
+		// Attachment route streams; JSON routes enforce 1 MiB in application code.
+		maxRequestBodySize: Number.MAX_SAFE_INTEGER,
 		// A console sits open with nothing to say for minutes at a time; the
 		// default idle timeout would sever its live feed.
 		idleTimeout: 0,
@@ -1724,8 +1937,22 @@ export async function startConsoleApi(
 						);
 						if (response) return response;
 					}
-					return await handle(request, url);
+					return await handle(
+						request,
+						url,
+						!remoteRequest || options.web?.remoteFullControl === true,
+					);
 				} catch (error) {
+					if (
+						error instanceof InvalidParamsError &&
+						error.field === "body" &&
+						error.message === "JSON body exceeds 1 MiB"
+					) {
+						return fail(413, "payload_too_large", error.message);
+					}
+					if (error instanceof InvalidParamsError) {
+						return fail(400, "invalid_request", error.message);
+					}
 					return fail(
 						500,
 						"internal",

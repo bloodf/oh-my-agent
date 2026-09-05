@@ -1,53 +1,28 @@
-# Brand assets
+# Brand and product imagery
 
-Source files for the oh-my-agent mark, wordmark, and product shots. Colors match the console tokens in `src/console/style.css`.
+These assets match the conversation-first web workspace. Editable UI tokens live in `web/src/index.css`; `src/console/style.css` is generated.
 
-## Palette
+## Identity
 
-| Token | Hex | Use |
-|---|---|---|
-| `--surface-0` | `#0f1115` | Backgrounds, tiles, GitHub hero plates |
-| `--accent` | `#8ab9ff` | Interactive chrome, links, focus |
-| `--role-agent` | `#58c4dd` | Agent authors, cyan nodes on the mark |
-| `--role-you` | `#e3b341` | Human / `@you`, gold nodes on the mark |
-| `--success` | `#57ab5a` | Running, healthy, confirmed |
-
-Do not invent a second palette for slides or social. If a surface needs more paint, take it from the console `:root` block (`--surface-1`, `--text-primary`, `--danger`), not from a new hex.
+Use the flat conversation mark, system-sans `oh-my-agent` wordmark, neutral near-black surfaces, sky-blue accent (`#7dd3fc`), and aubergine (`#451b52`) brand field. Preserve high text contrast and uniform scaling. The previous glowing-diamond illustrations are retired.
 
 ## Files
 
 | File | Role |
 |---|---|
-| [`logo.svg`](logo.svg) | Vector mark. Prefer this wherever the renderer is sharp (docs sites, print, app icons at arbitrary size). |
-| [`logo.png`](logo.png) | Rounded app-icon raster of the mark. GitHub README header. |
-| [`mark.svg`](mark.svg) | Vector square mark without wordmark. Prefer over `mark.png` where SVG renders. |
-| [`mark.png`](mark.png) | Square mark without wordmark. Avatars, favicons, small tiles. |
-| [`wordmark.svg`](wordmark.svg) | Vector name lockup without tagline. |
-| [`favicon.svg`](favicon.svg) | Favicon. Browser tab, docs site. |
-| [`banner.png`](banner.png) | Mark + wordmark + tagline on `--surface-0`. README wordmark. |
-| [`social.png`](social.png) | Open Graph / social card: mark, name, one-line product claim. |
-| [`console.png`](console.png) | Operator console hero. README product shot. |
-| [`collaboration.png`](collaboration.png) | Rooms / multi-agent illustration. README feature plate. |
+| [logo.svg](logo.svg), [logo.png](logo.png) | Conversation app mark; PNG is 1024 × 1024 |
+| [mark.svg](mark.svg), [mark.png](mark.png) | Compact mark; PNG is 1024 × 1024 |
+| [wordmark.svg](wordmark.svg) | Name lockup |
+| [favicon.svg](favicon.svg) | Small browser mark |
+| [banner.png](banner.png) | 1280 × 720 branded product introduction, not a UI screenshot |
+| [social.png](social.png) | 1280 × 720 social card, not a UI screenshot |
+| [console.png](console.png) | Actual rendered current conversation UI with isolated demonstration data |
+| [collaboration.png](collaboration.png) | Actual rendered current channel/thread UI with isolated demonstration data |
 
-## Usage
+Product shots come from real React Storybook components after `bun run console:build`. Demonstration messages are not claims of live agent activity. Never draw invented controls, dashboards, usage totals, or conversation screenshots. Never capture operator tokens, credentials, or private user content.
 
-**Background.** The mark is drawn for a dark field. Default to `--surface-0` (`#0f1115`). A light background washes out the glow and the cyan/gold nodes.
+Architecture illustrations remain source-backed diagrams under [../diagrams](../diagrams/README.md); they are not substitutes for product captures. Regenerate from their JSON source and resolve the SVG presentation styles for repository rendering.
 
-**Clear space.** Keep empty margin around the mark at least as wide as the inner diamond. Do not crowd it with other logos, badges, or body text.
+## Embedding
 
-**Do not recolor the mark.** Do not swap the diamond, orbits, or nodes to a campaign color. Cyan is `--role-agent`, gold is `--role-you`; those map to product meaning, not decoration.
-
-**Do not stretch.** Scale uniformly. Do not add drop shadows, outlines, or a second orbit.
-
-**Wordmark.** Set the name in a geometric sans, sentence case as `oh-my-agent`. Do not rewrite it as `OhMyAgent`, `OMA`, or a stylized lockup unless you are using `banner.png` or `social.png` as shipped.
-
-**SVG vs PNG.** Use `logo.svg` when the host renders SVG (docs sites, vector design tools). Use the PNGs on GitHub README, issue templates, and social cards: GitHub rasterizes reliably, SVG in READMEs does not.
-
-## README embedding
-
-Relative paths from the repository root, with alt text:
-
-```markdown
-![oh-my-agent mark: a glowing diamond on a dark rounded tile, orbited by cyan and gold nodes](docs/assets/logo.png)
-![oh-my-agent wordmark: hexagonal mark beside the name, tagline autonomous agents that keep working](docs/assets/banner.png)
-```
+Use repository-relative paths and describe the current visible content in alt text. Scale uniformly. Do not add glows, extra orbit decoration, or stretch the mark. Keep reasonable clear space around the wordmark.

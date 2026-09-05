@@ -488,16 +488,21 @@ describe("params validation", () => {
 		expect(badAutonomy.ok).toBe(false);
 		if (!badAutonomy.ok) expect(badAutonomy.field).toBe("autonomy.maxTurns");
 
-		for (const field of ["tools", "sha256"] as const) {
-			const result = METHODS.agent_create.validateParams({
-				name: "researcher",
-				description: "x",
-				body: "y",
-				[field]: field === "tools" ? ["read"] : "a".repeat(64),
-			});
-			expect(result.ok).toBe(false);
-			if (!result.ok) expect(result.field).toBe(field);
-		}
+		const validTools = METHODS.agent_create.validateParams({
+			name: "researcher",
+			description: "x",
+			body: "y",
+			tools: ["read"],
+		});
+		expect(validTools.ok).toBe(true);
+		const forgedFingerprint = METHODS.agent_create.validateParams({
+			name: "researcher",
+			description: "x",
+			body: "y",
+			sha256: "a".repeat(64),
+		});
+		expect(forgedFingerprint.ok).toBe(false);
+		if (!forgedFingerprint.ok) expect(forgedFingerprint.field).toBe("sha256");
 	});
 
 	test("definition_get requires a non-empty name", () => {

@@ -9,6 +9,13 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 ### Changed
 
 - A single manual release dispatch now publishes the verified tarball to npm automatically after all gates pass, retaining the npm-publish environment approval and provenance. Removed the separate publish checkbox and second dispatch.
+- Web messaging gains persistent thread links, distinct agent/bot creation, canonical channel and agent workspaces, explicit native Start, and scheduled-bot activation without daemon restart.
+- Browser-selected, dropped, and pasted files now stream into private temporary storage with progress, cancellation, owned-only deletion, and 24-hour retention. Local original files remain no-copy path references.
+- Repository branding, product screenshots, and architecture illustrations now reflect the conversation workspace rather than the retired console imagery.
+
+### Fixed
+
+- Require remote full-control opt-in for explicit agent Start, preserve child parentage when restarting, and keep migrated temporary attachments readable across repeated accesses.
 
 ## [1.1.0] - 2026-09-05
 

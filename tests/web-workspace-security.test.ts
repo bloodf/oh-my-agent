@@ -62,6 +62,12 @@ async function harness(remoteFullControl: boolean): Promise<WorkspaceHarness> {
 	await mkdir(roots.user, { recursive: true });
 	await mkdir(roots.project, { recursive: true });
 	const peerStore = createPeerStore(roots);
+	await peerStore.write({
+		name: "start-proof",
+		description: "Capability proof",
+		spawns: "*",
+		body: "Wait for instructions.",
+	});
 	const operations = createOperations({
 		rooms,
 		supervisor,
@@ -75,6 +81,7 @@ async function harness(remoteFullControl: boolean): Promise<WorkspaceHarness> {
 		peers,
 		peerStore,
 		knownRooms,
+		spawnPeer: async (name) => ({ name, state: "running" }),
 		ensureRoom: async (id) => {
 			if (knownRooms.has(id)) return;
 			const kind = id.startsWith("@") ? "dm" : "channel";
@@ -88,7 +95,7 @@ async function harness(remoteFullControl: boolean): Promise<WorkspaceHarness> {
 		web: {
 			chats,
 			plans,
-			clipboard: new WebAttachments(join(chats.storageDir, "clipboard")),
+			attachments: new WebAttachments(join(chats.storageDir, "clipboard")),
 			remoteFullControl,
 		},
 	});
@@ -177,6 +184,20 @@ function framesThroughBarrier(socket: WebSocket): Promise<ConsoleEvent[]> {
 }
 
 describe("remote workspace full-control boundary", () => {
+	test("remote Start requires full control while local and opted-in starts succeed", async () => {
+		const denied = await harness(false);
+		const allowed = await harness(true);
+		const start = (h: WorkspaceHarness, remote: boolean) =>
+			fetch(`${h.api.url}/api/agents/start-proof/start`, {
+				method: "POST",
+				headers: remote
+					? h.remoteHeaders
+					: { Authorization: `Bearer ${TOKEN}` },
+			});
+		expect((await start(denied, true)).status).toBe(403);
+		expect((await start(denied, false)).status).toBe(200);
+		expect((await start(allowed, true)).status).toBe(200);
+	});
 	test("trusted proxy identity denies files and chats by default and opt-in restores them", async () => {
 		const denied = await harness(false);
 		const allowed = await harness(true);

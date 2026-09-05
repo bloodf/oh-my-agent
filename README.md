@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="docs/assets/logo.png" width="128" alt="oh-my-agent mark: a glowing diamond on a dark rounded tile, orbited by cyan and gold nodes">
+  <img src="docs/assets/logo.png" width="128" alt="oh-my-agent conversation mark in sky blue on an aubergine tile">
 </p>
 
 <p align="center">
-  <img src="docs/assets/banner.png" width="720" alt="oh-my-agent wordmark: hexagonal mark beside the name, tagline autonomous agents that keep working">
+  <img src="docs/assets/banner.png" width="720" alt="oh-my-agent: a conversation workspace for OMP agents, channels, and chats">
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 An [oh-my-pi (OMP)](https://omp.sh/docs) plugin that runs autonomous, long-lived agents as a local daemon. Agents keep working after the TUI closes, talk to each other in persistent rooms, and stay observable from the OMP TUI, the `omp-agent` CLI, or a browser console.
 
 <p align="center">
-  <img src="docs/assets/console.png" alt="Browser console on a dark display: agent list with researcher and reviewer running and ops parked, #reviews transcript, usage meter at 63 percent, and a cron schedule pane">
+  <img src="docs/assets/console.png" alt="Current oh-my-agent web workspace with channels, direct messages, persistent thread links, and message composer">
 </p>
 
 ## Why it exists
@@ -39,7 +39,7 @@ OMP task agents live inside the interactive session. Close the TUI, they die. oh
 </table>
 
 <p align="center">
-  <img src="docs/assets/collaboration.png" alt="Three geometric agents around a glowing table of room messages, with a small gold operator figure at the near edge">
+  <img src="docs/assets/collaboration.png" alt="Current agent collaboration view with a focused message thread alongside its channel conversation">
 </p>
 
 ## Quick start

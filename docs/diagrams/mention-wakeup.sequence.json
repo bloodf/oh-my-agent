@@ -2,18 +2,20 @@
   "schema_version": 1,
   "diagram_type": "sequence",
   "meta": {
-    "title": "Mention wakeup",
+    "title": "Channel mention wakeup",
     "locale": "en",
     "quality_profile": "showcase",
     "output": "mention-wakeup.html",
-    "viewBox": [900, 880]
+    "viewBox": [1080, 880],
+    "column_fit": "spread"
   },
   "participants": [
     { "id": "you", "type": "external", "label": "You", "sublabel": "@you" },
-    { "id": "console", "type": "frontend", "label": "Console", "sublabel": "browser" },
+    { "id": "browser", "type": "frontend", "label": "Web console", "sublabel": "browser" },
+    { "id": "api", "type": "frontend", "label": "Console API", "sublabel": "HTTP + WebSocket" },
     { "id": "supervisor", "type": "backend", "label": "Supervisor", "sublabel": "daemon" },
-    { "id": "rooms", "type": "messagebus", "label": "Rooms", "sublabel": "SQLite" },
-    { "id": "worker", "type": "backend", "label": "Worker", "sublabel": "parked peer" }
+    { "id": "rooms", "type": "database", "label": "Channels", "sublabel": "durable SQLite rooms" },
+    { "id": "worker", "type": "backend", "label": "Agent worker", "sublabel": "parked" }
   ],
   "segments": [
     { "from": 150, "to": 280, "label": "Post" },
@@ -21,24 +23,27 @@
     { "from": 516, "to": 700, "label": "Reply" }
   ],
   "messages": [
-    { "from": "you", "to": "console", "y": 180, "label": "post @reviewer in #reviews", "variant": "emphasis" },
-    { "from": "console", "to": "supervisor", "y": 222, "label": "Supervisor.post()", "variant": "emphasis" },
-    { "from": "supervisor", "to": "rooms", "y": 264, "label": "store message + mention" },
-    { "from": "supervisor", "to": "worker", "y": 340, "label": "prompt batched pending", "variant": "emphasis" },
-    { "from": "worker", "to": "rooms", "y": 420, "label": "chat_send reply" },
-    { "from": "rooms", "to": "console", "y": 548, "label": "WebSocket diff", "variant": "dashed" },
-    { "from": "console", "to": "you", "y": 600, "label": "transcript updates", "variant": "return" }
+    { "from": "you", "to": "browser", "y": 180, "label": "post @reviewer in #reviews", "variant": "emphasis" },
+    { "from": "browser", "to": "api", "y": 222, "label": "HTTP post", "variant": "emphasis" },
+    { "from": "api", "to": "supervisor", "y": 264, "label": "Supervisor.post()", "variant": "emphasis" },
+    { "from": "supervisor", "to": "rooms", "y": 306, "label": "store message + mention" },
+    { "from": "supervisor", "to": "worker", "y": 382, "label": "prompt batched pending", "variant": "emphasis" },
+    { "from": "worker", "to": "rooms", "y": 462, "label": "chat_send reply" },
+    { "from": "rooms", "to": "api", "y": 548, "label": "read committed diff", "variant": "dashed" },
+    { "from": "api", "to": "browser", "y": 590, "label": "WebSocket event", "variant": "dashed" },
+    { "from": "browser", "to": "you", "y": 632, "label": "transcript updates", "variant": "return" }
   ],
   "activations": [
-    { "participant": "console", "from": 174, "to": 230, "type": "frontend" },
-    { "participant": "supervisor", "from": 216, "to": 350, "type": "backend" },
-    { "participant": "rooms", "from": 258, "to": 510, "type": "messagebus" },
-    { "participant": "worker", "from": 334, "to": 430, "type": "backend" },
-    { "participant": "console", "from": 542, "to": 610, "type": "frontend" }
+    { "participant": "browser", "from": 174, "to": 230, "type": "frontend" },
+    { "participant": "api", "from": 216, "to": 600, "type": "frontend" },
+    { "participant": "supervisor", "from": 258, "to": 392, "type": "backend" },
+    { "participant": "rooms", "from": 300, "to": 558, "type": "database" },
+    { "participant": "worker", "from": 376, "to": 472, "type": "backend" },
+    { "participant": "browser", "from": 584, "to": 642, "type": "frontend" }
   ],
   "cards": [
-    { "dot": "cyan", "title": "One write seam", "items": ["Console posts go through Supervisor.post(), never the store directly", "That call is what wakes subscribed agents"] },
-    { "dot": "emerald", "title": "Parked peers resume", "items": ["Mentions and room wake filters batch into one turn", "A stopped worker keeps the backlog instead of 500"] },
-    { "dot": "amber", "title": "Human is @you", "items": ["The console cannot post as an agent name", "The live feed pushes diffs only while a console is connected"] }
+    { "dot": "cyan", "title": "Browser boundary", "items": ["Browser traffic uses the console HTTP and WebSocket API", "The browser never connects to the daemon Unix socket"] },
+    { "dot": "emerald", "title": "Durable collaboration", "items": ["Console API calls Supervisor.post(); direct store writes would not wake agents", "Channel messages, threads, reactions, and subscriptions persist in SQLite"] },
+    { "dot": "slate", "title": "Separate temporary chats", "items": ["Independent web chats use temporary OMP sessions outside durable rooms", "Temporary attachments expire independently from channel history"] }
   ]
 }

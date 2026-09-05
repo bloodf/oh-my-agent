@@ -605,6 +605,9 @@ export async function bootDaemon(
 
 		const peers = new Map<string, PeerRecord>();
 		const knownRooms = new Map<string, RoomInfo>();
+		for (const room of await rooms.listRooms()) {
+			knownRooms.set(room.id, { ...room, name: room.id });
+		}
 		const schedules = new Map<string, ScheduleRecord>();
 		const definitions = new Map<string, PeerDefinition>();
 		const identities = new Map<string, ControlIdentity>([
@@ -653,10 +656,30 @@ export async function bootDaemon(
 				consoleApi?.publish({ type: "chat", chatId, event }),
 		});
 		started.push(() => chats.close());
+		const attachments = new WebAttachments(join(chats.storageDir, "clipboard"));
+		await attachments.cleanup();
+		let attachmentCleanup: Promise<void> | undefined;
+		const attachmentTimer = setInterval(
+			() => {
+				if (attachmentCleanup) return;
+				attachmentCleanup = attachments
+					.cleanup()
+					.catch((error) => log(`attachment cleanup: ${String(error)}`))
+					.finally(() => {
+						attachmentCleanup = undefined;
+					});
+			},
+			60 * 60 * 1000,
+		);
+		const stopAttachmentCleanup = async () => {
+			clearInterval(attachmentTimer);
+			await attachmentCleanup;
+		};
+		started.push(stopAttachmentCleanup);
 		const web = {
 			chats,
 			plans,
-			clipboard: new WebAttachments(join(chats.storageDir, "clipboard")),
+			attachments,
 			remoteFullControl,
 		};
 
@@ -684,10 +707,14 @@ export async function bootDaemon(
 					`rebuilding ${peerName}: definition changed (was ${previousFingerprint.slice(0, 12)}…)`,
 				);
 				const controlToken = mintControlToken();
+				const previous = db
+					.listAgents()
+					.find((agent) => agent.name === peerName);
+				const cwd = definition.workspace ?? previous?.cwd ?? projectDir;
 				const fresh = recordRuns(
 					await workerFactory({
 						peer: definition,
-						cwd: projectDir,
+						cwd,
 						agentDir,
 						rootDir: join(stateDir, "workers", peerName),
 						discoveredAgentNames,
@@ -713,6 +740,13 @@ export async function bootDaemon(
 				const record = peers.get(peerName);
 				if (record) peers.set(peerName, { ...record, worker: fresh });
 				markAgentRuntime(peerName, fresh.state, fresh.pid ?? null);
+				if (previous)
+					db.upsertAgent({
+						...previous,
+						cwd,
+						status: fresh.state,
+						workerPid: fresh.pid ?? null,
+					});
 				return fresh;
 			},
 		});
@@ -967,18 +1001,19 @@ export async function bootDaemon(
 		/** Materialize, launch, and register one peer. Idempotent by name. */
 		const spawnPeer = async (
 			name: string,
-			options: { parent?: string } = {},
+			options: { parent?: string; cwd?: string } = {},
 		): Promise<AgentSpawnResult> => {
-			const definition = definitions.get(name);
+			const definition = await store.get(name);
 			if (!definition) {
 				throw new InvalidParamsError("name", `Unknown peer: ${name}`);
 			}
+			definitions.set(name, definition);
 
 			// Parentage is validated before anything is built, and before the
 			// idempotence shortcut below: an impossible edge must be refused on
 			// its own terms rather than answered "already running", which would
 			// report success for a spawn that never happened.
-			const parent = options.parent;
+			const parent = options.parent ?? parents.get(name);
 			if (parent !== undefined) {
 				const record = peers.get(parent);
 				if (!record) {
@@ -1015,6 +1050,22 @@ export async function bootDaemon(
 				parent === undefined
 					? (definition.rooms ?? [])
 					: [...(definition.rooms ?? []), familyChannel(parent)];
+			const roomWorkspaces = [
+				...new Set(
+					peerRooms.flatMap((room) => {
+						const workspace = knownRooms.get(room)?.workspace;
+						return workspace ? [workspace] : [];
+					}),
+				),
+			];
+			if (!definition.workspace && !options.cwd && roomWorkspaces.length > 1) {
+				throw new InvalidParamsError(
+					"workspace",
+					"Subscribed channels have different workspaces. Set an explicit agent workspace before starting.",
+				);
+			}
+			const cwd =
+				definition.workspace ?? options.cwd ?? roomWorkspaces[0] ?? projectDir;
 
 			// Materialize from a definition whose rooms are the ones this peer
 			// actually subscribes to. The supervisor's staleness check subtracts
@@ -1031,7 +1082,7 @@ export async function bootDaemon(
 			const worker = recordRuns(
 				await workerFactory({
 					peer: materialized,
-					cwd: projectDir,
+					cwd,
 					agentDir,
 					rootDir: join(stateDir, "workers", name),
 					discoveredAgentNames,
@@ -1101,7 +1152,7 @@ export async function bootDaemon(
 				definitionPath: definitionPathFor(definition),
 				status: worker.state,
 				workerPid: worker.pid ?? null,
-				cwd: projectDir,
+				cwd,
 				startedAt: now(),
 				parent: parent ?? null,
 			});
@@ -1109,6 +1160,7 @@ export async function bootDaemon(
 			// frame published earlier would describe an agent that a status
 			// read taken in the same tick would not find.
 			consoleApi?.emit({ type: "agent", agent: name, state: worker.state });
+			registerDeclaredSchedules(definition);
 			return { name, state: worker.state };
 		};
 
@@ -1299,28 +1351,19 @@ export async function bootDaemon(
 			(name) => !orphans.has(name),
 		);
 
-		for (const name of bootOrder(startable)) {
-			const definition = definitions.get(name);
-			if (!definition) continue;
-			try {
-				// The persisted edge, not a fresh root: a boot that dropped it
-				// would silently flatten the tree on every restart.
-				await spawnPeer(definition.name, { parent: parents.get(name) });
-			} catch (error) {
-				// One peer that cannot start must not take the daemon with it: the
-				// operator needs a running socket to see what failed and why.
-				log(`peer ${definition.name} failed to start: ${String(error)}`);
-				continue;
-			}
-
+		const registerDeclaredSchedules = (definition: PeerDefinition): void => {
 			const declaredSchedules = definition.schedules ?? [];
 			for (let index = 0; index < declaredSchedules.length; index++) {
 				const schedule = declaredSchedules[index];
 				if (!schedule) continue;
 				const id = `${definition.name}:schedule:${index}`;
-				if (persisted.get(id)?.enabled === false) {
+				if (
+					(schedules.get(id)?.enabled ?? persisted.get(id)?.enabled) === false
+				) {
 					// Restored as the operator left it: listed, but with no timer and
 					// no next fire, which is what disarmed means everywhere else.
+					scheduler.remove(id);
+					db.setScheduleNextFire(id, null);
 					schedules.set(id, {
 						id,
 						peer: definition.name,
@@ -1342,7 +1385,8 @@ export async function bootDaemon(
 				if (!automation) continue;
 				const id = `${definition.name}:automation:${index}`;
 				const action = `${automation.event}: ${automation.prompt}`;
-				const enabled = persisted.get(id)?.enabled ?? true;
+				const enabled =
+					schedules.get(id)?.enabled ?? persisted.get(id)?.enabled ?? true;
 				schedules.set(id, {
 					id,
 					peer: definition.name,
@@ -1359,6 +1403,20 @@ export async function bootDaemon(
 					nextFireAt: null,
 					enabled,
 				});
+			}
+		};
+
+		for (const name of bootOrder(startable)) {
+			const definition = definitions.get(name);
+			if (!definition) continue;
+			try {
+				// The persisted edge, not a fresh root: a boot that dropped it
+				// would silently flatten the tree on every restart.
+				await spawnPeer(definition.name, { parent: parents.get(name) });
+			} catch (error) {
+				// One peer that cannot start must not take the daemon with it: the
+				// operator needs a running socket to see what failed and why.
+				log(`peer ${definition.name} failed to start: ${String(error)}`);
 			}
 		}
 
@@ -1638,6 +1696,7 @@ export async function bootDaemon(
 				knownRooms,
 				peerStore: store,
 				ensureRoom,
+				spawnPeer,
 				// The same object the control socket got, not a second copy.
 				operations,
 				token,
@@ -1762,6 +1821,7 @@ export async function bootDaemon(
 			// call against a torn-down dependency. Await the in-flight tick, not
 			// just the timer, before anything below tears those down.
 			await stopUsageLoop();
+			await stopAttachmentCleanup();
 
 			// Reverse order: the console and the socket first, so no new request
 			// arrives; then the workers, then the machinery they depend on, and

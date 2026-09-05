@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bot, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { AttachmentUpload } from "@/lib/attachments";
 import type {
   AgentInfo,
   ConsoleStateKind,
@@ -19,8 +20,8 @@ import { Transcript } from "./Transcript";
 
 const NOW = Date.UTC(2026, 8, 4, 14, 30);
 const ROOMS: RoomInfo[] = [
-  { id: "#research", kind: "channel", name: "research" },
-  { id: "#operations", kind: "channel", name: "operations" },
+  { id: "#research", kind: "channel", name: "research", workspace: "/workspace/oh-my-agent" },
+  { id: "#operations", kind: "channel", name: "operations", workspace: "/workspace/operations" },
   { id: "@reviewer", kind: "dm", name: "reviewer" },
 ];
 const AGENTS: AgentInfo[] = [
@@ -37,10 +38,11 @@ const AGENTS: AgentInfo[] = [
     rooms: ["#research"],
   },
   {
-    name: "release",
+    name: "release-bot",
     state: "stopped",
     account: "openai",
     rooms: ["#operations"],
+    automation: { wakeRooms: true, schedules: ["0 9 * * 1-5"] },
   },
 ];
 const MESSAGES: RoomMessage[] = [
@@ -213,6 +215,7 @@ function StoryFrame({
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [channelOpen, setChannelOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [botOpen, setBotOpen] = useState(false);
   const call = useFixtureCall();
   return (
     <div className="flex h-svh overflow-hidden bg-background text-foreground">
@@ -233,6 +236,7 @@ function StoryFrame({
           onNewChat={noop}
           onNewRoom={() => setChannelOpen(true)}
           onNewAgent={() => setAgentOpen(true)}
+          onNewBot={() => setBotOpen(true)}
           onSearch={noop}
           connected={connected}
         />
@@ -305,12 +309,22 @@ function StoryFrame({
         onOpenChange={setChannelOpen}
         call={call}
         onCreated={setRoom}
+        onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")}
       />
       <CreateAgentDialog
         open={agentOpen}
         onOpenChange={setAgentOpen}
         call={call}
         onCreated={noop}
+        onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")}
+      />
+      <CreateAgentDialog
+        open={botOpen}
+        onOpenChange={setBotOpen}
+        call={call}
+        onCreated={noop}
+        initialKind="bot"
+        onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")}
       />
     </div>
   );
@@ -374,25 +388,27 @@ function AgentStory({
   );
 }
 
-function DialogStory({ agent }: { agent?: boolean }) {
+function DialogStory({ agent, bot }: { agent?: boolean; bot?: boolean }) {
   const call = useFixtureCall();
   const [open, setOpen] = useState(true);
   return (
-    <ComponentStage title={agent ? "Agent creation" : "Room creation"}>
+    <ComponentStage title={bot ? "Automated bot creation" : agent ? "Agent creation" : "Channel creation"}>
       <div className="grid min-h-[34rem] place-items-center">
         <Button
-          id={agent ? "open-new-agent" : "open-new-channel"}
+          id={bot ? "open-new-bot" : agent ? "open-new-agent" : "open-new-channel"}
           onClick={() => setOpen(true)}
         >
           Open dialog
         </Button>
       </div>
-      {agent ? (
+      {agent || bot ? (
         <CreateAgentDialog
           open={open}
           onOpenChange={setOpen}
           call={call}
           onCreated={noop}
+          initialKind={bot ? "bot" : "agent"}
+          onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")}
         />
       ) : (
         <CreateChannelDialog
@@ -400,6 +416,7 @@ function DialogStory({ agent }: { agent?: boolean }) {
           onOpenChange={setOpen}
           call={call}
           onCreated={noop}
+          onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")}
         />
       )}
     </ComponentStage>
@@ -439,14 +456,20 @@ export function Storybook() {
   if (story === "comp-ops") return <AgentStory initialTab="operations" />;
   if (story === "comp-new-channel") return <DialogStory />;
   if (story === "comp-new-agent") return <DialogStory agent />;
+  if (story === "comp-new-bot") return <DialogStory bot />;
   if (story === "comp-composer")
     return (
-      <ComponentStage title="Composer">
+      <ComponentStage title="Composer uploads and local references">
         <div className="flex min-h-[34rem] flex-col justify-end">
           <Composer
             roomKey="#research"
             onSend={noopAsync}
             onPickFiles={() => Promise.resolve(["/workspace/evidence.txt"])}
+            onUpload={(file): AttachmentUpload => ({
+              cancel: noop,
+              promise: Promise.resolve({ id: `story-${file.name}`, name: file.name, type: file.type, size: file.size, path: `/tmp/oh-my-agent/${file.name}` }),
+            })}
+            onDeleteUpload={noopAsync}
           />
         </div>
       </ComponentStage>

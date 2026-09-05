@@ -2,10 +2,10 @@
  * @oh-my-agent/rooms - bun:sqlite RoomStore
  *
  * Purpose:        Persistent room, threaded-message, reaction, and subscription store for multi-agent collaboration.
- * Public API:      RoomStore.open(), createRoom(), post(), parseMentions(), listMessages(), react(), unreact(), subscribe(), markRead(), unreadCount(), pendingForAgent(), enqueueMention(), pendingMentionsForAgent(), acknowledgeMentions(), close();
- *                  Room { id, kind }, RoomKind; MessageReaction { actor, emoji };
+ * Public API:      RoomStore.open(), createRoom(), listRooms(), setWorkspace(), post(), parseMentions(), listMessages(), react(), unreact(), subscribe(), markRead(), unreadCount(), pendingForAgent(), enqueueMention(), pendingMentionsForAgent(), acknowledgeMentions(), close();
+ *                  Room { id, kind, workspace? }, RoomKind; MessageReaction { actor, emoji };
  *                  RoomMessage { id, room, author, body, mentions, createdAt, parentId, threadRootId, replyCount, reactions };
- *                  CreateRoomInput { id, kind }; PostMessageInput { room, author, body, createdAt?, parentId? };
+ *                  CreateRoomInput { id, kind, workspace? }; PostMessageInput { room, author, body, createdAt?, parentId? }.
  *                  PendingRoom { room, messages }.
  * Upstream deps:   bun:sqlite (Database), node:fs/promises (mkdir)
  * Downstream consumers: extension/index.ts, any agent code importing this module
@@ -21,6 +21,7 @@ export type RoomKind = "channel" | "dm";
 export interface Room {
 	id: string;
 	kind: RoomKind;
+	workspace?: string;
 }
 
 export interface MessageReaction {
@@ -44,6 +45,7 @@ export interface RoomMessage {
 export interface CreateRoomInput {
 	id: string;
 	kind: RoomKind;
+	workspace?: string;
 }
 
 export interface PostMessageInput {
@@ -100,8 +102,9 @@ export class RoomStore {
 		db.exec("PRAGMA journal_mode = WAL");
 		db.exec(`
       CREATE TABLE IF NOT EXISTS rooms (
-        id   TEXT PRIMARY KEY,
-        kind TEXT NOT NULL CHECK (kind IN ('channel', 'dm'))
+        id        TEXT PRIMARY KEY,
+        kind      TEXT NOT NULL CHECK (kind IN ('channel', 'dm')),
+        workspace TEXT
       );
       CREATE TABLE IF NOT EXISTS messages (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,6 +140,12 @@ export class RoomStore {
         FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
       );
     `);
+		const roomColumns = db.prepare("PRAGMA table_info(rooms)").all() as {
+			name: string;
+		}[];
+		if (!roomColumns.some((column) => column.name === "workspace")) {
+			db.exec("ALTER TABLE rooms ADD COLUMN workspace TEXT");
+		}
 		const columns = db.prepare("PRAGMA table_info(messages)").all() as {
 			name: string;
 		}[];
@@ -148,8 +157,16 @@ export class RoomStore {
 		return new RoomStore(path, db);
 	}
 
-	private mapRoom(row: { id: string; kind: string }): Room {
-		return { id: row.id, kind: row.kind as RoomKind };
+	private mapRoom(row: {
+		id: string;
+		kind: string;
+		workspace: string | null;
+	}): Room {
+		return {
+			id: row.id,
+			kind: row.kind as RoomKind,
+			...(row.workspace === null ? {} : { workspace: row.workspace }),
+		};
 	}
 
 	private mapMessage(row: MessageRow): RoomMessage {
@@ -191,19 +208,48 @@ export class RoomStore {
 		if (!input.id?.trim()) throw new Error("INVALID_ROOM");
 		if (input.kind !== "channel" && input.kind !== "dm")
 			throw new Error("INVALID_ROOM");
+		if (input.workspace !== undefined && input.workspace.length === 0)
+			throw new Error("INVALID_WORKSPACE");
 
 		const existing = this.db
-			.prepare("SELECT id, kind FROM rooms WHERE id = ?")
-			.get(input.id) as { id: string; kind: string } | undefined;
+			.prepare("SELECT id, kind, workspace FROM rooms WHERE id = ?")
+			.get(input.id) as
+			| { id: string; kind: string; workspace: string | null }
+			| undefined;
 		if (existing) {
 			if (existing.kind !== input.kind) throw new Error("INVALID_ROOM");
 			return this.mapRoom(existing);
 		}
 
 		this.db
-			.prepare("INSERT INTO rooms (id, kind) VALUES (?, ?)")
-			.run(input.id, input.kind);
-		return { id: input.id, kind: input.kind };
+			.prepare("INSERT INTO rooms (id, kind, workspace) VALUES (?, ?, ?)")
+			.run(input.id, input.kind, input.workspace ?? null);
+		return {
+			id: input.id,
+			kind: input.kind,
+			...(input.workspace === undefined ? {} : { workspace: input.workspace }),
+		};
+	}
+
+	async listRooms(): Promise<Room[]> {
+		return (
+			this.db
+				.prepare("SELECT id, kind, workspace FROM rooms ORDER BY id")
+				.all() as { id: string; kind: string; workspace: string | null }[]
+		).map((row) => this.mapRoom(row));
+	}
+
+	async setWorkspace(id: string, workspace: string | null): Promise<Room> {
+		if (!id || (workspace !== null && workspace.length === 0))
+			throw new Error("INVALID_WORKSPACE");
+		const changed = this.db
+			.prepare("UPDATE rooms SET workspace = ? WHERE id = ?")
+			.run(workspace, id);
+		if (changed.changes === 0) throw new Error("ROOM_NOT_FOUND");
+		const row = this.db
+			.prepare("SELECT id, kind, workspace FROM rooms WHERE id = ?")
+			.get(id) as { id: string; kind: string; workspace: string | null };
+		return this.mapRoom(row);
 	}
 
 	async post(input: PostMessageInput): Promise<RoomMessage> {

@@ -2,50 +2,41 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1280 720" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
   <style><![CDATA[
 
-svg { background: #020617; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+svg { background: #09090b; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 svg,
     [data-theme="dark"] {
-      --bg: #020617;
-      --grid: #1e293b;
-      --text: #ffffff;
-      --text-muted: #94a3b8;
-      --text-dim: #475569;
-      
-
-      --text-faint: #7d8da1;
-
-      --panel: rgba(15, 23, 42, 0.5);
-      --panel-border: #1e293b;
-      --lane-fill: rgba(15, 23, 42, 0.22);
-      --lane-stroke: #334155;
-
-      --arrow: #64748b;
-      --arrow-emphasis: #34d399;
-
-      
-
-      --mask: #0f172a;
-
-      --frontend-fill:    rgba(8, 51, 68, 0.4);
-      --frontend-stroke:  #22d3ee;
-      --backend-fill:     rgba(6, 78, 59, 0.4);
-      --backend-stroke:   #34d399;
-      --database-fill:    rgba(76, 29, 149, 0.4);
-      --database-stroke:  #a78bfa;
-      --cloud-fill:       rgba(120, 53, 15, 0.3);
-      --cloud-stroke:     #fbbf24;
-      --security-fill:    rgba(136, 19, 55, 0.4);
-      --security-stroke:  #fb7185;
-      --messagebus-fill:  rgba(251, 146, 60, 0.3);
-      --messagebus-stroke:#fb923c;
-      --external-fill:    rgba(30, 41, 59, 0.5);
-      --external-stroke:  #94a3b8;
-
-      --toolbar-bg:       rgba(15, 23, 42, 0.8);
-      --toolbar-border:   #334155;
-      --toolbar-text:     #e2e8f0;
-      --toolbar-hover:    rgba(15, 23, 42, 0.95);
-      --toolbar-menu-bg:  #0f172a;
+      --bg: #09090b;
+      --grid: #27272a;
+      --text: #fafafa;
+      --text-muted: #a1a1aa;
+      --text-dim: #71717a;
+      --text-faint: #71717a;
+      --panel: rgba(24, 24, 27, 0.92);
+      --panel-border: #3f3f46;
+      --lane-fill: rgba(39, 39, 42, 0.34);
+      --lane-stroke: #52525b;
+      --arrow: #71717a;
+      --arrow-emphasis: #38bdf8;
+      --mask: #18181b;
+      --frontend-fill: rgba(14, 116, 144, 0.28);
+      --frontend-stroke: #38bdf8;
+      --backend-fill: rgba(49, 46, 129, 0.24);
+      --backend-stroke: #818cf8;
+      --database-fill: rgba(88, 28, 135, 0.24);
+      --database-stroke: #c084fc;
+      --cloud-fill: rgba(161, 98, 7, 0.24);
+      --cloud-stroke: #fbbf24;
+      --security-fill: rgba(159, 18, 57, 0.24);
+      --security-stroke: #fb7185;
+      --messagebus-fill: rgba(43, 24, 47, 0.72);
+      --messagebus-stroke: #d8b4fe;
+      --external-fill: rgba(63, 63, 70, 0.46);
+      --external-stroke: #a1a1aa;
+      --toolbar-bg: rgba(24, 24, 27, 0.92);
+      --toolbar-border: #3f3f46;
+      --toolbar-text: #e4e4e7;
+      --toolbar-hover: #27272a;
+      --toolbar-menu-bg: #18181b;
     }
 .card-header {
       display: flex;
