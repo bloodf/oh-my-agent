@@ -1,6 +1,6 @@
 # Cutting a release
 
-Manual only. Nothing publishes because a tag landed on `main`. ADR-013: one verified tarball, then an explicit publish opt-in.
+Manual dispatch only. Nothing publishes because a tag landed on `main`. Dispatching **release** authorizes GitHub and npm publication after all verification gates pass, using the same verified tarball (ADR-013).
 
 ## Flow
 
@@ -8,8 +8,7 @@ Manual only. Nothing publishes because a tag landed on `main`. ADR-013: one veri
 2. Run **prepare-release** with the new semver (no `v`).
 3. Merge the `release/vX.Y.Z` PR.
 4. Tag `main`: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-5. Run **release** with tag `vX.Y.Z` and publish **unchecked**. Read the draft GitHub Release.
-6. Re-run **release** with the same tag and publish **checked**. Approve the `npm-publish` environment if it asks.
+5. Run **release** once with tag `vX.Y.Z`. After verification, the workflow creates the GitHub Release and automatically runs npm publication. Approve the `npm-publish` environment if it asks; no second dispatch or publish checkbox is needed.
 
 About 20 minutes of operator time plus the suite.
 
@@ -20,9 +19,9 @@ About 20 minutes of operator time plus the suite.
 | `ci.yml` | push/PR to `main` | Gates. Does not publish. |
 | `draft-changelog.yml` | manual | Drafts Unreleased from commits since the last tag. Unchecked = summary only. |
 | `prepare-release.yml` | manual | Bumps `package.json` + `omp.version`, cuts Unreleased, opens a PR. |
-| `release.yml` | manual | Verifies the tag, packs once, consumer-install smoke, GitHub Release, optional npm publish of that tarball. |
+| `release.yml` | manual | Verifies the tag, packs once, runs consumer-install smoke, creates the GitHub Release, and automatically publishes that tarball to npm. |
 
-E2E (`tests/consumer-install.test.ts`, console client) stays on the manual **release** workflow, not on every push.
+The release workflow includes the browser and consumer-install suites before publication; CI also runs these tests on pushes and pull requests.
 
 ## GitHub settings to add
 

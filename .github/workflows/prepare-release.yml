@@ -87,8 +87,8 @@ jobs:
 
           After merge:
           1. Tag the merge commit: \`git tag v${VERSION} && git push origin v${VERSION}\`
-          2. Run **release** with tag \`v${VERSION}\` and publish unchecked (verify).
-          3. Re-run **release** with publish checked.
+          2. Run **release** once with tag \`v${VERSION}\`; successful verification automatically publishes the verified tarball to npm.
+          3. Approve the \`npm-publish\` environment if prompted. No second dispatch is needed.
 
           Do not squash-merge if you already tagged a specific SHA. Merge commit or rebase is fine, then tag \`main\`.
           EOF

@@ -6,6 +6,10 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Changed
+
+- A single manual release dispatch now publishes the verified tarball to npm automatically after all gates pass, retaining the npm-publish environment approval and provenance. Removed the separate publish checkbox and second dispatch.
+
 ## [1.1.0] - 2026-09-05
 
 ### Added
