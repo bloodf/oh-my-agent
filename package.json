@@ -1,6 +1,6 @@
 {
 	"name": "@bloodf/oh-my-agent",
-	"version": "1.0.4",
+	"version": "1.1.0",
 	"type": "module",
 	"description": "OMP plugin for autonomous long-lived multi-agent collaboration",
 	"license": "MIT",
@@ -66,7 +66,7 @@
 	},
 	"omp": {
 		"name": "oh-my-agent",
-		"version": "1.0.4",
+		"version": "1.1.0",
 		"description": "OMP plugin for autonomous long-lived multi-agent collaboration",
 		"extensions": [
 			"src/extension/index.ts"
