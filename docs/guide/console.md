@@ -24,6 +24,16 @@ bun run storybook
 
 Open `http://127.0.0.1:6006/catalog.html`. The catalog renders real console components and states with isolated demo data; it does not connect to a daemon.
 
+## Appearance
+
+Use **Appearance** in the global toolbar to search the 59 color palettes from [shadcn.io](https://www.shadcn.io/theme). Select **Light**, **Dark**, or **System**; the choice is saved in this browser and does not change agent configuration or discard conversation drafts. System mode follows the device appearance. Fresh browsers default to Slack / Light.
+
+The workspace navigation keeps its palette identity across modes while conversation surfaces switch. Color data is bundled locally: changing themes makes no external requests. Palettes come from the site's public light/dark previews (59 entries on 2026-09-05); foreground corrections preserve readable controls and metadata where source colors lack contrast. Fonts, spacing, and corner sizes remain consistent.
+
+The bundled default retains the existing high-contrast checks. The full catalog is checked at WCAG AA for body text, primary controls, navigation, and metadata on background/muted/card/popover surfaces. Metadata corrections aim for AAA while preserving source colors; Retro Arcade dark and Summer dark remain AA rather than AAA on their most limiting surfaces.
+
+Global search opens the existing conversation/action switcher. The narrow desktop app bar provides conversations, agent controls, and new chats; the adjacent rail separates collapsible OMP chats, channels, and direct messages. Mobile retains the navigation drawer.
+
 ## Open it
 
 From the OMP TUI after install:

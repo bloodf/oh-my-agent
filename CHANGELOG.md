@@ -12,6 +12,7 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 - Web messaging gains persistent thread links, distinct agent/bot creation, canonical channel and agent workspaces, explicit native Start, and scheduled-bot activation without daemon restart.
 - Browser-selected, dropped, and pasted files now stream into private temporary storage with progress, cancellation, owned-only deletion, and 24-hour retention. Local original files remain no-copy path references.
 - Repository branding, product screenshots, and architecture illustrations now reflect the conversation workspace rather than the retired console imagery.
+- Web workspace now uses a Slack-inspired global search bar, compact app navigation, separate collapsible chats/channels/DMs, and chronological message dividers. Appearance offers 59 shadcn.io-derived color palettes with persistent light, dark, and system modes.
 
 ### Fixed
 

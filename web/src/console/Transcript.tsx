@@ -7,7 +7,7 @@
  * Performance: One linear render over visible messages; scroll restoration avoids forced bottom jumps.
  */
 import { MessageCircle, RefreshCw, Unplug } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ConsoleStateKind, RoomMessage } from "@/lib/types";
@@ -96,7 +96,7 @@ export function Transcript({
       aria-live="polite"
       tabIndex={0}
       onScroll={captureScroll}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 py-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-3 sm:py-3"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:py-3"
     >
       {showState ? (
         <section
@@ -182,16 +182,31 @@ export function Transcript({
       ) : (
         <div id="state" role="status" hidden />
       )}
-      {roots.map((message, index) => (
-        <Message
-          key={message.id}
-          message={message}
-          grouped={index > 0 && roots[index - 1]?.author === message.author}
-          onThread={onThread}
-          onReact={onReact}
-          interactive={interactive}
-        />
-      ))}
+      {roots.map((message, index) => {
+        const previous = roots[index - 1];
+        const date = new Date(message.createdAt);
+        const sameDay = previous !== undefined && new Date(previous.createdAt).toDateString() === date.toDateString();
+        return (
+          <Fragment key={message.id}>
+            {!sameDay && (
+              <div className="my-3 flex items-center gap-3 px-4" aria-label="Message date">
+                <span className="h-px flex-1 bg-border" />
+                <time dateTime={date.toISOString()} className="rounded-full border bg-background px-3 py-1 text-xs font-medium">
+                  {date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+                </time>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            )}
+            <Message
+              message={message}
+              grouped={sameDay && previous?.author === message.author}
+              onThread={onThread}
+              onReact={onReact}
+              interactive={interactive}
+            />
+          </Fragment>
+        );
+      })}
     </div>
   );
 }

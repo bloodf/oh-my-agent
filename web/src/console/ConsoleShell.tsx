@@ -52,6 +52,7 @@ import { AuthScreen } from "./AuthScreen";
 import { FilePicker } from "./FilePicker";
 import { PlansView } from "./PlansView";
 import { ChangesView } from "./ChangesView";
+import { WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
 
 /** Conversation-first frame. Native chats and shared rooms have separate lifecycles. */
 export function ConsoleShell() {
@@ -222,18 +223,24 @@ export function ConsoleShell() {
       onNewRoom={() => setNewRoom(true)}
       onNewAgent={() => setNewAgent(true)}
       onNewBot={() => { setMobileNav(false); setNewBot(true); }}
-      onSearch={() => setSearch(true)}
       connected={c.connected}
     />
   );
   return (
     <>
     {c.authRequired && <AuthScreen onAuthenticate={c.authenticate} error={c.authError} />}
-    <div hidden={c.authRequired} inert={c.authRequired} className="console-shell flex h-svh overflow-hidden bg-background text-foreground">
+    <div hidden={c.authRequired} inert={c.authRequired} className="console-shell flex h-svh flex-col overflow-hidden bg-background text-foreground">
       {!c.authRequired && <section id="operator-auth" hidden aria-label="Operator authentication" />}
       <a href="#composer-input" className="skip-link">
         Skip to composer
       </a>
+      <WorkspaceToolbar onSearch={() => setSearch(true)} />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <WorkspaceNavigation
+        onConversations={() => document.querySelector<HTMLButtonElement>("#sidebar button")?.focus()}
+        onAgents={() => setAgentsOpen(true)}
+        onNewChat={() => setNewChat(true)}
+      />
       <div className="hidden border-r md:block">{rail}</div>
       <main id="main" hidden={c.authRequired} className="flex min-w-0 flex-1 flex-col">
         <header
@@ -460,8 +467,9 @@ export function ConsoleShell() {
           )}
         </div>
       </main>
+      </div>
       <Sheet open={mobileNav} onOpenChange={setMobileNav}>
-        <SheetContent side="left" className="w-[260px] p-0">
+        <SheetContent side="left" className="workspace-drawer w-[260px] p-0">
           <SheetTitle className="sr-only">Conversations</SheetTitle>
           <SheetDescription className="sr-only">
             Switch rooms and chats

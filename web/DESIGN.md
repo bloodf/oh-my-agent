@@ -12,7 +12,7 @@ The operator explicitly permits filesystem access matching OMP's OS identity acr
 
 ## Information architecture
 
-- Compact 260px Slack-like rail: New OMP chat, Chats, Channels and DMs, agent and automated-bot creation. Unread state remains visible; Cmd/Ctrl+K searches destinations and actions.
+- Slack-like global search/appearance toolbar and narrow desktop app bar beside a 260px rail with separate collapsible OMP chats, Channels, and Direct messages. Creation actions remain nearby; Cmd/Ctrl+K searches destinations and actions.
 - Main conversation header: destination and effective working directory, model selector for independent chats, channel workspace editing, contextual agent actions. Conversation / Plans / Changes views preserve destination context.
 - Transcript: left-aligned authored messages, small avatars, grouped consecutive messages, readable Markdown/code, reactions, thread actions available on hover and focus.
 - Composer: full-width growing input, attachment tray, separate action row. Enter sends, Shift+Enter adds a line. Failed sends and uploads preserve draft. Device upload, local-path reference, drop, and paste remain visibly distinct.
@@ -25,7 +25,7 @@ The operator explicitly permits filesystem access matching OMP's OS identity acr
 
 ## Visual system
 
-Slack-derived application hierarchy: deep aubergine navigation rail, white conversation canvas, compact channel header, dense authored transcript, and bordered bottom composer. Neutral OKLCH surfaces and one plum accent; amber remains reserved for @you. System sans and system monospace; no font assets. Body 14px, metadata 11–12px, spacing based on 4/8px, compact controls with accessible targets, modest radii. High-contrast text, visible focus rings, reduced-motion support. No glass, gradient mesh, uppercase eyebrows, decorative gauges, or fake chrome.
+Slack-derived application hierarchy, referenced against [sanidhyy/slack-clone](https://github.com/sanidhyy/slack-clone): palette-colored workspace bar/navigation, bright default conversation canvas, compact context header, date dividers, square identity avatars, and bordered bottom composer. Appearance offers 59 color-only palettes from [shadcn.io's public previews](https://www.shadcn.io/theme), captured on 2026-09-05 in `web/src/lib/theme-palettes.json`. Registry downloads require authentication; no downloaded component code is used. The catalog currently exposes 59 entries, not 69. Light/dark/system mode and palette are browser-local preferences; startup applies them before React rendering. Workspace identity uses each palette's light primary across both modes, while content uses the selected mode. Foregrounds are corrected only where needed for reading contrast. System sans and monospace, 14px body, 11–12px metadata, 4/8px spacing, accessible touch targets, modest radii, visible focus rings, and reduced motion stay consistent across palettes. No glass, decorative gauges, fake Slack actions, or runtime theme downloads.
 
 ## States and verification
 

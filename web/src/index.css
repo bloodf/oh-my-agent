@@ -87,8 +87,8 @@
   --text-primary: var(--foreground);
   --text-muted: var(--muted-foreground);
   --success: oklch(0.72 0.17 150);
-  --role-agent: oklch(0.8 0.1 230);
-  --role-you: oklch(0.86 0.12 85);
+  --role-agent: var(--foreground);
+  --role-you: oklch(0.45 0.10 65);
   --role-system: var(--muted-foreground);
 }
 
@@ -130,10 +130,34 @@
   --text-primary: var(--foreground);
   --text-muted: var(--muted-foreground);
   --success: oklch(0.72 0.17 150);
-  --role-agent: oklch(0.8 0.1 230);
+  --role-agent: var(--foreground);
   --role-you: oklch(0.86 0.12 85);
   --role-system: var(--muted-foreground);
 }
+
+:root {
+  --workspace-bar: oklch(0.37 0.14 323.23);
+  --workspace-foreground: oklch(1 0 0);
+  --workspace-sidebar: var(--workspace-bar);
+  --workspace-accent: var(--workspace-foreground);
+  --workspace-accent-foreground: var(--workspace-bar);
+  --workspace-border: color-mix(in oklch, var(--workspace-foreground) 18%, transparent);
+}
+
+
+.workspace-drawer [data-slot="sheet-close"] {
+  color: var(--workspace-foreground);
+  min-width: 44px;
+  min-height: 44px;
+  top: 2px;
+}
+
+.workspace-drawer [data-slot="sheet-close"]:hover {
+  background: var(--workspace-accent);
+  color: var(--workspace-accent-foreground);
+}
+
+
 
 @layer base {
   * {
@@ -163,6 +187,12 @@
   :focus-visible {
     outline: 2px solid var(--ring) !important;
     outline-offset: 3px !important;
+  }
+  .workspace-rail :focus-visible,
+  [aria-label="Global workspace controls"] :focus-visible,
+  nav[aria-label="Workspace"] :focus-visible,
+  .workspace-drawer [data-slot="sheet-close"]:focus-visible {
+    outline-color: var(--workspace-foreground) !important;
   }
   button,
   input,
@@ -208,7 +238,7 @@
     @apply inline-flex max-w-full items-center gap-2 rounded-md border bg-background py-1 pl-2 pr-1 text-xs shadow-xs;
   }
   .message {
-    @apply rounded-md;
+    @apply rounded-none;
   }
   .message:hover,
   .message:focus-within {
