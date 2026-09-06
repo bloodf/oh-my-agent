@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, Folder, Menu, Plus, Square, ChevronDown } from "lucide-react";
+import { Bot, Folder, Menu, Plus, Square, ChevronDown, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -32,7 +32,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { readToken } from "@/lib/api";
+import { deleteManagedAttachment, uploadAttachment } from "@/lib/attachments";
 import type { RoomMessage } from "@/lib/types";
 import type {
   WebChatInfo,
@@ -52,6 +52,7 @@ import { AuthScreen } from "./AuthScreen";
 import { FilePicker } from "./FilePicker";
 import { PlansView } from "./PlansView";
 import { ChangesView } from "./ChangesView";
+import { WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
 
 /** Conversation-first frame. Native chats and shared rooms have separate lifecycles. */
 export function ConsoleShell() {
@@ -67,17 +68,22 @@ export function ConsoleShell() {
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [newRoom, setNewRoom] = useState(false);
   const [newAgent, setNewAgent] = useState(false);
+  const [newBot, setNewBot] = useState(false);
+  const [roomSettings, setRoomSettings] = useState(false);
   const [newChat, setNewChat] = useState(false);
   const [search, setSearch] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [thread, setThread] = useState<number | null>(null);
-  const [cwd, setCwd] = useState("");
+  const [chatCwd, setChatCwd] = useState("");
+  const [changesCwd, setChangesCwd] = useState("");
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
-  const [picker, setPicker] = useState<"attachment" | "workspace" | null>(null);
+  const [picker, setPicker] = useState<{ kind: "attachment" | "workspace"; initial: string } | null>(null);
   const pickResolve = useRef<((paths: string[]) => void) | null>(null);
+  const workspaceResolve = useRef<((path: string) => void) | null>(null);
   const selectedChat = chats.find((chat) => chat.id === chatId);
+  const selectedRoom = c.channels.find((room) => room.id === c.currentRoom);
   const selected = chatId ?? c.currentRoom;
   useEffect(() => {
     if (authRequired || !connected) return;
@@ -146,24 +152,13 @@ export function ConsoleShell() {
   const pickFiles = () =>
     new Promise<string[]>((resolve) => {
       pickResolve.current = resolve;
-      setPicker("attachment");
+      setPicker({ kind: "attachment", initial: selectedChat?.cwd ?? selectedRoom?.workspace ?? "" });
     });
-  const pasteImage = async (file: File) => {
-    const { token } = readToken();
-    const data = new FormData();
-    data.set("image", file);
-    const response = await fetch("/api/clipboard", {
-      method: "POST",
-      headers: { "X-Operator-Token": token },
-      body: data,
+  const pickWorkspace = (initial: string) =>
+    new Promise<string>((resolve) => {
+      workspaceResolve.current = resolve;
+      setPicker({ kind: "workspace", initial });
     });
-    const result = await response.json();
-    if (!response.ok)
-      throw new Error(
-        result.error?.message ?? "Clipboard image could not be saved",
-      );
-    return String(result.path);
-  };
   const send = async (
     body: string,
     paths: string[],
@@ -227,24 +222,31 @@ export function ConsoleShell() {
       }}
       onNewRoom={() => setNewRoom(true)}
       onNewAgent={() => setNewAgent(true)}
-      onSearch={() => setSearch(true)}
+      onNewBot={() => { setMobileNav(false); setNewBot(true); }}
       connected={c.connected}
     />
   );
   return (
     <>
     {c.authRequired && <AuthScreen onAuthenticate={c.authenticate} error={c.authError} />}
-    <div hidden={c.authRequired} inert={c.authRequired} className="console-shell flex h-svh overflow-hidden bg-background text-foreground">
+    <div hidden={c.authRequired} inert={c.authRequired} className="console-shell flex h-svh flex-col overflow-hidden bg-background text-foreground">
       {!c.authRequired && <section id="operator-auth" hidden aria-label="Operator authentication" />}
       <a href="#composer-input" className="skip-link">
         Skip to composer
       </a>
+      <WorkspaceToolbar onSearch={() => setSearch(true)} />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <WorkspaceNavigation
+        onConversations={() => document.querySelector<HTMLButtonElement>("#sidebar button")?.focus()}
+        onAgents={() => setAgentsOpen(true)}
+        onNewChat={() => setNewChat(true)}
+      />
       <div className="hidden border-r md:block">{rail}</div>
       <main id="main" hidden={c.authRequired} className="flex min-w-0 flex-1 flex-col">
         <header
           id="current-channel"
           role="banner"
-          className="flex min-h-16 items-center gap-3 border-b px-4 md:px-6"
+          className="channel-header flex min-h-14 items-center gap-2 border-b px-3 sm:px-5"
         >
           <Button
             className="md:hidden"
@@ -256,11 +258,11 @@ export function ConsoleShell() {
             <Menu />
           </Button>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold">
+            <h1 className="truncate text-base font-bold">
               {selectedChat?.title ?? c.currentRoom ?? "Your workspace"}
             </h1>
-            <p className="truncate text-xs text-muted-foreground">
-              {selectedChat?.cwd ?? "A shared space for you and your agents"}
+            <p className="truncate text-[11px] text-muted-foreground">
+              {selectedChat ? `Independent OMP · ${selectedChat.cwd}` : selectedRoom?.workspace ? `Working directory · ${selectedRoom.workspace}` : c.currentRoom ? "Shared channel · daemon working directory" : "Select a conversation"}
             </p>
           </div>
           {chatId ? (
@@ -295,6 +297,8 @@ export function ConsoleShell() {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
+            <div className="flex items-center gap-1">
+            {selectedRoom?.kind === "channel" && <Button type="button" variant="ghost" size="icon-sm" aria-label="Edit channel workspace" title="Edit channel workspace" onClick={() => setRoomSettings(true)}><Settings2 /></Button>}
             <Button
               id="open-agents"
               variant="outline"
@@ -305,6 +309,7 @@ export function ConsoleShell() {
               <span className="hidden sm:inline">Agents</span>
               <Badge variant="secondary">{c.agents.length}</Badge>
             </Button>
+            </div>
           )}
         </header>
         <div className="flex items-center justify-between border-b px-4 py-2 md:px-6">
@@ -377,8 +382,9 @@ export function ConsoleShell() {
                   onSend={send}
                   disabled={!selected}
                   supportsAttachments={fullControl}
-                  onPickFiles={pickFiles}
-                  onPasteImage={pasteImage}
+                  onPickFiles={fullControl ? pickFiles : undefined}
+                  onUpload={fullControl ? (file, onProgress) => uploadAttachment(file, { onProgress }) : undefined}
+                  onDeleteUpload={fullControl ? deleteManagedAttachment : undefined}
                 />
               </div>
               {!chatId && (
@@ -388,8 +394,9 @@ export function ConsoleShell() {
                   onClose={() => setThread(null)}
                   onReact={c.react}
                   onSend={(body, paths) => send(body, paths, thread)}
-                  onPickFiles={pickFiles}
-                  onPasteImage={pasteImage}
+                  onPickFiles={fullControl ? pickFiles : undefined}
+                  onUpload={fullControl ? (file, onProgress) => uploadAttachment(file, { onProgress }) : undefined}
+                  onDeleteUpload={fullControl ? deleteManagedAttachment : undefined}
                 />
               )}
             </>
@@ -436,32 +443,33 @@ export function ConsoleShell() {
                 <div className="flex gap-2 border-b p-3">
                   <Input
                     aria-label="Repository workspace"
-                    value={cwd}
-                    onChange={(e) => setCwd(e.target.value)}
+                    value={changesCwd}
+                    onChange={(e) => setChangesCwd(e.target.value)}
                     placeholder="Absolute workspace path"
                   />
                   <Button
                     variant="outline"
-                    onClick={() => setPicker("workspace")}
+                    onClick={() => void pickWorkspace(changesCwd).then(setChangesCwd)}
                   >
                     <Folder />
                     Browse
                   </Button>
                 </div>
               )}
-              {selectedChat?.cwd || cwd ? (
-                <ChangesView cwd={selectedChat?.cwd ?? cwd} call={c.call} />
+              {selectedChat?.cwd || changesCwd || selectedRoom?.workspace ? (
+                <ChangesView cwd={selectedChat?.cwd ?? (changesCwd || selectedRoom?.workspace || "")} call={c.call} />
               ) : (
                 <p className="p-6 text-sm text-muted-foreground">
-                  Choose a workspace to inspect its real Git changes.
+                  Choose a working directory to inspect its real Git changes.
                 </p>
               )}
             </div>
           )}
         </div>
       </main>
+      </div>
       <Sheet open={mobileNav} onOpenChange={setMobileNav}>
-        <SheetContent side="left" className="w-[260px] p-0">
+        <SheetContent side="left" className="workspace-drawer w-[260px] p-0">
           <SheetTitle className="sr-only">Conversations</SheetTitle>
           <SheetDescription className="sr-only">
             Switch rooms and chats
@@ -477,6 +485,7 @@ export function ConsoleShell() {
         call={c.call}
         onRefresh={c.refreshAgents}
         onNotice={c.showNotice}
+        fullControl={fullControl}
         onDirectMessage={async (name) => {
           const room = `@${name}`;
           await c.call("/api/channels", { method: "POST", body: { id: room } });
@@ -491,6 +500,13 @@ export function ConsoleShell() {
           if (stopped) c.showNotice("This agent is stopped. Messages wait here until it starts.");
         }}
       />
+      <Dialog open={roomSettings} onOpenChange={setRoomSettings}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><DialogTitle>{c.currentRoom} working directory</DialogTitle><DialogDescription>Channel context for agents without an explicit workspace. This is metadata, not a sandbox boundary.</DialogDescription></DialogHeader>
+          <div className="flex gap-2"><Input readOnly value={selectedRoom?.workspace ?? ""} placeholder="Daemon working directory" aria-label="Channel working directory" /><Button type="button" variant="outline" onClick={() => void pickWorkspace(selectedRoom?.workspace ?? "").then((workspace) => c.call(`/api/channels/${encodeURIComponent(c.currentRoom ?? "")}`, { method: "PATCH", body: { workspace } }).then(() => c.refreshChannels()))}><Folder />Choose</Button></div>
+          {selectedRoom?.workspace && <Button type="button" variant="ghost" onClick={() => void c.call(`/api/channels/${encodeURIComponent(c.currentRoom ?? "")}`, { method: "PATCH", body: { workspace: null } }).then(() => c.refreshChannels())}>Use daemon working directory</Button>}
+        </DialogContent>
+      </Dialog>
       <CreateChannelDialog
         open={newRoom}
         onOpenChange={setNewRoom}
@@ -499,15 +515,10 @@ export function ConsoleShell() {
           void c.refreshChannels();
           selectRoom(id);
         }}
+        onPickWorkspace={pickWorkspace}
       />
-      <CreateAgentDialog
-        open={newAgent}
-        onOpenChange={setNewAgent}
-        call={c.call}
-        onCreated={() => {
-          void c.refreshAgents();
-        }}
-      />
+      <CreateAgentDialog key={`agent:${newAgent}`} open={newAgent} onOpenChange={setNewAgent} call={c.call} initialKind="agent" onPickWorkspace={pickWorkspace} onCreated={() => { void c.refreshAgents(); }} />
+      <CreateAgentDialog key={`bot:${newBot}`} open={newBot} onOpenChange={setNewBot} call={c.call} initialKind="bot" onPickWorkspace={pickWorkspace} onCreated={() => { void c.refreshAgents(); }} />
       <Dialog open={newChat} onOpenChange={setNewChat}>
         <DialogContent>
           <DialogHeader>
@@ -526,7 +537,7 @@ export function ConsoleShell() {
               void c
                 .call("/api/chats", {
                   method: "POST",
-                  body: { cwd, title: title || undefined },
+                  body: { cwd: chatCwd, title: title || undefined },
                 })
                 .then((result) => {
                   const chat = result.chat as WebChatInfo;
@@ -542,15 +553,16 @@ export function ConsoleShell() {
             <div className="flex gap-2">
               <Input
                 id="chat-workspace"
-                value={cwd}
-                onChange={(e) => setCwd(e.target.value)}
+                value={chatCwd}
+                onChange={(e) => setChatCwd(e.target.value)}
                 placeholder="/Users/you/project"
                 required
               />
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setPicker("workspace")}
+                aria-label="Browse chat workspace"
+                onClick={() => void pickWorkspace(chatCwd).then(setChatCwd)}
               >
                 <Folder />
               </Button>
@@ -598,7 +610,7 @@ export function ConsoleShell() {
                     setNewChat(true);
                   }}
                 >
-                  New chat
+                  New OMP chat
                 </CommandItem>
                 <CommandItem
                   onSelect={() => {
@@ -606,7 +618,13 @@ export function ConsoleShell() {
                     setNewRoom(true);
                   }}
                 >
-                  Create room
+                  Create channel
+                </CommandItem>
+                <CommandItem onSelect={() => { setSearch(false); setNewAgent(true); }}>
+                  Create agent
+                </CommandItem>
+                <CommandItem onSelect={() => { setSearch(false); setNewBot(true); }}>
+                  Create automated bot
                 </CommandItem>
                 <CommandItem
                   onSelect={() => {
@@ -645,20 +663,24 @@ export function ConsoleShell() {
           </Command>
         </DialogContent>
       </Dialog>
-      <FilePicker key={`${picker}:${selectedChat?.cwd ?? cwd}`} open={picker !== null}
+      <FilePicker key={`${picker?.kind}:${picker?.initial}`} open={picker !== null}
       onOpenChange={(open) => {
         if (!open) {
           setPicker(null);
           pickResolve.current?.([]);
           pickResolve.current = null;
+          workspaceResolve.current?.(picker?.initial ?? "");
+          workspaceResolve.current = null;
         }
       }}
-      initialPath={selectedChat?.cwd ?? cwd}
+      initialPath={picker?.initial ?? ""}
       call={c.call}
-      directoryOnly={picker === "workspace"}
+      directoryOnly={picker?.kind === "workspace"}
       onPick={(path) => {
-        if (picker === "workspace") setCwd(path);
-        else {
+        if (picker?.kind === "workspace") {
+          workspaceResolve.current?.(path);
+          workspaceResolve.current = null;
+        } else {
           pickResolve.current?.([path]);
           pickResolve.current = null;
         }

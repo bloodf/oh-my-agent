@@ -29,7 +29,9 @@ import {
 	mkdir,
 	readdir,
 	readFile,
+	realpath,
 	rename,
+	stat,
 	unlink,
 	writeFile,
 } from "node:fs/promises";
@@ -230,6 +232,24 @@ export function createPeerStore(
 		},
 		async write(fields, options: { overwrite?: boolean } = {}) {
 			assertSafePeerName(fields.name);
+			let canonicalWorkspace: string | undefined;
+			if (fields.workspace !== undefined && !fields.workspace.startsWith(sep)) {
+				throw new Error(
+					`INVALID_WORKSPACE: workspace must be absolute: ${fields.workspace}`,
+				);
+			}
+			if (fields.workspace !== undefined) {
+				try {
+					canonicalWorkspace = await realpath(fields.workspace);
+					if (!(await stat(canonicalWorkspace)).isDirectory()) {
+						throw new Error("not directory");
+					}
+				} catch {
+					throw new Error(
+						`INVALID_WORKSPACE: workspace is not a real directory: ${fields.workspace}`,
+					);
+				}
+			}
 			const path = join(roots.project, `${fields.name}.md`);
 			// Defense in depth: even a validated name must resolve inside the
 			// store root it was joined under.
@@ -246,7 +266,12 @@ export function createPeerStore(
 			if (options.overwrite !== true && existsSync(path)) {
 				throw new Error(`PEER_EXISTS: ${fields.name}`);
 			}
-			const content = renderPeerDefinition(fields);
+			const content = renderPeerDefinition({
+				...fields,
+				...(canonicalWorkspace === undefined
+					? {}
+					: { workspace: canonicalWorkspace }),
+			});
 			// Parse before writing, not after: a file the daemon would refuse
 			// on its next boot must never reach the store, and the operator
 			// gets the parser's own words while the form is still open.

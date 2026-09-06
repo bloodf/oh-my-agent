@@ -96,6 +96,33 @@ describe("RoomStore.createRoom", () => {
 			}
 		});
 	});
+
+	test("workspace persists across reopen and can be cleared", async () => {
+		await withTempDb(async (path) => {
+			const first = await RoomStore.open(path);
+			await first.createRoom({
+				id: "#workspace",
+				kind: "channel",
+				workspace: "/tmp/project",
+			});
+			await first.close();
+
+			const reopened = await RoomStore.open(path);
+			try {
+				expect(await reopened.listRooms()).toContainEqual({
+					id: "#workspace",
+					kind: "channel",
+					workspace: "/tmp/project",
+				});
+				expect(await reopened.setWorkspace("#workspace", null)).toEqual({
+					id: "#workspace",
+					kind: "channel",
+				});
+			} finally {
+				await reopened.close();
+			}
+		});
+	});
 });
 
 // ── RoomStore.post ────────────────────────────────────────────────────────────

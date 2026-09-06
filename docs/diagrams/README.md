@@ -17,15 +17,15 @@ Embed the `.svg` with alt text. Do not paste mermaid for these maps.
 
 ## Runtime
 
-![oh-my-agent runtime: TUI, CLI, and browser console reach the daemon over a loopback control socket; the daemon owns workers, rooms, SQLite, and the credential gateway](runtime.svg)
+![Conversation workspace runtime: browser uses loopback HTTP and WebSocket; TUI and CLI use the Unix socket; native chats use temporary storage while agents and rooms retain durable state](runtime.svg)
 
 ## First run
 
-![First run workflow: omp install, TUI load, daemon boot, status, agent create, then spawn](first-run.svg)
+![First run: install plugin, start OMP, daemon autostarts, open console, create an agent or bot, explicitly Start](first-run.svg)
 
 ## Mention wakeup
 
-![Mention wakeup sequence: a console post mentions a parked peer, the supervisor persists and prompts, the worker replies, the live feed updates](mention-wakeup.svg)
+![Mention wakeup: browser posts through Console API, room store persists, supervisor prompts agent, WebSocket updates conversation](mention-wakeup.svg)
 
 ## Worker lifecycle
 
@@ -52,7 +52,7 @@ TMP=/tmp/oma-archify
 
 node "$ARCHIFY" validate architecture "$DIAGRAMS/runtime.architecture.json" --quality showcase --json
 node "$ARCHIFY" render architecture "$DIAGRAMS/runtime.architecture.json" "$TMP/runtime.html" --quality showcase
-node "$TMP/extract-svg.mjs" "$TMP/runtime.html" "$DIAGRAMS/runtime.svg"
+node scripts/export-diagram-svg.mjs "$TMP/runtime.html" "$DIAGRAMS/runtime.svg"
 ```
 
 Repeat with the matching Archify type:
@@ -66,7 +66,7 @@ Repeat with the matching Archify type:
 | `credential-path.dataflow.json` | `dataflow` | `credential-path.html` | `credential-path.svg` |
 | `isolation.architecture.json` | `architecture` | `isolation.html` | `isolation.svg` |
 
-`extract-svg.mjs` pulls the diagram SVG out of the HTML and inlines dark-theme CSS so GitHub markdown can display it. Keep the HTML under `/tmp`. Never write `.html` into the repo.
+`scripts/export-diagram-svg.mjs` extracts the diagram SVG and inlines the neutral dark UI palette and typography for GitHub Markdown. Keep intermediate HTML outside tracked documentation. The exported SVG, not the surrounding Archify viewer chrome, is the repository deliverable.
 
 ## Rules
 

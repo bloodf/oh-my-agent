@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bot, Users } from "lucide-react";
+import { Bot, Menu, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import type { AttachmentUpload } from "@/lib/attachments";
 import type {
   AgentInfo,
   ConsoleStateKind,
@@ -16,11 +19,12 @@ import { CreateChannelDialog, type ConsoleCall } from "./CreateChannelDialog";
 import { PlansView } from "./PlansView";
 import { ThreadPanel } from "./ThreadPanel";
 import { Transcript } from "./Transcript";
+import { WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
 
 const NOW = Date.UTC(2026, 8, 4, 14, 30);
 const ROOMS: RoomInfo[] = [
-  { id: "#research", kind: "channel", name: "research" },
-  { id: "#operations", kind: "channel", name: "operations" },
+  { id: "#research", kind: "channel", name: "research", workspace: "/workspace/oh-my-agent" },
+  { id: "#operations", kind: "channel", name: "operations", workspace: "/workspace/operations" },
   { id: "@reviewer", kind: "dm", name: "reviewer" },
 ];
 const AGENTS: AgentInfo[] = [
@@ -37,10 +41,11 @@ const AGENTS: AgentInfo[] = [
     rooms: ["#research"],
   },
   {
-    name: "release",
+    name: "release-bot",
     state: "stopped",
     account: "openai",
     rooms: ["#operations"],
+    automation: { wakeRooms: true, schedules: ["0 9 * * 1-5"] },
   },
 ];
 const MESSAGES: RoomMessage[] = [
@@ -202,116 +207,81 @@ function StoryFrame({
   messages = MESSAGES,
   threadOpen = false,
   connected = true,
+  initialView = "conversation",
 }: {
   status?: ConsoleStateKind;
   messages?: RoomMessage[];
   threadOpen?: boolean;
   connected?: boolean;
+  initialView?: "conversation" | "plans" | "changes";
 }) {
   const [room, setRoom] = useState("#research");
   const [thread, setThread] = useState(threadOpen ? 101 : null);
+  const [view, setView] = useState(initialView);
+  const [mobileNav, setMobileNav] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [channelOpen, setChannelOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [botOpen, setBotOpen] = useState(false);
   const call = useFixtureCall();
+  const rail = (
+    <ChannelRail
+      rooms={ROOMS}
+      chats={[{ id: "chat-1", title: "Resolver investigation", cwd: "/workspace/oh-my-agent" }]}
+      current={room}
+      unread={new Set(["#operations"])}
+      onSelectRoom={(id) => { setRoom(id); setMobileNav(false); }}
+      onSelectChat={noop}
+      onNewChat={noop}
+      onNewRoom={() => setChannelOpen(true)}
+      onNewAgent={() => setAgentOpen(true)}
+      onNewBot={() => setBotOpen(true)}
+      onClose={() => setMobileNav(false)}
+      connected={connected}
+    />
+  );
   return (
-    <div className="flex h-svh overflow-hidden bg-background text-foreground">
-      <div className="hidden border-r md:block">
-        <ChannelRail
-          rooms={ROOMS}
-          chats={[
-            {
-              id: "chat-1",
-              title: "Resolver investigation",
-              cwd: "/workspace/oh-my-agent",
-            },
-          ]}
-          current={room}
-          unread={new Set(["#operations"])}
-          onSelectRoom={setRoom}
-          onSelectChat={noop}
-          onNewChat={noop}
-          onNewRoom={() => setChannelOpen(true)}
-          onNewAgent={() => setAgentOpen(true)}
-          onSearch={noop}
-          connected={connected}
-        />
+    <div className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
+      <WorkspaceToolbar onSearch={noop} />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <WorkspaceNavigation onConversations={noop} onAgents={() => setAgentsOpen(true)} onNewChat={noop} />
+        <div className="hidden border-r md:block">{rail}</div>
+        <main id="main" className="flex min-w-0 flex-1 flex-col">
+          <header id="current-channel" role="banner" className="flex min-h-14 items-center gap-3 border-b px-3 md:px-5">
+            <Button type="button" className="md:hidden" variant="ghost" size="icon-sm" aria-label="Open navigation" onClick={() => setMobileNav(true)}><Menu /></Button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-base font-bold">{room}</h1>
+              <p className="truncate text-[11px] text-muted-foreground">Shared room · 2 active agents</p>
+            </div>
+            <Button id="open-agents" variant="outline" size="sm" onClick={() => setAgentsOpen(true)}><Users /><span className="hidden sm:inline">Agents</span></Button>
+          </header>
+          <div className="border-b px-4 py-2 md:px-6">
+            <Tabs value={view} onValueChange={(next) => setView(next as typeof view)}>
+              <TabsList variant="line">
+                <TabsTrigger value="conversation">Conversation</TabsTrigger>
+                <TabsTrigger value="plans">Plans</TabsTrigger>
+                <TabsTrigger value="changes">Changes</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+          <div className="flex min-h-0 flex-1">
+            {view === "conversation" ? <>
+              <div className="flex min-w-0 flex-1 flex-col">
+                <Transcript messages={messages} status={status} statusDetail={status === "offline" ? "Connection to the daemon was lost." : status === "load-failure" ? "The room history request failed." : ""} currentRoom={room} onThread={setThread} onReact={noopAsync} onRetry={noopAsync} />
+                <Composer roomKey={room} onSend={noopAsync} onPickFiles={() => Promise.resolve(["/workspace/notes.txt"])} />
+              </div>
+              <ThreadPanel root={messages.find((message) => message.id === thread) ?? null} messages={messages} onClose={() => setThread(null)} onReact={noopAsync} onSend={noopAsync} />
+            </> : view === "plans" ? <PlansView room={room} call={call} /> : <ChangesView cwd="/workspace/oh-my-agent" call={call} />}
+          </div>
+        </main>
       </div>
-      <main id="main" className="flex min-w-0 flex-1 flex-col">
-        <header
-          id="current-channel"
-          role="banner"
-          className="flex min-h-16 items-center gap-3 border-b px-4 md:px-6"
-        >
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold">{room}</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              Shared room · 2 active agents
-            </p>
-          </div>
-          <Button
-            id="open-agents"
-            variant="outline"
-            size="sm"
-            onClick={() => setAgentsOpen(true)}
-          >
-            <Users />
-            Agents
-          </Button>
-        </header>
-        <div className="flex min-h-0 flex-1">
-          <div className="flex min-w-0 flex-1 flex-col">
-            <Transcript
-              messages={messages}
-              status={status}
-              statusDetail={
-                status === "offline"
-                  ? "Connection to the daemon was lost."
-                  : status === "load-failure"
-                    ? "The room history request failed."
-                    : ""
-              }
-              currentRoom={room}
-              onThread={setThread}
-              onReact={noopAsync}
-              onRetry={noopAsync}
-            />
-            <Composer
-              roomKey={room}
-              onSend={noopAsync}
-              onPickFiles={() => Promise.resolve(["/workspace/notes.txt"])}
-            />
-          </div>
-          <ThreadPanel
-            root={messages.find((message) => message.id === thread) ?? null}
-            messages={messages}
-            onClose={() => setThread(null)}
-            onReact={noopAsync}
-            onSend={noopAsync}
-          />
-        </div>
-      </main>
-      <AgentPanel
-        open={agentsOpen}
-        onOpenChange={setAgentsOpen}
-        agents={AGENTS}
-        currentRoom={room}
-        call={call}
-        onRefresh={noopAsync}
-        onNotice={noop}
-      />
-      <CreateChannelDialog
-        open={channelOpen}
-        onOpenChange={setChannelOpen}
-        call={call}
-        onCreated={setRoom}
-      />
-      <CreateAgentDialog
-        open={agentOpen}
-        onOpenChange={setAgentOpen}
-        call={call}
-        onCreated={noop}
-      />
+      <Sheet open={mobileNav} onOpenChange={setMobileNav}>
+        <SheetContent side="left" className="w-[260px] p-0"><SheetTitle className="sr-only">Conversations</SheetTitle><SheetDescription className="sr-only">Switch rooms and chats</SheetDescription>{mobileNav && rail}</SheetContent>
+      </Sheet>
+      <AgentPanel open={agentsOpen} onOpenChange={setAgentsOpen} agents={AGENTS} currentRoom={room} call={call} onRefresh={noopAsync} onNotice={noop} />
+      <CreateChannelDialog open={channelOpen} onOpenChange={setChannelOpen} call={call} onCreated={setRoom} onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")} />
+      <CreateAgentDialog open={agentOpen} onOpenChange={setAgentOpen} call={call} onCreated={noop} onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")} />
+      <CreateAgentDialog open={botOpen} onOpenChange={setBotOpen} call={call} onCreated={noop} initialKind="bot" onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")} />
     </div>
   );
 }
@@ -374,25 +344,27 @@ function AgentStory({
   );
 }
 
-function DialogStory({ agent }: { agent?: boolean }) {
+function DialogStory({ agent, bot }: { agent?: boolean; bot?: boolean }) {
   const call = useFixtureCall();
   const [open, setOpen] = useState(true);
   return (
-    <ComponentStage title={agent ? "Agent creation" : "Room creation"}>
+    <ComponentStage title={bot ? "Automated bot creation" : agent ? "Agent creation" : "Channel creation"}>
       <div className="grid min-h-[34rem] place-items-center">
         <Button
-          id={agent ? "open-new-agent" : "open-new-channel"}
+          id={bot ? "open-new-bot" : agent ? "open-new-agent" : "open-new-channel"}
           onClick={() => setOpen(true)}
         >
           Open dialog
         </Button>
       </div>
-      {agent ? (
+      {agent || bot ? (
         <CreateAgentDialog
           open={open}
           onOpenChange={setOpen}
           call={call}
           onCreated={noop}
+          initialKind={bot ? "bot" : "agent"}
+          onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")}
         />
       ) : (
         <CreateChannelDialog
@@ -400,6 +372,7 @@ function DialogStory({ agent }: { agent?: boolean }) {
           onOpenChange={setOpen}
           call={call}
           onCreated={noop}
+          onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")}
         />
       )}
     </ComponentStage>
@@ -413,7 +386,6 @@ export function Storybook() {
       "page-populated",
     [],
   );
-  const call = useFixtureCall();
   if (story === "page-populated") return <StoryFrame />;
   if (story === "page-empty")
     return <StoryFrame status="empty" messages={[]} />;
@@ -423,30 +395,26 @@ export function Storybook() {
     return <StoryFrame status="load-failure" messages={[]} />;
   if (story === "page-thread" || story === "comp-thread")
     return <StoryFrame threadOpen />;
-  if (story === "page-plans")
-    return (
-      <div className="flex h-svh bg-background text-foreground">
-        <PlansView room="research" call={call} />
-      </div>
-    );
-  if (story === "page-changes")
-    return (
-      <div className="flex h-svh bg-background text-foreground">
-        <ChangesView cwd="/workspace/oh-my-agent" call={call} />
-      </div>
-    );
+  if (story === "page-plans") return <StoryFrame initialView="plans" />;
+  if (story === "page-changes") return <StoryFrame initialView="changes" />;
   if (story === "comp-agents") return <AgentStory />;
   if (story === "comp-ops") return <AgentStory initialTab="operations" />;
   if (story === "comp-new-channel") return <DialogStory />;
   if (story === "comp-new-agent") return <DialogStory agent />;
+  if (story === "comp-new-bot") return <DialogStory bot />;
   if (story === "comp-composer")
     return (
-      <ComponentStage title="Composer">
+      <ComponentStage title="Composer uploads and local references">
         <div className="flex min-h-[34rem] flex-col justify-end">
           <Composer
             roomKey="#research"
             onSend={noopAsync}
             onPickFiles={() => Promise.resolve(["/workspace/evidence.txt"])}
+            onUpload={(file): AttachmentUpload => ({
+              cancel: noop,
+              promise: Promise.resolve({ id: `story-${file.name}`, name: file.name, type: file.type, size: file.size, path: `/tmp/oh-my-agent/${file.name}` }),
+            })}
+            onDeleteUpload={noopAsync}
           />
         </div>
       </ComponentStage>

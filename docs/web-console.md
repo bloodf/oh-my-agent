@@ -43,19 +43,21 @@ Conversation, Plans, and Changes views retain the selected destination. Plans ar
 
 The workspace is execution location metadata, not an authorization boundary. Local console control has the daemon's OS filesystem authority. An independent chat can therefore reach files available to that OS identity, including files outside the selected workspace when its OMP tools permit it.
 
+Channels persist an optional canonical working directory. On Start, an agent's explicit workspace wins, then a single inherited channel workspace, then the daemon project directory. Multiple different inherited directories require explicit choice. Running agents retain their current directory; definition changes use the native rebuild policy. Automated bots are native agents with wake rules, autonomy bounds, and optional cron schedules; Start arms their declared schedules without a daemon reboot.
+
 ### Attachments and temporary data
 
 Existing files on the daemon's machine are attached as absolute paths. The daemon-backed file picker and path entry browse the machine and pass those paths to OMP; files are read in place, not uploaded or copied into the workspace.
 
-Clipboard images are the exception. Supported pasted PNG, JPEG, WebP, or GIF images are written under the web chat's OS temporary root, then attached by generated path. A clipboard image is limited to 12 MiB. A prompt accepts at most 20 attachment paths; every path must resolve to a file.
+Browser-selected, dropped, and pasted files of any type stream into private OS temporary storage. The upload endpoint does not buffer the full file or impose an arbitrary total file-size cap; disk space, browser, and proxy limits still apply. The UI exposes progress and cancellation. Cancelled/failed transfers remove partial bytes; explicit removal of an unsent attachment deletes only its managed copy. A prompt accepts at most 20 file paths.
 
-Independent chat metadata, native session JSONL, and clipboard-created images all live under OS temporary storage. OS cleanup can remove chat history and pasted images without warning. Original workspace files are never copied into that temporary root. Agent definitions, room and DM history, reactions, memberships, and room plans remain in daemon-owned durable storage.
+Uploads expire after 24 hours, with cleanup at daemon startup and hourly; room messages can outlive the uploaded files they reference. Independent chat metadata and native session JSONL also live in OS temporary storage and can disappear under OS cleanup. Existing original-file references are never deleted by retention. Agent definitions, room/DM history, reactions, membership, workspace assignments, and plans remain durable.
 
 ## Client layout and behavior
 
 The conversation-first frame has a compact destination rail, main transcript and composer, and contextual sheets or overlays. Threads use a side split where space allows and an overlay on narrow screens. Cmd/Ctrl+K searches destinations and actions. Enter sends; Shift+Enter inserts a line. Failed sends preserve the draft and attachments.
 
-Agent management is in the Agent sheet: membership, steering, logs, stop, account ceiling, and soul/definition editing. New chat, room, and agent actions open dialogs. The human posts to rooms and DMs as `@you`; a request claiming an agent author is refused.
+Agent management is in the Agent sheet: membership, explicit Start, steering, logs, Stop, account ceilings, and soul/definition editing. New OMP chat, channel, agent, and automated-bot actions open real dialogs. The human posts as `@you`; caller-provided agent authors are rejected.
 
 Definition reads use `GET /api/agents/:name/definition`; edits use `PATCH /api/agents/:name`. Room membership changes are applied to a running peer immediately. Other definition policy changes are saved and rebuild the worker on its next delivered turn.
 
@@ -67,11 +69,12 @@ Every static asset and API route requires the operator token. Loopback HTTP acce
 
 Remote mode uses the external HTTPS origin, token entry, and short-lived path-bound tickets described in [Remote console exposure](remote-exposure.md). The proxy secret authenticates forwarded request metadata; it does not replace the operator token.
 
-Remote access increases impact because an authenticated operator can control agents that use local credentials. Machine-wide web operations add direct access to native OMP sessions, filesystem browsing, clipboard-image writes, and Git inspection. For authenticated remote requests, these routes return 403 unless `OMA_REMOTE_FULL_CONTROL=1` was set when starting the daemon:
+Remote access increases impact because an authenticated operator can control agents that use local credentials. Machine-wide operations expose native OMP sessions, filesystem browsing, temporary writes, and Git inspection. These routes require `OMA_REMOTE_FULL_CONTROL=1`:
 
 - `/api/chats*`
 - `/api/workspace/*`
-- `/api/clipboard`
+- `/api/attachments*`
+- `/api/agents/:name/start` and agent/channel mutations that set a workspace
 
 `GET /api/capabilities` reports whether full control is available to that request. Rooms, DMs, plans, and existing agent controls remain under the remote operator trust model without this extra flag. There is no browser shell-command endpoint; Git inspection invokes fixed read-only commands with bounded output.
 
@@ -103,13 +106,15 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 | `/api/workspace/files?path=` | GET | Lists up to 1,000 entries in an absolute directory for the daemon picker |
 | `/api/workspace/changes?cwd=` | GET | Reads repository context and Git status |
 | `/api/workspace/diff?cwd=&path=&staged=` | GET | Reads a bounded diff for a reported changed path |
-| `/api/clipboard` | POST | Stores one supported clipboard image in OS temporary storage |
+| `/api/attachments` | GET / POST | Lists managed uploads or streams a raw body into private temporary storage; POST uses percent-encoded `X-Attachment-Name` and `Content-Type`, returns `{id,name,type,size,path}` |
+| `/api/attachments/:id` | DELETE | Deletes a managed upload by opaque ID; never accepts an original file path |
 
 ### Rooms, DMs, plans, and agents
 
 | Route | Methods | Behavior |
 |---|---|---|
-| `/api/channels` | GET / POST | Lists or creates a `#` room or `@` DM |
+| `/api/channels` | GET / POST | Lists or creates a `#` channel or `@` DM, optionally with canonical `workspace` |
+| `/api/channels/:id` | PATCH | Sets an existing directory as `workspace`, or clears it with `null` |
 | `/api/channels/:id/messages` | GET / POST | Reads a transcript or posts as `@you`; supports `afterId`, `limit`, and thread `parentId` |
 | `/api/channels/:id/plans` | GET / POST | Lists or creates durable plans for a room |
 | `/api/channels/:id/plans/:planId` | PATCH | Updates a plan using `expectedRevision` |
@@ -117,6 +122,7 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 | `/api/agents` | GET / POST | Lists registered and defined agents, or creates a validated definition |
 | `/api/agents/:name/definition` | GET | Reads the editable definition wire shape |
 | `/api/agents/:name` | PATCH | Validates and edits the definition; the agent name is immutable |
+| `/api/agents/:name/start` | POST | Explicitly starts a stopped definition with resolved workspace and declared schedules; requires full control |
 | `/api/agents/:name/rooms[/:room]` | POST / DELETE | Adds or removes durable, live-applied membership |
 | `/api/agents/:name/kill` | POST | Stops an agent, cascading by default unless `keepChildren` is true |
 | `/api/agents/:name/inject` | POST | Sends a steering message |

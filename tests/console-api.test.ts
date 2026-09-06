@@ -21,7 +21,15 @@
  * @Environment bun
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	realpath,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -220,6 +228,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		},
 		daemonLog: async () => "daemon line one\ndaemon line two\n",
 	});
+	const starts: Array<{ name: string; cwd?: string }> = [];
 
 	const api: ConsoleApi = await startConsoleApi({
 		rooms,
@@ -228,6 +237,13 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		peerStore,
 		knownRooms,
 		ensureRoom,
+		spawnPeer: async (name, spawnOptions) => {
+			starts.push({
+				name,
+				...(spawnOptions?.cwd === undefined ? {} : { cwd: spawnOptions.cwd }),
+			});
+			return { name, state: "running" };
+		},
 		operations,
 		token: TOKEN,
 		...(options.pollIntervalMs === undefined
@@ -342,6 +358,7 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		registerMeteredPeer,
 		reload,
 		call,
+		starts,
 		operations,
 		/** What the wired tree was asked to kill, and whether it cascaded. */
 		kills,
@@ -545,6 +562,32 @@ describe("operator token", () => {
 		});
 	});
 
+	test("explicit Start passes canonical agent workspace to lifecycle", async () => {
+		const h = await harness();
+		const workspace = await mkdtemp(join(tmpdir(), "oh-my-agent-workspace-"));
+		cleanups.push(() => rm(workspace, { recursive: true, force: true }));
+		const created = await h.call("/api/agents", {
+			method: "POST",
+			body: JSON.stringify({
+				name: "workspace-agent",
+				description: "Uses an explicit workspace.",
+				spawns: ["scout"],
+				workspace,
+				body: "Work in the selected directory.",
+			}),
+		});
+		expect(created.status).toBe(201);
+
+		const response = await h.call("/api/agents/workspace-agent/start", {
+			method: "POST",
+			body: "{}",
+		});
+		expect(response.status).toBe(200);
+		expect(h.starts).toEqual([
+			{ name: "workspace-agent", cwd: await realpath(workspace) },
+		]);
+	});
+
 	test("refuses a websocket with no operator token", async () => {
 		const h = await harness();
 		const url = `${h.api.url.replace("http://", "ws://")}/api/events`;
@@ -630,6 +673,77 @@ describe("channels", () => {
 		expect(res.status).toBe(400);
 		const body = (await res.json()) as { error: { code: string } };
 		expect(body.error.code).toBe("invalid_request");
+	});
+
+	test("channel workspace canonicalizes symlinks and Start inherits it", async () => {
+		const h = await harness();
+		const root = await mkdtemp(
+			join(tmpdir(), "oh-my-agent-channel-workspace-"),
+		);
+		cleanups.push(() => rm(root, { recursive: true, force: true }));
+		const workspace = join(root, "workspace");
+		const alias = join(root, "alias");
+		await mkdir(workspace);
+		await symlink(workspace, alias);
+
+		const channel = await h.call("/api/channels", {
+			method: "POST",
+			body: JSON.stringify({ id: "#workspace", workspace: alias }),
+		});
+		expect(channel.status).toBe(201);
+		expect(await channel.json()).toEqual({
+			channel: {
+				id: "#workspace",
+				kind: "channel",
+				name: "#workspace",
+				workspace: await realpath(workspace),
+			},
+		});
+
+		const created = await h.call("/api/agents", {
+			method: "POST",
+			body: JSON.stringify({
+				name: "channel-agent",
+				description: "Inherits its channel workspace.",
+				spawns: ["scout"],
+				rooms: ["#workspace"],
+				body: "Work in the channel directory.",
+			}),
+		});
+		expect(created.status).toBe(201);
+		const started = await h.call("/api/agents/channel-agent/start", {
+			method: "POST",
+			body: "{}",
+		});
+		expect(started.status).toBe(200);
+		expect(h.starts.at(-1)).toEqual({
+			name: "channel-agent",
+			cwd: await realpath(workspace),
+		});
+	});
+
+	test("channel workspace rejects missing paths and regular files", async () => {
+		const h = await harness();
+		const root = await mkdtemp(
+			join(tmpdir(), "oh-my-agent-invalid-workspace-"),
+		);
+		cleanups.push(() => rm(root, { recursive: true, force: true }));
+		const file = join(root, "file.txt");
+		await writeFile(file, "not a directory", "utf8");
+
+		for (const workspace of [join(root, "missing"), file]) {
+			const response = await h.call("/api/channels", {
+				method: "POST",
+				body: JSON.stringify({ id: "#invalid", workspace }),
+			});
+			expect(response.status).toBe(400);
+			expect(await response.json()).toEqual({
+				error: {
+					code: "invalid_workspace",
+					message: `workspace is not a real directory: ${workspace}`,
+				},
+			});
+		}
 	});
 });
 
@@ -1922,6 +2036,7 @@ describe("operations", () => {
 			peerStore: h.peerStore,
 			knownRooms: h.knownRooms,
 			ensureRoom: h.ensureRoom,
+			spawnPeer: async (name) => ({ name, state: "running" }),
 			operations: createOperations({
 				rooms: h.rooms,
 				supervisor: h.supervisor,

@@ -10,6 +10,7 @@ import { MessageSquare, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import type { RoomMessage } from "@/lib/types";
+import type { AttachmentUpload } from "@/lib/attachments";
 import { Composer } from "./Composer";
 import { Message } from "./Message";
 
@@ -20,7 +21,8 @@ export type ThreadPanelProps = {
   onReact: (id: number, emoji: string) => Promise<void>;
   onSend: (body: string, paths: string[]) => Promise<void>;
   onPickFiles?: () => Promise<string[]>;
-  onPasteImage?: (file: File) => Promise<string>;
+  onUpload?: (file: File, onProgress: (loaded: number, total: number) => void) => AttachmentUpload;
+  onDeleteUpload?: (id: string) => Promise<void>;
 };
 
 export function ThreadPanel({
@@ -30,7 +32,8 @@ export function ThreadPanel({
   onReact,
   onSend,
   onPickFiles,
-  onPasteImage,
+  onUpload,
+  onDeleteUpload,
 }: ThreadPanelProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const previousRootRef = useRef<RoomMessage | null>(null);
@@ -142,7 +145,8 @@ export function ThreadPanel({
           placeholder="Reply in thread"
           onSend={onSend}
           onPickFiles={onPickFiles}
-          onPasteImage={onPasteImage}
+          onUpload={onUpload}
+          onDeleteUpload={onDeleteUpload}
         />
       )}
     </aside>

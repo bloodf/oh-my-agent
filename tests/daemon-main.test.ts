@@ -26,7 +26,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -200,6 +200,67 @@ async function boot(
 
 	return { handle, agentDir, workers: stub.workers };
 }
+
+test("web-created bot starts in channel workspace and arms cron without reboot", async () => {
+	const { handle, agentDir } = await boot();
+	const workspace = await tempAgentDir();
+	const url = new URL(handle.consoleUrl ?? "");
+	const headers = {
+		"X-Operator-Token": url.searchParams.get("token") ?? "",
+		"Content-Type": "application/json",
+	};
+	const post = (path: string, body: unknown) =>
+		fetch(`${url.origin}${path}`, {
+			method: "POST",
+			headers,
+			body: JSON.stringify(body),
+		});
+	expect(
+		(await post("/api/channels", { id: "#digest", workspace })).status,
+	).toBe(201);
+	expect(
+		(
+			await post("/api/agents", {
+				name: "digest-bot",
+				description: "Daily digest",
+				spawns: "*",
+				model: ["anthropic/claude-sonnet-4-5"],
+				rooms: ["#digest"],
+				body: "Summarize decisions.",
+				schedules: [{ cron: "0 9 * * *", prompt: "Summarize decisions." }],
+			})
+		).status,
+	).toBe(201);
+	expect((await post("/api/agents/digest-bot/start", {})).status).toBe(200);
+	const registry = await readAgents(agentDir);
+	expect(registry.find((agent) => agent.name === "digest-bot")?.cwd).toBe(
+		await realpath(workspace),
+	);
+	const schedules = await call<SchedulesListResult>(
+		handle.socketPath,
+		"schedules_list",
+	);
+	expect(
+		schedules.schedules.find(
+			(schedule) => schedule.id === "digest-bot:schedule:0",
+		)?.nextFireAt,
+	).toBeGreaterThan(Date.now());
+	await call(handle.socketPath, "schedules_arm", {
+		scheduleId: "digest-bot:schedule:0",
+		enabled: false,
+	});
+	expect((await post("/api/agents/digest-bot/kill", {})).status).toBe(200);
+	expect((await post("/api/agents/digest-bot/start", {})).status).toBe(200);
+	const restarted = await call<SchedulesListResult>(
+		handle.socketPath,
+		"schedules_list",
+	);
+	expect(
+		restarted.schedules.find(
+			(schedule) => schedule.id === "digest-bot:schedule:0",
+		),
+	).toMatchObject({ enabled: false, nextFireAt: null });
+});
 
 /** One authenticated JSON-RPC round trip over the daemon's unix socket. */
 async function rpc(

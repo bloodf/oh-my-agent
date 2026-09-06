@@ -1,48 +1,31 @@
 {
   "schema_version": 1,
   "diagram_type": "architecture",
-  "meta": {
-    "title": "oh-my-agent runtime",
-    "locale": "en",
-    "quality_profile": "showcase",
-    "output": "runtime.html",
-    "viewBox": [1280, 720]
-  },
+  "meta": {"title": "Conversation workspace runtime", "locale": "en", "quality_profile": "showcase", "viewBox": [1380, 800]},
   "components": [
-    { "id": "you", "type": "external", "label": "You", "sublabel": "@you", "pos": [40, 300], "size": [120, 60] },
-    { "id": "tui", "type": "frontend", "label": "OMP TUI", "sublabel": "/agents /rooms", "pos": [230, 160], "size": [140, 60] },
-    { "id": "cli", "type": "frontend", "label": "omp-agent CLI", "sublabel": "JSON-RPC client", "pos": [230, 300], "size": [140, 60] },
-    { "id": "console", "type": "frontend", "label": "Browser console", "sublabel": "HTTP + WebSocket", "pos": [230, 440], "size": [140, 60] },
-    { "id": "socket", "type": "security", "label": "Control socket", "sublabel": "unix JSON-RPC", "pos": [450, 300], "size": [140, 60], "tag": "loopback" },
-    { "id": "daemon", "type": "backend", "label": "Daemon", "sublabel": "supervisor + scheduler", "pos": [670, 300], "size": [160, 64], "tag": "detached" },
-    { "id": "rooms", "type": "messagebus", "label": "Rooms", "sublabel": "channels + DMs", "pos": [670, 160], "size": [160, 60] },
-    { "id": "sqlite", "type": "database", "label": "SQLite", "sublabel": "agents, runs, messages", "pos": [670, 440], "size": [160, 60] },
-    { "id": "workers", "type": "backend", "label": "Workers", "sublabel": "RPC subprocess", "pos": [910, 160], "size": [150, 60] },
-    { "id": "gateway", "type": "security", "label": "Credential gateway", "sublabel": "scoped bearer", "pos": [910, 300], "size": [150, 60] },
-    { "id": "broker", "type": "external", "label": "Auth broker", "sublabel": "provider credentials", "pos": [910, 440], "size": [150, 60] }
-  ],
-  "boundaries": [
-    { "kind": "region", "label": "Operator surfaces", "wraps": ["tui", "cli", "console"] },
-    { "kind": "security-group", "label": "Loopback only", "wraps": ["socket", "daemon", "rooms", "sqlite", "gateway"] }
+    {"id":"web","type":"frontend","label":"Web workspace","sublabel":"Channels · DMs · OMP chats","pos":[70,100],"size":[260,80]},
+    {"id":"http","type":"security","label":"Console API","sublabel":"Loopback HTTP + WebSocket","pos":[530,100],"size":[260,80]},
+    {"id":"chats","type":"backend","label":"Independent OMP","sublabel":"Native discovery · selected cwd","pos":[1090,100],"size":[280,80]},
+    {"id":"clients","type":"frontend","label":"OMP TUI / CLI","sublabel":"Operator controls","pos":[70,360],"size":[260,80]},
+    {"id":"daemon","type":"backend","label":"Daemon","sublabel":"Supervisor · scheduler","pos":[530,360],"size":[260,80]},
+    {"id":"temp","type":"database","label":"Private OS temporary storage","sublabel":"Chat sessions · uploaded files","pos":[1090,360],"size":[280,80]},
+    {"id":"rooms","type":"database","label":"Durable room store","sublabel":"Channels · plans · workspace","pos":[70,640],"size":[260,80]},
+    {"id":"peers","type":"backend","label":"Agents and bots","sublabel":"Native OMP workers","pos":[530,640],"size":[260,80]},
+    {"id":"gateway","type":"security","label":"Credential gateway","sublabel":"Scoped worker bearer","pos":[1090,640],"size":[280,80]}
   ],
   "connections": [
-    { "id": "you-tui", "from": "you", "to": "tui" },
-    { "id": "you-cli", "from": "you", "to": "cli", "variant": "emphasis" },
-    { "id": "you-console", "from": "you", "to": "console" },
-    { "id": "tui-socket", "from": "tui", "to": "socket", "label": "JSON-RPC", "labelDy": -24 },
-    { "id": "cli-socket", "from": "cli", "to": "socket", "variant": "emphasis" },
-    { "id": "console-socket", "from": "console", "to": "socket", "label": "HTTP + WS", "labelDy": 24 },
-    { "id": "socket-daemon", "from": "socket", "to": "daemon", "variant": "emphasis" },
-    { "id": "daemon-rooms", "from": "daemon", "to": "rooms", "label": "wake", "labelDy": -24 },
-    { "id": "daemon-sqlite", "from": "daemon", "to": "sqlite", "label": "persist", "labelDy": 24 },
-    { "id": "daemon-workers", "from": "daemon", "to": "workers", "label": "spawn", "labelDy": -24 },
-    { "id": "daemon-gateway", "from": "daemon", "to": "gateway", "label": "scope", "variant": "security", "labelDy": 49 },
-    { "id": "workers-gateway", "from": "workers", "to": "gateway", "label": "bearer", "variant": "security", "labelDy": 24 },
-    { "id": "gateway-broker", "from": "gateway", "to": "broker", "label": "filter", "variant": "security", "labelDy": 24 }
+    {"from":"web","to":"http","label":"Authenticated requests"},
+    {"from":"http","to":"chats","label":"Independent session"},
+    {"from":"http","to":"daemon","label":"Room operations","labelDy":70},
+    {"from":"clients","to":"daemon","label":"Unix control socket"},
+    {"from":"chats","to":"temp","label":"Temporary history","labelDy":70},
+    {"from":"daemon","to":"peers","label":"Start and supervise","labelDy":70},
+    {"from":"peers","to":"rooms","label":"Room messages"},
+    {"from":"peers","to":"gateway","label":"Model requests","variant":"security"}
   ],
   "cards": [
-    { "dot": "cyan", "title": "Three clients, one daemon", "items": ["TUI and CLI speak JSON-RPC over the unix socket; the browser uses loopback HTTP and WebSocket", "The daemon owns workers, rooms, schedules, and SQLite"] },
-    { "dot": "emerald", "title": "Autonomy", "items": ["omp-agent daemon detaches from the TTY", "Closing the terminal does not stop workers"] },
-    { "dot": "rose", "title": "Credentials stay in the daemon", "items": ["Workers receive a scoped gateway bearer, never the vault token", "The gateway filters snapshot, usage, and disable"] }
+    {"dot":"cyan","title":"Conversation first","items":["Browser requests use the console HTTP API, never the Unix control socket.","Agents and automated bots share the native peer lifecycle; independent chats stay separate."]},
+    {"dot":"amber","title":"Files stay where they belong","items":["Existing computer files are path references, not copies.","Browser uploads and independent chat history are temporary; rooms and definitions are durable."]},
+    {"dot":"rose","title":"Authority stays explicit","items":["Remote full control requires explicit opt-in.","A workspace selects the working directory; it is not a sandbox boundary."]}
   ]
 }

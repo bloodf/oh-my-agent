@@ -1,6 +1,8 @@
 import {
+  Bot,
   FilePenLine,
   MessageCircle,
+  Play,
   ScrollText,
   Send,
   Square,
@@ -41,6 +43,7 @@ export type AgentPanelProps = {
   onRefresh: () => Promise<void>;
   onNotice: (text: string) => void;
   onDirectMessage?: (name: string) => Promise<void>;
+  fullControl?: boolean;
 };
 
 export function AgentPanel({
@@ -52,6 +55,7 @@ export function AgentPanel({
   onRefresh,
   onNotice,
   onDirectMessage,
+  fullControl = true,
 }: AgentPanelProps) {
   const [definitionTarget, setDefinitionTarget] = useState<string | null>(null);
   const [killTarget, setKillTarget] = useState<string | null>(null);
@@ -147,11 +151,12 @@ export function AgentPanel({
                         data-name={agent.name}
                       >
                         <div className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
-                          <div className="truncate text-sm font-medium">
-                            {agent.name}
+                          <div className="flex items-center gap-1.5 truncate text-sm font-medium">
+                            {agent.automation && <Bot className="size-3.5 shrink-0" aria-label="Automated bot" />}
+                            <span className="truncate">{agent.name}</span>
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            {agent.state}
+                            {agent.state}{agent.automation ? ` · Bot${agent.automation.wakeRooms ? " · message wake" : ""}${agent.automation.schedules.length ? ` · ${agent.automation.schedules.join(", ")}` : ""}` : " · Agent"}
                           </div>
                         </div>
                         <Button
@@ -238,6 +243,28 @@ export function AgentPanel({
                           <Square />
                           Stop
                         </Button>
+                        {agent.state === "stopped" && (
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="secondary"
+                            className="ops-start"
+                            disabled={busy !== null || !fullControl}
+                            title={fullControl ? "Start agent" : "Full control disabled remotely"}
+                            onClick={() => {
+                              setError("");
+                              setBusy(`start:${agent.name}`);
+                              void call(`/api/agents/${encodeURIComponent(agent.name)}/start`, { method: "POST", body: {} })
+                                .then(async () => { onNotice(`${agent.name} started. Waiting DMs can now be processed.`); await onRefresh(); })
+                                .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+                                .finally(() => setBusy(null));
+                            }}
+                          >
+                            <Play />
+                            Start
+                          </Button>
+                        )}
+                        {!fullControl && agent.state === "stopped" && <span className="text-xs text-muted-foreground">Full control disabled remotely</span>}
                         <Button
                           type="button"
                           size="xs"

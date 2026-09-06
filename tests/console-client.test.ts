@@ -3806,6 +3806,59 @@ describe("accessibility", () => {
 	);
 
 	browserTest(
+		"appearance preserves drafts and restores the selected palette and mode",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#composer-input");
+			await page.type("#composer-input", "Keep this draft");
+			const before = await page.$eval(
+				"body",
+				(node) => getComputedStyle(node).backgroundColor,
+			);
+			await page.click('[aria-label="Appearance"]');
+			await page.type('[aria-label="Search color palettes"]', "Catppuccin");
+			await page.click('aria/Catppuccin[role="button"]');
+			await page.click('aria/Dark[role="button"]');
+			await page.keyboard.press("Escape");
+			expect(
+				await page.$eval(
+					"#composer-input",
+					(node) => (node as unknown as { value: string }).value,
+				),
+			).toBe("Keep this draft");
+			const selected = await page.$eval(
+				"body",
+				(node) => getComputedStyle(node).backgroundColor,
+			);
+			expect(selected).not.toBe(before);
+			await page.reload({ waitUntil: "domcontentloaded" });
+			await page.waitForSelector('[aria-label="Appearance"]');
+			expect(
+				await page.$eval(
+					"body",
+					(node) => getComputedStyle(node).backgroundColor,
+				),
+			).toBe(selected);
+			await page.click('[aria-label="Appearance"]');
+			expect(
+				await page.$eval('aria/Dark[role="button"]', (node) =>
+					node.getAttribute("aria-pressed"),
+				),
+			).toBe("true");
+			await page.type('[aria-label="Search color palettes"]', "Catppuccin");
+			expect(
+				await page.$eval('aria/Catppuccin[role="button"]', (node) =>
+					node.getAttribute("aria-pressed"),
+				),
+			).toBe("true");
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
 		"channel switching is keyboard-only: skip link, roving arrows, Enter",
 		async () => {
 			const h = await harness();
@@ -3826,13 +3879,13 @@ describe("accessibility", () => {
 			const first = await focusProbe(page);
 			expect(first?.className ?? "").toContain("skip-link");
 
-			// Second Tab lands on the roving channel option, not every option.
+			// Follow the toolbar and navigation controls to the roving channel option.
 			await page.keyboard.press("Tab");
 			// Tab through preceding visible actions until the roving room option.
 			let onOption = await focusProbe(page);
 			for (
 				let presses = 0;
-				presses < 8 && !(onOption?.className ?? "").includes("channel");
+				presses < 24 && !(onOption?.className ?? "").includes("channel");
 				presses += 1
 			) {
 				await page.keyboard.press("Tab");
@@ -4158,7 +4211,7 @@ describe("accessibility", () => {
 		let focused = await focusProbe(page);
 		for (
 			let presses = 0;
-			presses < 8 && !(focused?.className ?? "").includes("channel");
+			presses < 24 && !(focused?.className ?? "").includes("channel");
 			presses += 1
 		) {
 			await page.keyboard.press("Tab");

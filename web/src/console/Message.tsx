@@ -178,7 +178,7 @@ export function MessageBody({ body }: { body: string }) {
                 {block.value.split("\n").map((line, lineIndex) => (
                   <span
                     key={lineIndex}
-                    className={`block min-w-max ${block.language === "diff" && line.startsWith("+") ? "bg-emerald-500/10 text-emerald-300" : block.language === "diff" && line.startsWith("-") ? "bg-red-500/10 text-red-300" : ""}`}
+                    className={`block min-w-max ${block.language === "diff" && line.startsWith("+") ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300" : block.language === "diff" && line.startsWith("-") ? "bg-red-500/10 text-red-800 dark:text-red-300" : ""}`}
                   >
                     {line || " "}
                   </span>
@@ -226,31 +226,31 @@ export function Message({
   return (
     <article
       data-id={String(message.id)}
-      className={`message group relative grid grid-cols-[1.75rem_minmax(0,1fr)] gap-x-2 rounded-lg px-2 py-1 hover:bg-muted/30 focus-within:bg-muted/30 ${roleClass(message.author)} ${grouped ? "grouped" : "mt-3"}`}
+      className={`message group relative grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-2.5 px-2 py-1.5 sm:px-4 hover:bg-muted/45 focus-within:bg-muted/45 ${roleClass(message.author)} ${grouped ? "grouped" : "mt-3"}`}
     >
       {grouped ? (
-        <span />
+        <time className="timestamp self-start pt-0.5 text-center text-[9px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" dateTime={new Date(message.createdAt).toISOString()} aria-label={`Sent ${new Date(message.createdAt).toLocaleString()}`}>{timeLabel(message.createdAt)}</time>
       ) : (
-        <Avatar size="sm" className="mt-0.5">
+        <Avatar className="mt-0.5 size-9 rounded-lg">
           <AvatarFallback
             className={
               message.author === HUMAN_AUTHOR
-                ? "bg-amber-500/15 text-amber-300"
+                ? "rounded-lg bg-amber-500/15 text-amber-800 dark:text-amber-300"
                 : message.author === "system"
-                  ? "bg-muted text-muted-foreground"
-                  : "bg-sky-500/15 text-sky-300"
+                  ? "rounded-lg bg-muted text-muted-foreground"
+                  : "rounded-lg bg-primary/10 text-primary"
             }
           >
             {initials(message.author)}
           </AvatarFallback>
         </Avatar>
       )}
-      <div className="min-w-0">
+      <div className="min-w-0 max-w-[80ch]">
         {!grouped && (
           <div className="meta mb-0.5 flex items-baseline gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className={`author ${roleClass(message.author)} cursor-default text-xs font-semibold`}>
+                <span className={`author ${roleClass(message.author)} cursor-default text-sm font-semibold`}>
                   {message.author}
                 </span>
               </TooltipTrigger>
@@ -277,7 +277,7 @@ export function Message({
               <Badge
                 key={mention}
                 variant="outline"
-                className="mention h-5 border-sky-400/30 text-sky-300"
+                className="mention h-5 border-primary/30 bg-primary/5 text-primary"
               >
                 @{mention.replace(/^@/, "")}
               </Badge>
@@ -324,7 +324,7 @@ export function Message({
                       size="icon-xs"
                       variant="ghost"
                       aria-label="Add reaction"
-                      className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100"
+                      className="message-secondary-action min-h-11 min-w-11 transition-opacity data-[state=open]:opacity-100"
                     >
                       <Plus />
                     </Button>
@@ -361,7 +361,7 @@ export function Message({
                 type="button"
                 size="xs"
                 variant="ghost"
-                className="thread-open text-muted-foreground opacity-0 transition-opacity hover:text-primary group-hover:opacity-100 group-focus-within:opacity-100"
+                className={`thread-open min-h-11 text-muted-foreground transition-opacity hover:text-primary ${message.replyCount > 0 ? "font-medium text-primary" : "message-secondary-action"}`}
                 onClick={() => onThread(message.id)}
               >
                 <MessageSquare />

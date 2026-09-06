@@ -341,14 +341,8 @@ const DEFINITION_FIELDS: Record<string, boolean> = {
 };
 
 const CREATE_FIELDS: Record<string, boolean> = {
-	name: true,
-	description: true,
-	model: true,
-	rooms: true,
-	wake: true,
-	autonomy: true,
-	spawns: true,
-	body: true,
+	...DEFINITION_FIELDS,
+	sha256: false,
 };
 
 const CHANGE_FIELDS: Record<string, boolean> = {

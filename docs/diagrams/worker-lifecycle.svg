@@ -2,50 +2,41 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 980 660" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
   <style><![CDATA[
 
-svg { background: #020617; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+svg { background: #09090b; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 svg,
     [data-theme="dark"] {
-      --bg: #020617;
-      --grid: #1e293b;
-      --text: #ffffff;
-      --text-muted: #94a3b8;
-      --text-dim: #475569;
-      
-
-      --text-faint: #7d8da1;
-
-      --panel: rgba(15, 23, 42, 0.5);
-      --panel-border: #1e293b;
-      --lane-fill: rgba(15, 23, 42, 0.22);
-      --lane-stroke: #334155;
-
-      --arrow: #64748b;
-      --arrow-emphasis: #34d399;
-
-      
-
-      --mask: #0f172a;
-
-      --frontend-fill:    rgba(8, 51, 68, 0.4);
-      --frontend-stroke:  #22d3ee;
-      --backend-fill:     rgba(6, 78, 59, 0.4);
-      --backend-stroke:   #34d399;
-      --database-fill:    rgba(76, 29, 149, 0.4);
-      --database-stroke:  #a78bfa;
-      --cloud-fill:       rgba(120, 53, 15, 0.3);
-      --cloud-stroke:     #fbbf24;
-      --security-fill:    rgba(136, 19, 55, 0.4);
-      --security-stroke:  #fb7185;
-      --messagebus-fill:  rgba(251, 146, 60, 0.3);
-      --messagebus-stroke:#fb923c;
-      --external-fill:    rgba(30, 41, 59, 0.5);
-      --external-stroke:  #94a3b8;
-
-      --toolbar-bg:       rgba(15, 23, 42, 0.8);
-      --toolbar-border:   #334155;
-      --toolbar-text:     #e2e8f0;
-      --toolbar-hover:    rgba(15, 23, 42, 0.95);
-      --toolbar-menu-bg:  #0f172a;
+      --bg: #09090b;
+      --grid: #27272a;
+      --text: #fafafa;
+      --text-muted: #a1a1aa;
+      --text-dim: #71717a;
+      --text-faint: #71717a;
+      --panel: rgba(24, 24, 27, 0.92);
+      --panel-border: #3f3f46;
+      --lane-fill: rgba(39, 39, 42, 0.34);
+      --lane-stroke: #52525b;
+      --arrow: #71717a;
+      --arrow-emphasis: #38bdf8;
+      --mask: #18181b;
+      --frontend-fill: rgba(14, 116, 144, 0.28);
+      --frontend-stroke: #38bdf8;
+      --backend-fill: rgba(49, 46, 129, 0.24);
+      --backend-stroke: #818cf8;
+      --database-fill: rgba(88, 28, 135, 0.24);
+      --database-stroke: #c084fc;
+      --cloud-fill: rgba(161, 98, 7, 0.24);
+      --cloud-stroke: #fbbf24;
+      --security-fill: rgba(159, 18, 57, 0.24);
+      --security-stroke: #fb7185;
+      --messagebus-fill: rgba(43, 24, 47, 0.72);
+      --messagebus-stroke: #d8b4fe;
+      --external-fill: rgba(63, 63, 70, 0.46);
+      --external-stroke: #a1a1aa;
+      --toolbar-bg: rgba(24, 24, 27, 0.92);
+      --toolbar-border: #3f3f46;
+      --toolbar-text: #e4e4e7;
+      --toolbar-hover: #27272a;
+      --toolbar-menu-bg: #18181b;
     }
 .card-header {
       display: flex;
@@ -285,7 +276,7 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] {
 
         <!-- Lifecycle bands -->
         <path d="M 72 112 L 908 112" class="a-default" stroke-width="0.8" stroke-dasharray="3,8"/>
-        <text x="72" y="100" class="t-dim" font-size="10" font-weight="600">01 / Peer states</text>
+        <text x="72" y="100" class="t-dim" font-size="10" font-weight="600">01 / Agent states</text>
         <path d="M 72 264 L 908 264" class="a-default" stroke-width="0.8" stroke-dasharray="3,8"/>
         <text x="72" y="252" class="t-dim" font-size="10" font-weight="600">02 / Idle wait + Quota recovery</text>
         <path d="M 72 436 L 908 436" class="a-default" stroke-width="0.8" stroke-dasharray="3,8"/>
@@ -303,8 +294,8 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] {
         <path data-edge-from="parked" data-edge-to="cascade" data-edge-key="5" data-edge-id="parked-cascade" data-composition-points="402,336;480,336;480,432;402,432;402,450" d="M 402 336 L 470 336 Q 480 336 480 346 L 480 422 Q 480 432 470 432 L 411 432 Q 402 432 402 441 L 402 450" class="a-security" stroke-width="1.1" marker-end="url(#arrowhead-security)"/>
 
         <!-- States -->
-        <g id="node-defined" data-node-id="defined" data-node-label="Defined" tabindex="0" role="button" aria-label="Focus Defined, peer markdown, Peer states" aria-pressed="false" data-node-kind="start" data-node-sublabel="peer markdown" data-node-tag="create" data-node-context="Peer states">
-          <title>Defined · peer markdown · Peer states · create</title>
+        <g id="node-defined" data-node-id="defined" data-node-label="Defined" tabindex="0" role="button" aria-label="Focus Defined, agent definition, Agent states" aria-pressed="false" data-node-kind="start" data-node-sublabel="agent definition" data-node-tag="create" data-node-context="Agent states">
+          <title>Defined · agent definition · Agent states · create</title>
           <rect x="35" y="126" width="118" height="62" rx="7" class="c-mask"/>
           <rect x="35" y="126" width="118" height="62" rx="7" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="start" class="semantic-sigil s-frontend" transform="translate(136 132) scale(0.6875)">
@@ -313,12 +304,12 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] {
           </g>
         <text data-detail="fine" x="45" y="140" class="t-frontend" font-size="7" font-weight="700">01</text>
           <text data-node-label="" data-detail-anchor="" x="94" y="147" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">Defined</text>
-          <text data-detail="context" x="94" y="163" class="t-muted" font-size="7" text-anchor="middle">peer markdown</text>
+          <text data-detail="context" x="94" y="163" class="t-muted" font-size="7" text-anchor="middle">agent definition</text>
         <text data-detail="fine" x="94" y="177" class="t-frontend" font-size="7" text-anchor="middle">create</text>
         </g>
 
-        <g id="node-running" data-node-id="running" data-node-label="Running" tabindex="0" role="button" aria-label="Focus Running, RPC worker, Peer states" aria-pressed="false" data-node-kind="active" data-node-sublabel="RPC worker" data-node-tag="spawn" data-node-context="Peer states">
-          <title>Running · RPC worker · Peer states · spawn</title>
+        <g id="node-running" data-node-id="running" data-node-label="Running" tabindex="0" role="button" aria-label="Focus Running, RPC worker, Agent states" aria-pressed="false" data-node-kind="active" data-node-sublabel="RPC worker" data-node-tag="spawn" data-node-context="Agent states">
+          <title>Running · RPC worker · Agent states · spawn</title>
           <rect x="189" y="126" width="118" height="62" rx="7" class="c-mask"/>
           <rect x="189" y="126" width="118" height="62" rx="7" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="active" class="semantic-sigil s-backend" transform="translate(290 132) scale(0.6875)">
@@ -330,8 +321,8 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] {
         <text data-detail="fine" x="248" y="177" class="t-backend" font-size="7" text-anchor="middle">spawn</text>
         </g>
 
-        <g id="node-working" data-node-id="working" data-node-label="Working" tabindex="0" role="button" aria-label="Focus Working, session.prompt, Peer states" aria-pressed="false" data-node-kind="active" data-node-sublabel="session.prompt" data-node-tag="turn" data-node-context="Peer states">
-          <title>Working · session.prompt · Peer states · turn</title>
+        <g id="node-working" data-node-id="working" data-node-label="Working" tabindex="0" role="button" aria-label="Focus Working, session.prompt, Agent states" aria-pressed="false" data-node-kind="active" data-node-sublabel="session.prompt" data-node-tag="turn" data-node-context="Agent states">
+          <title>Working · session.prompt · Agent states · turn</title>
           <rect x="343" y="126" width="118" height="62" rx="7" class="c-mask"/>
           <rect x="343" y="126" width="118" height="62" rx="7" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="active" class="semantic-sigil s-backend" transform="translate(444 132) scale(0.6875)">
@@ -343,8 +334,8 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] {
         <text data-detail="fine" x="402" y="177" class="t-backend" font-size="7" text-anchor="middle">turn</text>
         </g>
 
-        <g id="node-reviewing" data-node-id="reviewing" data-node-label="Idle check" tabindex="0" role="button" aria-label="Focus Idle check, budget + mentions, Peer states" aria-pressed="false" data-node-kind="decision" data-node-sublabel="budget + mentions" data-node-context="Peer states">
-          <title>Idle check · budget + mentions · Peer states</title>
+        <g id="node-reviewing" data-node-id="reviewing" data-node-label="Idle check" tabindex="0" role="button" aria-label="Focus Idle check, budget + mentions, Agent states" aria-pressed="false" data-node-kind="decision" data-node-sublabel="budget + mentions" data-node-context="Agent states">
+          <title>Idle check · budget + mentions · Agent states</title>
           <rect x="497" y="126" width="118" height="62" rx="7" class="c-mask"/>
           <rect x="497" y="126" width="118" height="62" rx="7" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="neutral" class="semantic-sigil s-external" transform="translate(598 132) scale(0.6875)">
@@ -356,8 +347,8 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] {
           <text data-detail="context" x="556" y="163" class="t-muted" font-size="7" text-anchor="middle">budget + mentions</text>
         </g>
 
-        <g id="node-stopped" data-node-id="stopped" data-node-label="Stopped" tabindex="0" role="button" aria-label="Focus Stopped, kill or exit, Peer states" aria-pressed="false" data-node-kind="success" data-node-sublabel="kill or exit" data-node-tag="kill" data-node-context="Peer states">
-          <title>Stopped · kill or exit · Peer states · kill</title>
+        <g id="node-stopped" data-node-id="stopped" data-node-label="Stopped" tabindex="0" role="button" aria-label="Focus Stopped, kill or exit, Agent states" aria-pressed="false" data-node-kind="success" data-node-sublabel="kill or exit" data-node-tag="kill" data-node-context="Agent states">
+          <title>Stopped · kill or exit · Agent states · kill</title>
           <rect x="651" y="126" width="118" height="62" rx="7" class="c-mask"/>
           <rect x="651" y="126" width="118" height="62" rx="7" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="success" class="semantic-sigil s-database" transform="translate(752 132) scale(0.6875)">

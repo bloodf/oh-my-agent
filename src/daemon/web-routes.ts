@@ -8,11 +8,39 @@ import { inspectWorkspace, readWorkspaceDiff } from "./workspace-changes";
 export interface WebServices {
 	chats: WebChats;
 	plans: RoomPlans;
-	clipboard: WebAttachments;
+	attachments: WebAttachments;
 	remoteFullControl: boolean;
 }
 const json = (status: number, value: unknown) =>
 	Response.json(value, { status });
+
+const MAX_JSON_BODY_BYTES = 1024 * 1024;
+async function readJson(request: Request): Promise<unknown> {
+	const declared = request.headers.get("content-length");
+	if (declared !== null && Number(declared) > MAX_JSON_BODY_BYTES)
+		throw new Error("JSON body exceeds 1 MiB");
+	if (!request.body) throw new Error("JSON body is required");
+	const reader = request.body.getReader();
+	const decoder = new TextDecoder();
+	let size = 0;
+	let text = "";
+	try {
+		while (true) {
+			const chunk = await reader.read();
+			if (chunk.done) break;
+			size += chunk.value.byteLength;
+			if (size > MAX_JSON_BODY_BYTES) {
+				await reader.cancel("JSON body exceeds 1 MiB");
+				throw new Error("JSON body exceeds 1 MiB");
+			}
+			text += decoder.decode(chunk.value, { stream: true });
+		}
+		text += decoder.decode();
+		return JSON.parse(text) as unknown;
+	} finally {
+		reader.releaseLock();
+	}
+}
 /** Called only after console authentication, with server-derived remote identity. */
 export async function handleWebRoute(
 	request: Request,
@@ -25,7 +53,8 @@ export async function handleWebRoute(
 	const privileged =
 		path.startsWith("/api/chats") ||
 		path.startsWith("/api/workspace/") ||
-		path === "/api/clipboard";
+		path === "/api/attachments" ||
+		path.startsWith("/api/attachments/");
 	if (path === "/api/capabilities")
 		return json(200, {
 			fullControl: !remoteRequest || services.remoteFullControl,
@@ -48,7 +77,7 @@ export async function handleWebRoute(
 			const id = planMatch[2];
 			if (request.method === "GET" && !id)
 				return json(200, { plans: services.plans.list(room) });
-			const body = (await request.json()) as Record<string, unknown>;
+			const body = (await readJson(request)) as Record<string, unknown>;
 			if (request.method === "POST" && !id) {
 				const plan = services.plans.create({
 					room,
@@ -91,30 +120,42 @@ export async function handleWebRoute(
 					url.searchParams.get("staged") === "true",
 				),
 			);
-		if (path === "/api/clipboard" && request.method === "POST") {
-			const length = Number(request.headers.get("content-length"));
-			if (!Number.isFinite(length) || length <= 0 || length > 12 * 1024 * 1024)
-				return json(413, {
-					error: {
-						code: "too_large",
-						message: "Clipboard image must be at most 12 MiB",
+		if (path === "/api/attachments") {
+			if (request.method === "GET")
+				return json(200, { attachments: await services.attachments.list() });
+			if (request.method === "POST") {
+				if (!request.body) throw new Error("Attachment body is required");
+				const encodedName = request.headers.get("x-attachment-name");
+				if (!encodedName || encodedName.length > 1200)
+					throw new Error("Attachment name is required");
+				let name: string;
+				try {
+					name = decodeURIComponent(encodedName);
+				} catch {
+					throw new Error("Attachment name is invalid");
+				}
+				const attachment = await services.attachments.upload(
+					request.body,
+					{
+						name,
+						type:
+							request.headers.get("content-type") || "application/octet-stream",
 					},
-				});
-			const body = await request.formData();
-			const file = body.get("image");
-			if (
-				!(file instanceof File) ||
-				!/^image\/(png|jpeg|webp|gif)$/.test(file.type)
-			)
-				throw new Error("Only clipboard images are accepted");
-			const image = await services.clipboard.upload(file);
-			return json(201, { path: image.path });
+					request.signal,
+				);
+				return json(201, attachment);
+			}
+		}
+		const attachmentMatch = /^\/api\/attachments\/([^/]+)$/.exec(path);
+		if (attachmentMatch?.[1] !== undefined && request.method === "DELETE") {
+			await services.attachments.delete(decodeURIComponent(attachmentMatch[1]));
+			return new Response(null, { status: 204 });
 		}
 		if (path === "/api/chats") {
 			if (request.method === "GET")
 				return json(200, { chats: await services.chats.list() });
 			if (request.method === "POST") {
-				const body = await request.json();
+				const body = await readJson(request);
 				if (
 					!body ||
 					typeof body !== "object" ||
@@ -166,7 +207,7 @@ export async function handleWebRoute(
 					await services.chats.abort(id);
 					return json(200, { aborted: true });
 				}
-				const body = (await request.json()) as Record<string, unknown>;
+				const body = (await readJson(request)) as Record<string, unknown>;
 				if (action === "model")
 					return json(
 						200,
