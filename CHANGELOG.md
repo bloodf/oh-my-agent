@@ -6,6 +6,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-08
+
 ### Fixed
 
 - Launch daemon TypeScript with Bun when OMP is installed as a compiled binary, including TUI autostart and restart.
