@@ -16,7 +16,7 @@ Three operator surfaces, one daemon:
 
 ![Runtime](../diagrams/runtime.svg)
 
-TUI and CLI never touch SQLite. They send protocol methods defined in [`src/shared/protocol.ts`](../../src/shared/protocol.ts) over the control socket in [`src/daemon/socket.ts`](../../src/daemon/socket.ts). The browser talks HTTP and WebSocket to [`src/daemon/console-api.ts`](../../src/daemon/console-api.ts). Kill, inject, logs, and budget bump are one module ([`src/daemon/operations.ts`](../../src/daemon/operations.ts)) composed once in [`src/daemon/main.ts`](../../src/daemon/main.ts) and handed to both surfaces.
+TUI and CLI never touch SQLite. They send protocol methods defined in [`src/shared/protocol.ts`](../../src/shared/protocol.ts) over the control socket in [`src/daemon/socket.ts`](../../src/daemon/socket.ts). The browser talks HTTP and WebSocket to [`src/daemon/console-api.ts`](../../src/daemon/console-api.ts). Kill, inject, logs, and budget bump are one module ([`src/daemon/operations.ts`](../../src/daemon/operations.ts)) composed once in [`src/daemon/runtime.ts`](../../src/daemon/runtime.ts) and handed to both surfaces.
 
 A typical turn:
 
@@ -30,7 +30,7 @@ A typical turn:
 
 ## Boot path
 
-[`bootDaemon`](../../src/daemon/main.ts) is the composition root:
+[`bootDaemon`](../../src/daemon/runtime.ts) is the composition root. [`main.ts`](../../src/daemon/main.ts) remains the lightweight `omp-agent` executable launcher; [`startup.ts`](../../src/daemon/startup.ts) parses daemon-start arguments without loading daemon dependencies:
 
 1. Refuse a live pidfile for the same agent dir (`PI_CODING_AGENT_DIR`, else OMP `getAgentDir()`).
 2. Resolve broker hosting: reuse a discovered broker, or embed one ([`src/daemon/boot.ts`](../../src/daemon/boot.ts)).
@@ -51,7 +51,7 @@ Three layers, decreasing strength. Full argument: [ARCHITECTURE.md §7](../../AR
 | Write isolation | OMP `task.isolation.mode` for delegated coding subagents | A read boundary |
 | Convention scoping | Tool allowlists, generated worker config, instructions | Security |
 
-**`workspace:` scopes defaults, not access.** It sets cwd and project discovery. It does not stop a worker reading `~/.ssh`. `/agents` shows a shield only for sandboxed peers.
+**`workspace:` scopes defaults, not access.** It sets cwd and project discovery. It does not stop a worker reading `~/.ssh`. Inspect each peer's actual `sandboxed` field with `omp-agent --json agents` (or `/cli --json agents` in the TUI); the TUI does not currently render a visual indicator.
 
 ## Credentials and quota
 

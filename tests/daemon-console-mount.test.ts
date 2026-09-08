@@ -24,8 +24,8 @@ import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { DaemonHandle, WorkerFactory } from "../src/daemon/main";
-import { bootDaemon } from "../src/daemon/main";
+import type { DaemonHandle, WorkerFactory } from "../src/daemon/runtime";
+import { bootDaemon } from "../src/daemon/runtime";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
 import { hermeticChildEnv } from "./fixtures/hermetic-env";
 

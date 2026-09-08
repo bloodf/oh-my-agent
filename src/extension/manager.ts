@@ -30,7 +30,7 @@ import { type DaemonClient, type ExtensionIO, editCommand } from "./commands";
 
 /** Said when the host has no terminal UI to host the overlay. */
 export const MANAGER_NEEDS_TUI =
-	"The agent manager needs the interactive TUI — use /agents in this mode.";
+	"The agent manager needs the interactive TUI — use /cli agents in this mode.";
 
 /** One visible line of the tree: an agent, and how deep it sits. */
 export interface ManagerRow {
@@ -286,8 +286,8 @@ export type ManagerMode =
 	| { kind: "inject"; agent: AgentStatus; draft: string }
 	| { kind: "logs"; name: string; lines: string[]; offset: number };
 
-/** A manager edit action over the selected live agent. */
-export type EditFlow = (agent: AgentStatus) => Promise<string | undefined>;
+/** A completed manager surface action. */
+export type ManagerResult = { kind: "edit"; agent: AgentStatus } | undefined;
 
 /** Run the same guided flow `/edit <name>` uses. */
 export async function openEditFlow(
@@ -299,19 +299,15 @@ export async function openEditFlow(
 }
 
 /**
- * What the component needs from its host. Deliberately only two callbacks:
- * every prompt the manager raises is drawn *inside* this component, not as a
- * nested OMP dialog. A nested dialog becomes the topmost overlay without
- * `fullscreen`, which hands the alternate screen back mid-flow and tears the
- * manager off the screen (see `OverlayOptions.fullscreen`).
+ * What the component needs from its host. Every prompt except Edit is drawn
+ * inside this component. Edit closes the fullscreen surface first, then its
+ * result lets `openManager` run OMP's guided dialog over the normal TUI.
  */
 export interface ManagerComponentHost {
-	/** Close the overlay. */
-	done: () => void;
+	/** Close the overlay, optionally requesting a follow-up action. */
+	done: (result: ManagerResult) => void;
 	/** Ask the host to repaint after asynchronous work. */
 	requestRender: () => void;
-	/** Guided definition/model flow supplied by the production manager factory. */
-	editFlow?: EditFlow;
 }
 
 /** The pi-tui `Component` shape the overlay satisfies. */
@@ -389,14 +385,7 @@ export function createManagerComponent(
 	const chooseAction = (agent: AgentStatus, index: number): void => {
 		const action = ACTION_ORDER[index];
 		if (action === ACTIONS.edit) {
-			void run(async () => {
-				if (host.editFlow === undefined) return "Editing is not configured.";
-				try {
-					return (await host.editFlow(agent)) ?? "";
-				} catch (error) {
-					return error instanceof Error ? error.message : String(error);
-				}
-			});
+			host.done({ kind: "edit", agent });
 			return;
 		}
 		if (action === ACTIONS.logs) {
@@ -426,7 +415,7 @@ export function createManagerComponent(
 			if (busy) {
 				// A wedged daemon must not hold the terminal: while a call is in
 				// flight, Esc abandons the overlay; the fetch settles on its own.
-				if (data === KEY.escape) host.done();
+				if (data === KEY.escape) host.done(undefined);
 				return;
 			}
 
@@ -533,7 +522,7 @@ export function createManagerComponent(
 			}
 
 			if (data === KEY.escape) {
-				host.done();
+				host.done(undefined);
 				return;
 			}
 			if (data === KEY.enter || data === KEY.newline) {
@@ -637,17 +626,16 @@ export interface ManagerTui {
  * Adapt `createManagerComponent` onto the factory shape `ctx.ui.custom`
  * expects: `(tui, theme, keybindings, done) => component`.
  */
-export function managerFactory(state: ManagerState, editFlow?: EditFlow) {
+export function managerFactory(state: ManagerState) {
 	return (
 		tui: ManagerTui,
 		_theme: unknown,
 		_keybindings: unknown,
-		done: (result: undefined) => void,
+		done: (result: ManagerResult) => void,
 	): ManagerComponent =>
 		createManagerComponent(state, {
-			done: () => done(undefined),
+			done,
 			requestRender: () => tui.requestRender(),
-			editFlow,
 		});
 }
 
@@ -688,14 +676,14 @@ export async function openManager(
 		return;
 	}
 
-	await ctx.custom<void>(
-		managerFactory(
-			state,
-			async (agent) => await openEditFlow(client, io, agent),
-		),
-		{
+	for (;;) {
+		const result = await ctx.custom<ManagerResult>(managerFactory(state), {
 			overlay: true,
 			overlayOptions: { fullscreen: true },
-		},
-	);
+		});
+		if (result === undefined) return;
+
+		await openEditFlow(client, io, result.agent);
+		await state.load();
+	}
 }

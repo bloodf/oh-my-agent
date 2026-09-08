@@ -13,9 +13,9 @@
  * `tests/ensure-daemon.test.ts`.
  *
  * Failure modes: an already-up daemon is a no-op. A refused or missing
- * socket spawns `[process.execPath, DAEMON_MAIN_PATH, "daemon"]` with
- * `PI_CODING_AGENT_DIR` pointing at the active profile — the same launcher
- * `omp-agent daemon` and `daemon restart` use, so PATH is never required.
+ * socket spawns the plugin-local entry with Bun (not process.execPath, which
+ * is the OMP executable in binary installs). PI_CODING_AGENT_DIR points at
+ * the active profile; the optional omp-agent shell shim is never required.
  * A spawn that exits non-zero is still success if a later probe works
  * (pidfile already-running race). Probe/spawn surprises return `"failed"`
  * rather than throwing into the TUI; the widget then paints the shared
@@ -64,9 +64,11 @@ async function defaultSpawn(
 		env: request.env,
 		stdio: ["ignore", "pipe", "pipe"],
 	});
-	const stdout = await new Response(child.stdout).text();
-	const stderr = await new Response(child.stderr).text();
-	const exitCode = await child.exited;
+	const [exitCode, stdout, stderr] = await Promise.all([
+		child.exited,
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+	]);
 	return {
 		exitCode: exitCode ?? 1,
 		stdout: stdout.trim(),
@@ -100,7 +102,7 @@ export async function ensureDaemon(
 
 	try {
 		await spawn({
-			cmd: [process.execPath, DAEMON_MAIN_PATH, "daemon"],
+			cmd: [Bun.which("bun") ?? "bun", DAEMON_MAIN_PATH, "daemon"],
 			env: { ...process.env, PI_CODING_AGENT_DIR: agentDir() },
 		});
 	} catch {

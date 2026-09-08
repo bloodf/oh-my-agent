@@ -15,11 +15,11 @@ OMP plugin for autonomous long-lived multi-agent collaboration. A Bun daemon sup
 
 ## Repo map
 
-- `src/daemon/` - composition root, socket, supervisor, scheduler, gateway, CLI
+- `src/daemon/` - `main.ts` executable launcher, `runtime.ts` daemon composition, dependency-free `startup.ts` parser, socket, supervisor, scheduler, gateway, CLI
 - `src/worker/` - RPC lifecycle, sandbox, toolbelt
 - `src/rooms/` - SQLite room store
-- `src/extension/` - OMP TUI plugin
-- `src/console/` - browser client (no build step)
+- `web/` - editable React/shadcn source for the console
+- `src/console/` - generated production output from `web/`; refresh with `bun run console:build`; served by the daemon
 - `src/shared/` - protocol and peer parser
 - `tests/` - unit, integration, contract, browser, pack
 - `scripts/gen-delivery-docs.py` - delivery tree source

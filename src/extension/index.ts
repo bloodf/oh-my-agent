@@ -30,10 +30,9 @@ import type {
 } from "@oh-my-pi/pi-coding-agent";
 /** `getAgentDir()` from pi-utils resolves the active profile's agent dir. */
 import { getAgentDir } from "@oh-my-pi/pi-utils";
-import { cliCommand } from "./cli";
+import { cliCommand, consoleCommand } from "./cli";
 import type { ExtensionIO } from "./commands";
 import {
-	agentsCommand,
 	injectCommand,
 	killCommand,
 	logsCommand,
@@ -95,16 +94,16 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 	});
 
 	pi.registerCommand("console", {
-		description: "Print the browser console URL (same as /cli console).",
+		description: "Open web UI or copy console URL.",
 		handler: async (_args, ctx) => {
-			await cliCommand(ioFrom(ctx.ui), "console");
-		},
-	});
-
-	pi.registerCommand("agents", {
-		description: "List oh-my-agent peers with live state from the daemon.",
-		handler: async (args, ctx) => {
-			await agentsCommand(client, ioFrom(ctx.ui), args);
+			const io = ioFrom(ctx.ui);
+			if (!ctx.hasUI) {
+				io.notify(
+					"Web console menu needs the TUI; run /cli console to print the URL.",
+				);
+				return;
+			}
+			await consoleCommand(io);
 		},
 	});
 
@@ -166,7 +165,6 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 			await injectCommand(client, ioFrom(ctx.ui), args);
 		},
 	});
-
 	// The manager owns no state: it opens over the transcript, drives the
 	// daemon through the same socket every command uses, and closes clean.
 	// `custom` lives on `ctx.ui` while the mode guard lives on `ctx`, so the
@@ -176,17 +174,20 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 		description: "Open the full-screen agent manager (needs the TUI).",
 		handler: async (_args, ctx) => {
 			await openManager(client, ioFrom(ctx.ui), managerHostFrom(ctx));
+			await refreshWidget(client, ioFrom(ctx.ui));
 		},
 	});
 
 	// Feature-guarded: `registerShortcut` is present on the real
 	// `ExtensionAPI`, but a host (or an older one) that lacks it must still
 	// load the extension — the shortcut is a convenience, and `/manage` is
-	// the surface that has to work.
-	pi.registerShortcut?.("ctrl+g", {
+	// the surface that has to work. Ctrl+G belongs to OMP's external-editor
+	// binding, so this uses Alt+G and never shadows a core shortcut.
+	pi.registerShortcut?.("alt+g", {
 		description: "Open the oh-my-agent manager.",
 		handler: async (ctx) => {
 			await openManager(client, ioFrom(ctx.ui), managerHostFrom(ctx));
+			await refreshWidget(client, ioFrom(ctx.ui));
 		},
 	});
 

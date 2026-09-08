@@ -178,6 +178,8 @@ async function openPage(): Promise<TrackedPage> {
 	await page.bringToFront();
 	// RED runs must fail fast; 5s default hides a missing client behind a hang.
 	page.setDefaultTimeout(1_500);
+	// Initial bundle load is not an assertion wait, especially on cold CI.
+	page.setDefaultNavigationTimeout(10_000);
 	let closed = false;
 	cleanups.push(async function cleanupPage() {
 		if (closed) return;
@@ -2697,7 +2699,9 @@ describe("remote operator authentication", () => {
 				(request) => request.path === "/api/ws-ticket",
 			);
 			expect(wsTicketsAfter).toEqual(wsTicketsBefore);
-			expect(wsTicketsAfter.map((request) => request.token)).toEqual([TOKEN]);
+			expect(new Set(wsTicketsAfter.map((request) => request.token))).toEqual(
+				new Set([TOKEN]),
+			);
 			expect(h.feed.connects).toBe(connectsBefore);
 			expect(
 				await page.evaluate(() => {

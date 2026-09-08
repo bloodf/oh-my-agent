@@ -4,7 +4,7 @@ Contributor hub. Operator install and usage live in the [root README](../../READ
 
 ## First hour
 
-1. Follow [setup.md](setup.md): clone, `bun install`, optional Chrome, first green run.
+1. Follow [setup.md](setup.md): clone, install root and `web/` locked dependencies, optional Chrome, first green run.
 2. Confirm the suite is green (`bun run test:fast` while iterating; `bun test` before a PR).
 3. Read [ARCHITECTURE.md §4](../../ARCHITECTURE.md#4-component-architecture) (component architecture). Then this folder's [architecture.md](architecture.md) for the onboarding tour.
 4. Skim [modules.md](modules.md) so file names map to jobs.
@@ -14,7 +14,7 @@ Contributor hub. Operator install and usage live in the [root README](../../READ
 
 | Page | Use it for |
 |---|---|
-| [setup.md](setup.md) | Clone, install, Chrome, first green run, Biome |
+| [setup.md](setup.md) | Clone, root + web installs, console build output, Chrome, first green run, Biome |
 | [architecture.md](architecture.md) | How TUI, CLI, and console reach the daemon |
 | [modules.md](modules.md) | File-to-purpose map of `src/` and `tests/` |
 | [testing.md](testing.md) | How to run and write tests, non-vacuity, flake rules |

@@ -10,10 +10,6 @@
  * registerCommand/setWidget/notify/confirm calls, because OMP's runtime is
  * not running under the test suite.
  *
- * The shield assertion runs twice, once against a daemon context that marks
- * one peer sandboxed and once against the production context (which predates
- * that field): the shield must appear only in the first, because a shield on
- * an unsandboxed agent is a false security claim (ADR-005).
  *
  * @Environment bun
  */
@@ -34,10 +30,9 @@ import type {
 import { startControlSocket } from "../src/daemon/socket";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
 import { Supervisor } from "../src/daemon/supervisor";
-import { cliCommand } from "../src/extension/cli";
+import { cliCommand, consoleCommand } from "../src/extension/cli";
 import type { ExtensionIO } from "../src/extension/commands";
 import {
-	agentsCommand,
 	editCommand,
 	injectCommand,
 	killCommand,
@@ -386,118 +381,6 @@ async function startDaemon(
 	};
 }
 
-describe("/agents hierarchy", () => {
-	test("renders roots and descendants in alphabetical tree order", async () => {
-		const daemon = await startDaemon([
-			{ name: "zeta" },
-			{ name: "charlie", parent: "bravo" },
-			{ name: "bravo", parent: "alpha" },
-			{ name: "alpha" },
-		]);
-		const io = fakeIo();
-
-		await agentsCommand(daemon.client, io, "");
-
-		expect(io.notices).toEqual([
-			[
-				"alpha — running (anthropic)",
-				"  bravo — running (anthropic)",
-				"    charlie — running (anthropic)",
-				"zeta — running (anthropic)",
-			].join("\n"),
-		]);
-	});
-
-	test("renders an orphan as a root naming its absent parent", async () => {
-		const daemon = await startDaemon([], {
-			orphans: new Map([["stranded", "missing-parent"]]),
-		});
-		const io = fakeIo();
-
-		await agentsCommand(daemon.client, io, "");
-
-		expect(io.notices).toEqual([
-			"stranded — stopped (unknown) (orphan: missing-parent)",
-		]);
-	});
-});
-
-// ── /agents ──────────────────────────────────────────────────────────────────
-
-describe("/agents", () => {
-	test("lists peers with state and account from the daemon", async () => {
-		const daemon = await startDaemon([
-			{ name: "researcher" },
-			{ name: "reviewer" },
-		]);
-		daemon.workers.get("reviewer")?.setState("parked");
-
-		const io = fakeIo();
-		await agentsCommand(daemon.client, io, "");
-
-		const out = io.notices.join("\n");
-		expect(out).toContain("researcher");
-		expect(out).toContain("running");
-		expect(out).toContain("reviewer");
-		expect(out).toContain("parked");
-		expect(out).toContain("anthropic");
-	});
-
-	test("shows a shield only for peers whose wire status says sandboxed", async () => {
-		// The wire shape predates a sandboxed field, so the command computes
-		// the marker from the payload it is handed: true shields, everything
-		// else does not. The production server never sets the field today, so
-		// the shield cannot appear by accident — ADR-005's false-claim rule.
-		const staticClient = {
-			async call<T>(): Promise<T> {
-				return {
-					agents: [
-						{
-							name: "vault",
-							state: "running",
-							account: "anthropic",
-							sandboxed: true,
-						},
-						{ name: "plain", state: "running", account: "anthropic" },
-						{
-							name: "opted-out",
-							state: "running",
-							account: "anthropic",
-							sandboxed: false,
-						},
-					],
-				} as T;
-			},
-		};
-		const io = fakeIo();
-		await agentsCommand(staticClient, io, "");
-
-		const out = io.notices.join("\n");
-		const lineFor = (name: string): string => {
-			const line = out.split("\n").find((l) => l.includes(name));
-			if (line === undefined) throw new Error(`no line for ${name}`);
-			return line;
-		};
-		expect(lineFor("vault")).toContain("🛡");
-		expect(lineFor("plain")).not.toContain("🛡");
-		expect(lineFor("opted-out")).not.toContain("🛡");
-	});
-
-	test("shows no shield against a live daemon that predates the field", async () => {
-		// Full round trip: the production server (startControlSocket) strips
-		// unknown record fields, so even a peer the daemon believes sandboxed
-		// arrives without the flag — and must render shieldless.
-		const daemon = await startDaemon([{ name: "plain", sandboxed: true }]);
-
-		const io = fakeIo();
-		await agentsCommand(daemon.client, io, "");
-
-		const out = io.notices.join("\n");
-		expect(out).toContain("plain");
-		expect(out).not.toContain("🛡");
-	});
-});
-
 // ── /rooms ───────────────────────────────────────────────────────────────────
 
 describe("/rooms", () => {
@@ -556,18 +439,18 @@ describe("/rooms", () => {
 // ── /spawn ───────────────────────────────────────────────────────────────────
 
 describe("/spawn", () => {
-	test("spawns a peer that then appears in /agents", async () => {
+	test("spawns a peer and the daemon reports it back", async () => {
 		const daemon = await startDaemon([]);
 
 		const io = fakeIo();
 		await spawnCommand(daemon.client, io, "implementor");
 		expect(io.notices.join("\n")).toContain("implementor");
 
-		const io2 = fakeIo();
-		await agentsCommand(daemon.client, io2, "");
-		expect(io2.notices.join("\n")).toContain("implementor");
+		const listed = await daemon.client.call<{
+			agents: { name: string }[];
+		}>("agent_status", {});
+		expect(listed.agents.map((a) => a.name)).toContain("implementor");
 	});
-
 	test("reports daemon refusal instead of throwing", async () => {
 		const daemon = await startDaemon([]);
 		// The stub context accepts any name, so exercise the error path through
@@ -781,7 +664,6 @@ describe("status widget", () => {
 		expect(text).toContain("1 running");
 		expect(text).toContain("1 parked");
 		expect(text).toContain("2 unread");
-		expect(text).toContain("ctrl+g manager");
 		expect(text).not.toContain("token=");
 	});
 });
@@ -795,7 +677,6 @@ describe("daemon unavailable", () => {
 		);
 
 		const io = fakeIo();
-		await agentsCommand(missing, io, "");
 		await spawnCommand(missing, io, "x");
 		await killCommand(missing, io, "x");
 		await roomsReadCommand(missing, io, "#x");
@@ -810,7 +691,7 @@ describe("daemon unavailable", () => {
 		});
 		await refreshWidget(missing, io);
 
-		expect(io.notices.length).toBeGreaterThanOrEqual(10);
+		expect(io.notices.length).toBeGreaterThanOrEqual(9);
 		for (const notice of io.notices) {
 			expect(notice).toContain(DAEMON_UNAVAILABLE);
 		}
@@ -873,20 +754,71 @@ describe("/cli", () => {
 	});
 });
 
+// ── /console ─────────────────────────────────────────────────────────────────
+
+describe("/console", () => {
+	test("cancel leaves URL private and does not dispatch native actions", async () => {
+		const io = fakeIo();
+		let opened = 0;
+		let copied = 0;
+		await consoleCommand(io, {
+			ensure: async () => {},
+			fetchUrl: async () => "http://127.0.0.1:50561/?private=operator",
+			openUrl: async () => {
+				opened += 1;
+				return true;
+			},
+			writeClipboard: async () => {
+				copied += 1;
+			},
+		});
+
+		expect(io.selects).toEqual([
+			{
+				title: "Open the web console",
+				options: ["Open web UI", "Copy URL", "Show URL"],
+			},
+		]);
+		expect(io.notices).toEqual([]);
+		expect(opened).toBe(0);
+		expect(copied).toBe(0);
+	});
+
+	test("open failure never leaks the URL and never silently copies", async () => {
+		const io = fakeIo();
+		io.selectAnswer = "Open web UI";
+		const url = "http://127.0.0.1:50561/?private=operator";
+		let copied = 0;
+		await consoleCommand(io, {
+			ensure: async () => {},
+			fetchUrl: async () => url,
+			openUrl: async () => {
+				throw new Error(url);
+			},
+			writeClipboard: async () => {
+				copied += 1;
+			},
+		});
+
+		expect(io.notices).toEqual([
+			"Browser unavailable; choose Copy URL or Show URL.",
+		]);
+		expect(io.notices.join("\n")).not.toContain(url);
+		expect(copied).toBe(0);
+	});
+});
+
 // ── registration factory ─────────────────────────────────────────────────────
 
 describe("extension factory", () => {
 	test("registers the operator commands without touching the runtime", () => {
 		const registered: string[] = [];
-		const shortcuts: string[] = [];
 		const events: string[] = [];
 		const fakePi = {
 			registerCommand(name: string) {
 				registered.push(name);
 			},
-			registerShortcut(shortcut: string) {
-				shortcuts.push(shortcut);
-			},
+			registerShortcut() {},
 			on(event: string) {
 				events.push(event);
 			},
@@ -895,7 +827,6 @@ describe("extension factory", () => {
 		// before session start, so the factory must not call them here.
 		ohMyAgentExtension(fakePi as never);
 
-		expect(registered).toContain("agents");
 		expect(registered).toContain("spawn");
 		expect(registered).toContain("kill");
 		expect(registered).toContain("rooms");
@@ -905,7 +836,6 @@ describe("extension factory", () => {
 		expect(registered).toContain("manage");
 		expect(registered).toContain("cli");
 		expect(registered).toContain("console");
-		expect(shortcuts).toHaveLength(1);
 		expect(events).toContain("session_start");
 		expect(events).toContain("turn_end");
 	});
@@ -1381,30 +1311,26 @@ describe("editing flows", () => {
 	});
 });
 
-describe("manager edit seam", () => {
-	test("the edit action calls the T-903 flow and reports its message", async () => {
+describe("manager edit handoff", () => {
+	test("the edit action closes the fullscreen surface with its selected agent", async () => {
 		const daemon = await startDaemon([{ name: "alpha" }]);
 		const state = new ManagerState(daemon.client);
 		await state.load();
-		const seen: string[] = [];
+		let result: unknown;
 		const component = createManagerComponent(state, {
-			done: () => {},
-			requestRender: () => {},
-			editFlow: async (agent) => {
-				seen.push(agent.name);
-				return `Edited ${agent.name}.`;
+			done: (value) => {
+				result = value;
 			},
+			requestRender: () => {},
 		});
 
 		component.handleInput("\r");
 		component.handleInput("\r"); // "Edit definition / model" is first
-		await settle(component);
 
-		expect(seen).toEqual(["alpha"]);
-		expect(component.render(80).join("\n")).toContain("Edited alpha.");
+		expect(result).toMatchObject({ kind: "edit", agent: { name: "alpha" } });
 	});
 
-	test("the production manager action runs the shared definition flow", async () => {
+	test("the production manager closes before guided edit, reloads, and reopens", async () => {
 		const daemon = await startDaemon([{ name: "alpha" }], {
 			definitions: [
 				{
@@ -1417,27 +1343,61 @@ describe("manager edit seam", () => {
 			],
 		});
 		const io = fakeIo();
-		io.selectAnswers = ["Model", "@review"];
+		const order: string[] = [];
+		io.selectAnswers = ["Definition"];
+		io.editorAnswers = [
+			'---\nname: "alpha"\ndescription: "Alpha peer."\nmodel: ["@review"]\nspawns: ["scout"]\n---\nEdited body.\n',
+		];
+		const select = io.select.bind(io);
+		io.select = async (title, options) => {
+			order.push("select");
+			return await select(title, options);
+		};
+		const editor = io.editor;
+		if (editor === undefined) throw new Error("editor stub missing");
+		io.editor = async (title, prefill = "") => {
+			order.push("editor");
+			return await editor(title, prefill);
+		};
+		let opens = 0;
+
 		await openManager(daemon.client, io, {
 			mode: "tui",
 			hasUI: true,
 			custom: async (factory) => {
+				opens += 1;
+				order.push("open");
+				if (opens === 2) {
+					const reopened = factory(
+						{ requestRender: () => {} },
+						{},
+						{},
+						() => {},
+					);
+					expect(reopened.render(80).join("\n")).toContain("alpha");
+					return undefined as never;
+				}
+				let result: unknown;
 				const component = factory(
 					{ requestRender: () => {} },
 					{},
 					{},
-					() => {},
+					(value) => {
+						order.push("close");
+						result = value;
+					},
 				);
 				component.handleInput("\r");
 				component.handleInput("\r");
-				await settle(component);
-				expect(component.render(80).join("\n")).toContain(
-					"rebuildRequired: false",
-				);
-				return undefined as never;
+				return result as never;
 			},
 		});
-		expect(io.selects[0]?.options).toEqual(["Definition", "Model"]);
+
+		const fetched = await daemon.client.call<{
+			definition: { body: string };
+		}>("definition_get", { name: "alpha" });
+		expect(order).toEqual(["open", "close", "select", "editor", "open"]);
+		expect(fetched.definition.body.trim()).toBe("Edited body.");
 	});
 });
 

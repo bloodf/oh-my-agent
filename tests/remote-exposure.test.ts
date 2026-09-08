@@ -29,8 +29,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { runCli } from "../src/daemon/cli";
 import { normalizeRequestUrl } from "../src/daemon/console-api";
-import type { DaemonHandle, WorkerFactory } from "../src/daemon/main";
-import { bootDaemon } from "../src/daemon/main";
+import type { DaemonHandle, WorkerFactory } from "../src/daemon/runtime";
+import { bootDaemon } from "../src/daemon/runtime";
 import { persistConnectionAuditState } from "../src/daemon/socket";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
 import type { JsonRpcFailure, JsonRpcSuccess } from "../src/shared/protocol";
@@ -677,6 +677,10 @@ describe("loopback default", () => {
 describe("remote mode control-socket hierarchy enforced", () => {
 	/** A peer definition, so a real boot mints a scoped worker token. */
 	async function writePeer(agentDir: string): Promise<void> {
+		await mkdir(join(agentDir, "oh-my-agent"), {
+			recursive: true,
+			mode: 0o700,
+		});
 		const root = join(agentDir, "oh-my-agent", "agents");
 		await mkdir(root, { recursive: true });
 		await writeFile(

@@ -1,6 +1,6 @@
 # Setup
 
-Requirements: [Bun](https://bun.sh) >= 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` >= 18.0.7). The OMP packages are peer plus dev dependencies; `bun install` is enough for a checkout.
+Requirements: [Bun](https://bun.sh) >= 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` >= 18.0.7). Root and `web/` have separate locked dependency trees; install both.
 
 BASE_BRANCH: `main`.
 
@@ -9,10 +9,15 @@ BASE_BRANCH: `main`.
 ```sh
 git clone https://github.com/bloodf/oh-my-agent.git
 cd oh-my-agent
-bun install
+bun install --frozen-lockfile
+bun install --cwd web --frozen-lockfile
 ```
 
-The package has no `dependencies` and no `build` script ([`tests/build-hygiene.test.ts`](../../tests/build-hygiene.test.ts)). Runtime is TypeScript run by Bun from `src/`.
+`web/` contains editable React source. `src/console/` is generated production output served by the daemon; refresh it after web changes:
+
+```sh
+bun run console:build
+```
 
 ## 2. Optional: headless Chrome
 
@@ -27,7 +32,7 @@ Skip this if you are not touching the console client. `bun run test:fast` alread
 ## 3. First green run
 
 ```sh
-bun run typecheck   # tsc --noEmit
+bun run typecheck   # tsc --noEmit, then bun run --cwd web typecheck
 bun run test:fast   # full suite minus pack, consumer-install, console-client
 bun run lint        # biome check .
 ```
@@ -46,7 +51,7 @@ bun run docs        # second run must produce no diff
 
 | Script | Command | When |
 |---|---|---|
-| `typecheck` | `tsc --noEmit` | Every change |
+| `typecheck` | `tsc --noEmit && bun run --cwd web typecheck` | Every change |
 | `test` | `bun test --timeout 30000` | Before a PR; what CI runs |
 | `test:fast` | `bun test` ignoring `tests/pack.test.ts`, `tests/consumer-install.test.ts`, `tests/console-client.test.ts` | Iteration on daemon, worker, rooms, extension |
 | `test:consumer-install` | that one file | Packaging / install path |
@@ -54,7 +59,7 @@ bun run docs        # second run must produce no diff
 | `format` | `biome check --write .` | When lint reports format drift |
 | `docs` | `python3 scripts/gen-delivery-docs.py` | After editing the generator |
 
-`prepack` runs `typecheck` then `test:fast`. There is no compile step.
+`prepack` runs `console:build`, then `typecheck` and `test:fast`; the console has a compile step.
 
 ## 5. Editor and Biome
 
@@ -75,11 +80,12 @@ bun run docs        # second run must produce no diff
 1. Changelog version matches `package.json` / `omp.version`
 2. Patch hygiene (`python3 scripts/check-patches.py` and `--selftest`)
 3. `bun install --frozen-lockfile`
-4. Chrome headless shell (same command as step 2)
-5. `bun run typecheck`
-6. `PATH="$PWD/node_modules/.bin:$PATH" bun test --timeout 30000`
-7. `bunx biome check .`
-8. `python3 scripts/gen-delivery-docs.py` then `git diff --exit-code docs/`
+4. `bun install --cwd web --frozen-lockfile`
+5. Chrome headless shell (same command as step 2)
+6. `bun run typecheck`
+7. `PATH="$PWD/node_modules/.bin:$PATH" bun test --timeout 30000`
+8. `bunx biome check .`
+9. `python3 scripts/gen-delivery-docs.py` then `git diff --exit-code docs/`
 
 A stale `docs/delivery/` tree, or a hand-edit of it, fails that last step.
 

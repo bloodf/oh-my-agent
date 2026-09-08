@@ -35,10 +35,10 @@ import { dirname, join } from "node:path";
 
 import type { ConsoleApi, ConsoleEvent } from "../src/daemon/console-api";
 import { startConsoleApi } from "../src/daemon/console-api";
-import { bootDaemon } from "../src/daemon/main";
 import { createOperations } from "../src/daemon/operations";
 import type { PeerStoreRoots } from "../src/daemon/peer-store";
 import { createPeerStore } from "../src/daemon/peer-store";
+import { bootDaemon } from "../src/daemon/runtime";
 import { Scheduler } from "../src/daemon/scheduler";
 import type { PeerRecord } from "../src/daemon/socket";
 import { Supervisor } from "../src/daemon/supervisor";

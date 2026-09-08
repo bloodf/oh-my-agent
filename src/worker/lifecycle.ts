@@ -4,8 +4,7 @@
  * and stop it. Delegation stays OMP-native (§5.1): the child keeps `task`, and
  * durable peers are created through the daemon toolbelt, never in-run.
  *
- * Public API: `startWorker(options): Promise<WorkerHandle>`,
- * `classifyAgentSpawn(payload): "peer" | "subtask"`.
+ * Public API: `startWorker(options): Promise<WorkerHandle>`.
  *
  * Upstream deps: `@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client` (`RpcClient`),
  * `../daemon/materializer` (`WorkerLayout`), `../shared/agent-definition`.
@@ -37,6 +36,7 @@ import { fingerprintPeerDefinition } from "../shared/agent-definition";
 import type { SandboxLaunch } from "./launch-gate";
 import { resolveSandboxLaunch } from "./launch-gate";
 import type { SandboxPolicy } from "./sandbox";
+import toolbeltExtension, { type ToolbeltConnection } from "./toolbelt";
 
 export interface StartWorkerOptions {
 	peer: PeerDefinition;
@@ -88,20 +88,6 @@ export interface WorkerHandle {
 	park(): Promise<void>;
 	resume(): Promise<void>;
 	stop(): Promise<void>;
-}
-
-/**
- * Which spawn verb a payload belongs to (§5.1). A durable peer names the rooms
- * it joins; a one-shot subtask names none and must go through native `task`
- * instead — `expected_output` alone does not make it durable.
- */
-export function classifyAgentSpawn(payload: {
-	rooms?: unknown;
-	[key: string]: unknown;
-}): "peer" | "subtask" {
-	return Array.isArray(payload.rooms) && payload.rooms.length > 0
-		? "peer"
-		: "subtask";
 }
 
 /**
@@ -269,7 +255,7 @@ export function buildWorkerPolicy(
 	return {
 		workspace: cwd,
 		workerHome: layout.home,
-		runtimePaths: ["/usr/bin", "/bin", "/usr/lib"],
+		runtimePaths: ["/usr/bin", "/bin", "/usr/lib", join(import.meta.dir, "..")],
 		inferenceGateway: layout.inferenceGateway,
 		loopbackPorts: [layout.inferenceGateway.port],
 		extraRoots,
@@ -351,15 +337,20 @@ export async function startWorker(
 				[SHIM_ENV_CARRIER]: JSON.stringify(layout.env),
 			},
 			sessionDir: layout.sessionDir,
-			// Both resolve to the gateway provider declared in the worker's
-			// models.yml, so every turn leaves through the credential gateway.
-			provider: layout.provider,
-			model: layout.modelId,
+			// A fully qualified selector defers custom-provider resolution until
+			// OMP discovery completes; --provider rejects before discovery runs.
+			model: `${layout.provider}/${layout.modelId}`,
 			cliPath: entry,
 			// No `--agent` flag exists (verified via `omp --help`): the worker's
 			// definition reaches the child through its materialized agent dir
 			// (PI_CODING_AGENT_DIR); its body is appended as the system prompt.
-			args: ["--append-system-prompt", peer.body],
+			args: [
+				"--no-extensions",
+				"--extension",
+				join(import.meta.dir, "toolbelt.ts"),
+				"--append-system-prompt",
+				peer.body,
+			],
 		});
 
 		// Subscribe before start so no early dispatch is missed.
@@ -510,6 +501,8 @@ export interface InProcessWorkerOptions {
 	 * see the same value the RPC path would compute.
 	 */
 	fingerprint: string;
+	/** Session-local daemon identity; never installed into process.env. */
+	toolbelt?: ToolbeltConnection;
 	/** SDK seam — defaults to the real `createAgentSession`; overridable for tests. */
 	createSession?: (
 		options: CreateAgentSessionOptions,
@@ -588,6 +581,10 @@ export async function startInProcessWorker(
 		modelPattern: options.modelPattern,
 		appendSystemPrompt: options.appendSystemPrompt,
 		agentId: options.agentId ?? peer.name,
+		disableExtensionDiscovery: true,
+		extensions: options.toolbelt
+			? [(pi) => toolbeltExtension(pi, options.toolbelt)]
+			: [],
 		...(activeSessionManager ? { sessionManager: activeSessionManager } : {}),
 	});
 

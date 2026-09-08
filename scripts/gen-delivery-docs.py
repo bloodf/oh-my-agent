@@ -1765,10 +1765,13 @@ TASKS += [
         epic="EP-03", sprint="SP-03", status="Done",
         goal="Each worker sees only the credentials its token is bound to, through a loopback proxy.",
         read_first=[ARCH, ("Broker contract", "tests/contracts/broker.contract.test.ts")],
-        files=["src/daemon/credential-gateway.ts", "tests/credential-gateway.test.ts"],
+        files=["src/daemon/credential-gateway.ts", "tests/credential-gateway.test.ts", "src/daemon/inference-gateway.ts", "tests/inference-gateway.test.ts", "src/worker/spawn-policy.ts"],
         assets=[
             ("src/daemon/credential-gateway.ts", "New", "Token issuance, filtering, generations."),
             ("tests/credential-gateway.test.ts", "New", "44 tests."),
+            ("src/daemon/inference-gateway.ts", "New", "Model-scoped pi-native inference with daemon-owned provider authentication."),
+            ("tests/inference-gateway.test.ts", "New", "Real local-provider streaming and scope/auth rejection proof."),
+            ("src/worker/spawn-policy.ts", "New", "Lightweight peer-vs-subtask classifier used by the worker toolbelt."),
         ],
         steps=[
             "Issue a revocable bearer token per worker, bound to explicit credential ids.",
@@ -2105,9 +2108,11 @@ TASKS += [
             ("Control protocol", "docs/delivery/tasks/T-507-control-socket-protocol.md"),
             ("ADR-001: RPC subprocess workers", "docs/delivery/adr/ADR-001-rpc-subprocess-workers.md"),
         ],
-        files=["src/daemon/main.ts", "src/daemon/socket.ts", "package.json", "tests/daemon-main.test.ts"],
+        files=["src/daemon/main.ts", "src/daemon/runtime.ts", "src/daemon/startup.ts", "src/daemon/socket.ts", "package.json", "tests/daemon-main.test.ts"],
         assets=[
-            ("src/daemon/main.ts", "New", "Composition root."),
+            ("src/daemon/main.ts", "New", "Executable bin and detached launcher."),
+            ("src/daemon/runtime.ts", "Edited", "Daemon composition root extracted from the executable loader."),
+            ("src/daemon/startup.ts", "New", "Dependency-free daemon-start parser."),
             ("src/daemon/socket.ts", "New", "Serves the T-507 protocol over a unix socket."),
             ("tests/daemon-main.test.ts", "New", "Boot, socket, single-instance, shutdown."),
             ("src/shared/protocol.ts", "Read", "The method set and version this server implements."),
@@ -2135,7 +2140,7 @@ TASKS += [
         depends_on=["T-501", "T-507"],
         evidence=[
             ("Daemon suite, 29 tests incl. boot/detach/shutdown", "tests/daemon-main.test.ts"),
-            ("Composition root", "src/daemon/main.ts"),
+            ("Daemon composition root", "src/daemon/runtime.ts"),
             ("Thirteen-method socket server", "src/daemon/socket.ts"),
             ("Commit", "c99c961"),
         ],

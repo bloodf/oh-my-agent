@@ -18,8 +18,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { runCli } from "../src/daemon/cli";
-import type { WorkerFactory } from "../src/daemon/main";
-import { bootDaemon } from "../src/daemon/main";
+import type { WorkerFactory } from "../src/daemon/runtime";
+import { bootDaemon } from "../src/daemon/runtime";
 import type {
 	AgentStatusResult,
 	DefinitionGetResult,

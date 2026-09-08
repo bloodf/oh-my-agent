@@ -63,7 +63,7 @@ compose the tested runtime described below.*
 ```
 ┌────────────────────────────── omp (interactive TUI) ──────────────────────────────┐
 │  oh-my-agent extension                                                            │
-│  /agents /rooms /spawn /kill …   status widget   chat renderer   notifications    │
+│  /cli agents /rooms /spawn /kill …   status widget   chat renderer   notifications    │
 └───────────────┬───────────────────────────────────────────────────────────────────┘
                 │ JSON-RPC over unix socket (~/.omp/agent/oh-my-agent/daemon.sock)
 ┌───────────────▼───────────────── omp-agent daemon (Bun) ──────────────────────────┐
@@ -78,8 +78,9 @@ compose the tested runtime described below.*
 
 ### 4.1 Daemon - [Implemented]
 
-*The `omp-agent` binary and composition root live in
-[`src/daemon/main.ts`](src/daemon/main.ts); the JSON-RPC control plane lives in
+*The `omp-agent` binary lives in [`src/daemon/main.ts`](src/daemon/main.ts), a
+lightweight launcher. Daemon composition lives in
+[`src/daemon/runtime.ts`](src/daemon/runtime.ts); the JSON-RPC control plane lives in
 [`src/daemon/socket.ts`](src/daemon/socket.ts). [`src/shared/protocol.ts`](src/shared/protocol.ts)
 defines the 17-method contract, including `logs_tail`, `inject`, `chat_react`,
 and `chat_unreact`, covered by `tests/protocol.contract.test.ts` and exercised by
@@ -121,7 +122,7 @@ flow through the supervisor and socket, covered end to end by
 
 *Cron evaluation and one-shot timers live in
 [`src/daemon/scheduler.ts`](src/daemon/scheduler.ts), covered by
-`tests/scheduler.test.ts`. [`src/daemon/main.ts`](src/daemon/main.ts) arms
+`tests/scheduler.test.ts`. [`src/daemon/runtime.ts`](src/daemon/runtime.ts) arms
 definition `schedules:` at boot and composes them with
 [`src/daemon/db.ts`](src/daemon/db.ts); `tests/daemon-main.test.ts` covers
 definition arming and `tests/daemon-persistence.test.ts` covers persisted arm
@@ -139,7 +140,7 @@ commands, and [`src/extension/widget.ts`](src/extension/widget.ts) owns the
 daemon socket client and status widget. `tests/extension.test.ts` covers the
 extension surface.*
 
-- Slash commands: `/agents` (hub: list/spawn/kill/logs), `/rooms` (join/read/post), `/schedule`.
+- Slash commands: `/cli agents` (no visual sandbox indicator), `/rooms` (join/read/post), `/schedule`, plus `/manage` (full-screen manager; no visual sandbox indicator). Inspect each peer's actual `sandboxed` field with `omp-agent --json agents` or `/cli --json agents` in the TUI.
 - Status widget: running/parked agent count, unread room messages.
 - Room transcripts render through `/rooms` output; destructive actions use ask-dialog confirmations.
 - Talks **only** to the daemon socket — no direct DB access, so the TUI and daemon can't race.
@@ -162,7 +163,7 @@ The operator guide is [docs/web-console.md](docs/web-console.md).*
 `PeerParsingError` at parse time because a silently tolerated typo in `sandbox:` is
 an unenforced policy.*
 
-Definitions use OMP's task-agent format verbatim — but they are **not** stored in OMP's discovery roots. `~/.omp/agent/agents/` is global: OMP merges it into every session, so parking peer definitions there would surface them in the `/agents` hub of every unrelated OMP session. See §5.2 for where they actually live.
+Definitions use OMP's task-agent format verbatim — but they are **not** stored in OMP's discovery roots. `~/.omp/agent/agents/` is global: OMP merges it into every session, so parking peer definitions there would surface them in the built-in native `/agents` task-agent hub of every unrelated OMP session. See §5.2 for where they actually live.
 
 ```markdown
 ---
@@ -236,11 +237,11 @@ schedules(id, cron, action, payload, next_fire_at, enabled)
 opted-in sandboxed workers; `tests/sandbox.test.ts`,
 `tests/sandbox-gate.test.ts`, `tests/worker-lifecycle.test.ts`, and
 `tests/seatbelt-wiring.test.ts` cover the boundary. The daemon launches workers
-through [`src/daemon/main.ts`](src/daemon/main.ts),
-[`src/daemon/socket.ts`](src/daemon/socket.ts) carries actual sandbox state on
-the wire, and [`src/extension/commands.ts`](src/extension/commands.ts) renders
-the `/agents` shield only for sandboxed peers. `tests/daemon-main.test.ts` and
-`tests/extension.test.ts` cover that operator-visible state.*
+through [`src/daemon/runtime.ts`](src/daemon/runtime.ts), and
+[`src/daemon/socket.ts`](src/daemon/socket.ts) carries actual `sandboxed` state
+on the wire. `omp-agent --json agents` (or `/cli --json agents` in the TUI)
+exposes that field; the TUI renders no visual indicator. `tests/daemon-main.test.ts`
+covers the wire state.*
 
 This section is deliberately blunt because the intuitive mental model is wrong.
 
@@ -252,12 +253,13 @@ Three distinct layers, in decreasing strength:
 2. **Write isolation (mergeability, not security).** OMP `task.isolation.mode` gives delegated coding subagents copy-on-write workspaces and controlled merge-back. It does not restrict reads by itself.
 3. **Convention scoping (soft, bypassable).** Tool allowlists, generated worker config, and system instructions reduce accidents when `sandbox` is off. They are never described as security isolation.
 
-Defaults: layer 2 + 3 on, layer 1 opt-in (it constrains tooling and needs per-OS setup). `/agents` shows a shield icon only for sandboxed agents so the actual guarantee is visible.
+Defaults: layer 2 + 3 on, layer 1 opt-in (it constrains tooling and needs per-OS setup). The TUI does not currently render a visual sandbox indicator. Inspect each peer's actual `sandboxed` field with `omp-agent --json agents` or `/cli --json agents` in the TUI. The human `/cli agents` listing is unshielded.
 
 ## 8. Repo layout - [Implemented]
 
 *Daemon, worker, shared, extension, browser console, example-agent, and test
 trees exist. [`src/daemon/main.ts`](src/daemon/main.ts),
+[`src/daemon/runtime.ts`](src/daemon/runtime.ts),
 [`src/daemon/socket.ts`](src/daemon/socket.ts),
 [`src/worker/toolbelt.ts`](src/worker/toolbelt.ts),
 [`src/extension/index.ts`](src/extension/index.ts), [`src/console/`](src/console/),
@@ -280,7 +282,7 @@ oh-my-agent/
 
 ## 9. Decisions (confirmed) - [Implemented]
 
-*Every documented subsystem is shipped. [`src/daemon/main.ts`](src/daemon/main.ts)
+*Every documented subsystem is shipped. [`src/daemon/runtime.ts`](src/daemon/runtime.ts)
 composes workers, rooms, schedules, persistence, broker hosting, and the scoped
 credential gateway; `tests/daemon-main.test.ts` covers the composition.
 [`src/daemon/materializer.ts`](src/daemon/materializer.ts) routes each worker
@@ -306,7 +308,7 @@ reachable; `tests/supervisor.test.ts`, `tests/account-registry.test.ts`, and
 ## 10. Open questions
 
 1. ~~Transcript storage~~ **Resolved.** OMP's persisted session JSONL remains the canonical full transcript; oh-my-agent stores only `session_file`/byte cursor, run outcome, room projection ids, and optional deterministic search/index metadata in SQLite. On-demand replay reads OMP JSONL through its RPC/session APIs. No duplicate full-message blobs and no LLM-generated digest store.
-2. ~~Sandbox policy shipping~~ **Resolved.** One typed workspace policy compiles to macOS Seatbelt or Linux `bwrap`. macOS enforces filesystem roots plus declared loopback gateway/host-bridge ports. Linux `bwrap --share-net` cannot enforce port-level loopback, so sandbox mode fails closed unless the agent explicitly accepts `unrestricted-host-network`; that downgrade is visible in `/agents`. Unsupported/missing adapters fail closed. Contract tests validate generated profiles/argv without launching privileged sandboxes.
+2. ~~Sandbox policy shipping~~ **Resolved.** One typed workspace policy compiles to macOS Seatbelt or Linux `bwrap`. macOS enforces filesystem roots plus declared loopback gateway/host-bridge ports. Linux `bwrap --share-net` cannot enforce port-level loopback, so sandbox mode fails closed unless the agent explicitly accepts `unrestricted-host-network`; that downgrade is visible in `/manage`. Unsupported/missing adapters fail closed. Contract tests validate generated profiles/argv without launching privileged sandboxes.
 3. ~~Materialized-dir staleness~~ **Resolved.** The daemon fingerprints the effective peer definition plus the materialized `spawns:` closure. Before every wake/scheduled run it recomputes that fingerprint. Match → reuse the parked worker; mismatch → stop/park the old RPC process, rebuild the worker dir and static `task.disabledAgents` snapshot, then start a fresh OMP session before delivering messages. No hot-reload protocol: policy-changing files never mutate under a live process.
 4. ~~Broker surface~~ **Resolved** → §9.6. Server is exported (`startAuthBroker`, HTTP+SSE, bearer auth, ArkType wire schemas); embedding template is `runServe` (`auth-broker-cli.ts:154-194`) over local SQLite; discovery precedence verified in `auth-broker-config.ts`.
 5. ~~Quota-signal producer~~ **Resolved.** `AuthStorage.rotateSessionCredential()` detects usage-limit/account-rate-limit outcomes (`auth-storage.ts:6429`), extracts provider retry hints, and calls `markUsageLimitReached()` (`:6433-6442`). That method computes `blockedUntil` from the hint plus an OAuth usage-report reset window (`:4544-4557`), then `#markCredentialBlocked()` persists `{credentialId, providerKey, blockScope, blockedUntilMs}` through the credential store (`:1888-1916`). With broker-backed workers, `RemoteAuthCredentialStore.upsertCredentialBlock()` posts the same block to `/v1/credential/:id/block`; snapshots expose the deadline. Subscription auto-resume schedules from this verified `blockedUntilMs`; providers without a parseable reset use OMP's retry-hint/default-backoff path rather than a custom oh-my-agent parser.
@@ -314,6 +316,7 @@ reachable; `tests/supervisor.test.ts`, `tests/account-registry.test.ts`, and
 ## 11. Engineering practice — [Implemented]
 
 *Production modules including [`src/daemon/main.ts`](src/daemon/main.ts),
+[`src/daemon/runtime.ts`](src/daemon/runtime.ts),
 [`src/worker/lifecycle.ts`](src/worker/lifecycle.ts), and
 [`src/extension/index.ts`](src/extension/index.ts) are covered by focused and
 integration suites including `tests/daemon-main.test.ts`,

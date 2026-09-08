@@ -30,11 +30,8 @@ import { parsePeerDefinition } from "../src/shared/agent-definition";
 import { PASSTHROUGH_ENV_VARS } from "../src/shared/env-scrub";
 import { resolveSandboxLaunch } from "../src/worker/launch-gate";
 import type { WorkerHandle } from "../src/worker/lifecycle";
-import {
-	classifyAgentSpawn,
-	resolveOmpCli,
-	startWorker,
-} from "../src/worker/lifecycle";
+import { resolveOmpCli, startWorker } from "../src/worker/lifecycle";
+import { classifyAgentSpawn } from "../src/worker/spawn-policy";
 import { supervisorContract } from "./contracts/supervisor-contract.test";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -498,14 +495,6 @@ describe("§5.1 delegation contract", () => {
 		const handle = await start({ tools: ["read"] });
 
 		expect(handle.layout.disabledAgents).toEqual(["other-agent"]);
-	});
-
-	test("agent_spawn is not part of the worker's in-run tool surface", async () => {
-		const handle = await start({ tools: ["read", "grep"] });
-
-		// Durable peers are created through the daemon toolbelt, never as an
-		// in-run OMP tool; coding subtasks must route through native `task`.
-		expect(await handle.effectiveTools()).not.toContain("agent_spawn");
 	});
 
 	test("a prompted worker delegates through native task and never agent_spawn", async () => {

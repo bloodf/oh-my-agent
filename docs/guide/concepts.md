@@ -92,7 +92,7 @@ Three layers, decreasing strength:
 
 ![Isolation](../diagrams/isolation.svg)
 
-`/agents` shows a shield only for sandboxed peers. Details: [Security](security.md) and [ARCHITECTURE.md §7](../../ARCHITECTURE.md).
+`/cli agents` lists peers. Inspect each peer's actual `sandboxed` field with `omp-agent --json agents` (or `/cli --json agents` in the TUI); the TUI does not currently render a visual indicator. Details: [Security](security.md) and [ARCHITECTURE.md §7](../../ARCHITECTURE.md).
 
 ## Where state lives
 
