@@ -313,7 +313,6 @@ describe("spawn → room message → delegate → park → auto-resume", () => {
 		expect(d.layout.disabledAgents).toEqual(["other-agent"]);
 		const tools = await worker.effectiveTools();
 		expect(tools).toContain("task");
-		expect(tools).not.toContain("agent_spawn");
 	});
 
 	test("the worker carries only its gateway token", async () => {

@@ -8,7 +8,9 @@ Long-running `omp-agent` process. Composition root, control socket, persistence,
 
 | File | Purpose |
 |---|---|
-| [`main.ts`](../../src/daemon/main.ts) | Composition root and `omp-agent` bin. Boots every subsystem, detaches, shuts down in reverse. |
+| [`main.ts`](../../src/daemon/main.ts) | `omp-agent` bin and lightweight detached launcher. Parses startup arguments before loading daemon or OMP SDK. |
+| [`runtime.ts`](../../src/daemon/runtime.ts) | Daemon composition root: exports `bootDaemon` and `runDaemon`; boots subsystems and shuts down in reverse. |
+| [`startup.ts`](../../src/daemon/startup.ts) | Dependency-free daemon-start parser: usage, validation, and worker-backend selection. |
 | [`cli.ts`](../../src/daemon/cli.ts) | Shell client: JSON-RPC over the unix socket, no TUI required. |
 | [`boot.ts`](../../src/daemon/boot.ts) | Broker hosting: reuse a discovered broker or embed one. Workers never see `adminToken`. |
 | [`socket.ts`](../../src/daemon/socket.ts) | JSON-RPC control socket. TUI, CLI, and toolbelt reach the daemon only through this. |
@@ -47,7 +49,7 @@ OMP TUI plugin. Socket-only: no direct DB access.
 | File | Purpose |
 |---|---|
 | [`index.ts`](../../src/extension/index.ts) | Extension factory: register commands and the status widget. Auto-starts the daemon on session start. |
-| [`commands.ts`](../../src/extension/commands.ts) | `/agents`, `/rooms`, `/spawn`, `/kill`, inject, logs, schedule, edit. |
+| [`commands.ts`](../../src/extension/commands.ts) | `/cli agents`, `/rooms`, `/spawn`, `/kill`, inject, logs, schedule, edit. |
 | [`widget.ts`](../../src/extension/widget.ts) | Daemon socket client and running/parked/unread status widget. |
 | [`ensure-daemon.ts`](../../src/extension/ensure-daemon.ts) | Probe the socket; spawn plugin-local `main.ts` if down. Not PATH. |
 | [`cli.ts`](../../src/extension/cli.ts) | `/cli` and `/console`: in-process `runCli`, no PATH. |
@@ -55,13 +57,11 @@ OMP TUI plugin. Socket-only: no direct DB access.
 
 ## `src/console/`
 
-Vanilla JS, no build step. Bun serves these files as-is.
+Generated production output: `index.html`, `app.js`, `style.css`. Source lives in `web/` (React/shadcn). Regenerate with `bun run console:build`. The daemon serves these three files via the loopback HTTP listener; do not hand-edit.
 
-| File | Purpose |
-|---|---|
-| [`index.html`](../../src/console/index.html) | Console shell, operator-token prompt, landmarks. |
-| [`app.js`](../../src/console/app.js) | Channels, transcript, composer, threads, reactions, live events. |
-| [`style.css`](../../src/console/style.css) | Design tokens. Rules outside `:root` may only use `var()`. |
+## `web/`
+
+Editable React/shadcn source. Builds into `src/console/`.
 
 ## `src/shared/`
 

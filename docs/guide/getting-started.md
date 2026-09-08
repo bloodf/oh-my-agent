@@ -4,7 +4,7 @@
 
 ![First run](../diagrams/first-run.svg)
 
-Five minutes from install to a spawned example agent and a room post. Assumes [Bun](https://bun.sh) >= 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` >= 18.0.7) are already installed, and that OMP can already call the model you put in the definition.
+From install to a spawned example agent and a room post. Assumes [Bun](https://bun.sh) >= 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` >= 18.0.7) are already installed, and that OMP can already call the model you put in the definition.
 
 If a term is new, skim [Concepts](concepts.md) after this page.
 
@@ -20,7 +20,7 @@ omp install @bloodf/oh-my-agent
 omp
 ```
 
-Session start starts the detached daemon from the plugin tree. No PATH. No extra `omp-agent daemon`. Widget should show `agents: 0 running, 0 parked`. `ctrl+g` opens the manager.
+Session start starts the detached daemon from the plugin tree. No PATH. No extra `omp-agent daemon`. Widget should show `agents: 0 running, 0 parked`. `Alt+G` opens the manager.
 
 Inside the TUI:
 
@@ -29,7 +29,7 @@ Inside the TUI:
 /console
 ```
 
-`/cli` is every `omp-agent` verb. `/console` prints the browser URL. Paste it. That is the full operator web UI.
+`/cli` is every `omp-agent` verb. `/console` opens **Open web UI**, **Copy URL**, and **Show URL**. **Show URL** deliberately reveals the operator token; use `/cli console` when you need explicit URL output. That is the full operator web UI.
 
 The daemon keeps running after you close the TUI. Closing the terminal does not stop it.
 
@@ -55,7 +55,27 @@ oh-my-agent daemon not running — start it with `omp-agent daemon`.
 
 The TUI already tried to start it. That sentence means the auto-start failed; run `omp-agent daemon` from PATH as the fallback.
 
-## 3. Create the example researcher
+## 3. Install the native scout
+
+The researcher restricts temporary subagents to `scout`. Native task-agent definitions are separate from persistent oh-my-agent peers, and the npm package does not ship one. Create this read-only native definition before spawning researcher:
+
+```sh
+mkdir -p ~/.omp/agent/agents
+cat >~/.omp/agent/agents/scout.md <<'EOF'
+---
+name: scout
+description: Read-only code locator. Returns file:line citations.
+model: "@task"
+tools: [read, grep, glob]
+---
+
+You are a read-only scout. Locate the requested code, return path:line citations only, never suggest fixes, never edit.
+EOF
+```
+
+Keep researcher's `spawns: [scout]` allowlist; do not replace it with `"*"`.
+
+## 4. Create the example researcher
 
 `agent create` stores a definition. It does not start a worker. It accepts only a subset of frontmatter keys: `name`, `description`, `model`, `rooms`, `wake`, `autonomy`, `spawns`, plus the markdown body. See [Agents](agents.md) for the rest.
 
@@ -92,7 +112,7 @@ researcher	created
 
 The file is written to `<daemon-project>/.omp/oh-my-agent/agents/researcher.md`, where daemon-project is the cwd of the daemon process (the directory you launched `omp` from, or the cwd of a manual `omp-agent daemon`), not the CLI cwd. It is not written to OMP's global `~/.omp/agent/agents/` root.
 
-## 4. Spawn it
+## 5. Spawn it
 
 ```sh
 omp-agent spawn researcher
@@ -114,10 +134,10 @@ List live peers:
 omp-agent agents
 ```
 
-## 5. Post to the room
+## 6. Post to the room
 
 ```sh
-omp-agent rooms post #research @researcher Look up how omp-agent spawn differs from native task.
+omp-agent rooms post '#research' @researcher Look up how omp-agent spawn differs from native task.
 ```
 
 Expected:
@@ -131,7 +151,7 @@ You post as `@you`. With `wake.mention: true` and `wake.rooms: true`, the resear
 Read the transcript:
 
 ```sh
-omp-agent rooms read #research
+omp-agent rooms read '#research'
 ```
 
 Open the same conversation in the browser:
@@ -142,7 +162,7 @@ omp-agent console
 
 Paste the printed URL. Details: [Console](console.md).
 
-From the OMP TUI, the same actions are `/agents`, `/spawn researcher`, `/rooms post #research ...`, `/rooms read #research`. The status widget shows running and parked counts.
+From the OMP TUI, the same actions are `/cli agents`, `/spawn researcher`, `/rooms post #research ...`, `/rooms read #research`. The status widget shows running and parked counts. The native OMP `/agents` is the built-in task-agent hub and is unrelated to oh-my-agent peers.
 
 ## Stop and next
 

@@ -19,6 +19,8 @@
 ## Files this task may change
 
 - `src/daemon/main.ts`
+- `src/daemon/runtime.ts`
+- `src/daemon/startup.ts`
 - `src/daemon/socket.ts`
 - `package.json`
 - `tests/daemon-main.test.ts`
@@ -27,7 +29,9 @@
 
 | Path | Role | Note |
 |---|---|---|
-| [`src/daemon/main.ts`](../../../src/daemon/main.ts) | New | Composition root. |
+| [`src/daemon/main.ts`](../../../src/daemon/main.ts) | New | Executable bin and detached launcher. |
+| [`src/daemon/runtime.ts`](../../../src/daemon/runtime.ts) | Edited | Daemon composition root extracted from the executable loader. |
+| [`src/daemon/startup.ts`](../../../src/daemon/startup.ts) | New | Dependency-free daemon-start parser. |
 | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | New | Serves the T-507 protocol over a unix socket. |
 | [`tests/daemon-main.test.ts`](../../../tests/daemon-main.test.ts) | New | Boot, socket, single-instance, shutdown. |
 | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Read | The method set and version this server implements. |
@@ -59,7 +63,7 @@ Evidence:
 | Claim | Anchor |
 |---|---|
 | Daemon suite, 29 tests incl. boot/detach/shutdown | [`tests/daemon-main.test.ts`](../../../tests/daemon-main.test.ts) |
-| Composition root | [`src/daemon/main.ts`](../../../src/daemon/main.ts) |
+| Daemon composition root | [`src/daemon/runtime.ts`](../../../src/daemon/runtime.ts) |
 | Thirteen-method socket server | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) |
 | Commit | `c99c961` |
 

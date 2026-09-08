@@ -40,6 +40,7 @@ import type {
 	StatusResult,
 } from "../shared/protocol";
 import { METHODS } from "../shared/protocol-schemas";
+import { USAGE, UsageError } from "./startup";
 
 const STATE_DIR = "oh-my-agent";
 const CONSOLE_URL_FILE = "console-url";
@@ -95,70 +96,8 @@ export class DaemonUnavailableError extends Error {
 	}
 }
 
-export class UsageError extends Error {}
-
 /** A daemon replied with an error frame; its message is operator-safe output. */
 class DaemonRpcError extends Error {}
-
-/** Full command reference, emitted for every CLI parsing error. */
-export const USAGE = `Usage: omp-agent [--json] <verb> [args]
-
-Flags come before the verb; anything after \`--\` is payload, so a literal
---json inside a message is never eaten. Errors are always plain text,
-never JSON.
-
-Verbs:
-  status
-  audit
-  agents
-  agent create <name> <file|->
-  agent show <name>
-  agent edit <name> <file|->
-  spawn <name> [--parent <parent>]
-  daemon [--worker-backend rpc|in-process]
-  kill <name> [--keep-children]
-  rooms
-  rooms read <room>
-  rooms post <room> <text...>
-  schedule
-  schedule <id> on|off
-  logs <name|daemon> [n]
-  inject <name> <text...>
-  bump <account> <usd>
-  console
-  daemon stop
-  daemon restart
-`;
-
-export type WorkerBackend = "rpc" | "in-process";
-
-export interface DaemonStartOptions {
-	json: boolean;
-	workerBackend: WorkerBackend;
-}
-
-/** Parse only daemon-start forms; lifecycle and other verbs stay in runCli. */
-export function parseDaemonStartArgs(
-	argv: readonly string[],
-): DaemonStartOptions | undefined {
-	if (argv.length === 0) return { json: false, workerBackend: "rpc" };
-	const json = argv[0] === "--json";
-	const args = json ? argv.slice(1) : argv;
-	if (args[0] !== "daemon" || args[1] === "stop" || args[1] === "restart") {
-		return undefined;
-	}
-	if (args.length === 1) return { json, workerBackend: "rpc" };
-	if (args.length !== 3 || args[1] !== "--worker-backend") {
-		throw new UsageError();
-	}
-	const workerBackend = args[2];
-	if (workerBackend !== "rpc" && workerBackend !== "in-process") {
-		throw new UsageError(
-			`unknown worker backend ${JSON.stringify(workerBackend)}`,
-		);
-	}
-	return { json, workerBackend };
-}
 
 /** Equivalent to the extension client, kept local so daemon never imports UI. */
 export function createCliClient(
@@ -847,7 +786,7 @@ async function daemon(
 	// read the ambient environment would boot a different profile than the one
 	// just stopped.
 	const launcher = Bun.spawn({
-		cmd: [process.execPath, MAIN_PATH, "daemon"],
+		cmd: [Bun.which("bun") ?? "bun", MAIN_PATH, "daemon"],
 		env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
 		stdio: ["ignore", "pipe", "pipe"],
 	});

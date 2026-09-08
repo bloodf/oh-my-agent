@@ -12,7 +12,7 @@
  * Failure modes: every failure rejects rather than degrading to an unsandboxed
  * launch — a worker that silently escapes its policy is worse than one that
  * does not start. The single exception is an explicit `enabled: false`, which
- * is reported as unsandboxed so `/agents` can surface it.
+ * is reported as unsandboxed so `/cli agents` can surface it.
  *
  * Performance: one adapter probe per launch; the gate never executes anything.
  */

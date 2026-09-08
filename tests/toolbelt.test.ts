@@ -295,6 +295,34 @@ describe("worker toolbelt", () => {
 		}
 	});
 
+	test("session-local credentials override poisoned ambient worker settings", async () => {
+		const { socketPath } = await harness();
+		process.env.OH_MY_AGENT_SOCKET = "/nonexistent/ambient-daemon.sock";
+		process.env.OH_MY_AGENT_CONTROL_TOKEN = "wrong-ambient-token";
+		const tools = new Map<string, ToolDefinition>();
+		toolbeltExtension(
+			{
+				zod,
+				registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
+			} as unknown as ExtensionAPI,
+			{
+				socketPath,
+				controlToken: TEST_OPERATOR_TOKEN,
+				actor: "reviewer",
+			},
+		);
+		const result = await invoke(tools, "chat_send", {
+			room: "#general",
+			body: "scoped in-process message",
+		});
+		expect(result.isError).toBeUndefined();
+		const read = await invoke(tools, "chat_read", { room: "#general" });
+		expect(read.details).toMatchObject({
+			messages: [{ body: "scoped in-process message" }],
+		});
+		expect(process.env.OH_MY_AGENT_CONTROL_TOKEN).toBe("wrong-ambient-token");
+	});
+
 	test("executes every tool through the production control socket", async () => {
 		const { tools, spawnCalls, workerPrompts } = await harness();
 

@@ -41,8 +41,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DaemonDb } from "../src/daemon/db";
-import type { DaemonHandle, WorkerFactory } from "../src/daemon/main";
-import { bootDaemon } from "../src/daemon/main";
+import type { DaemonHandle, WorkerFactory } from "../src/daemon/runtime";
+import { bootDaemon } from "../src/daemon/runtime";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
 import { fingerprintPeerDefinition } from "../src/shared/agent-definition";
 import type {

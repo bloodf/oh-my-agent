@@ -2,10 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-import type { WorkerFactory } from "../src/daemon/main";
-import { bootDaemon } from "../src/daemon/main";
 import { createPeerStore } from "../src/daemon/peer-store";
+import type { WorkerFactory } from "../src/daemon/runtime";
+import { bootDaemon } from "../src/daemon/runtime";
 import { Scheduler } from "../src/daemon/scheduler";
 import {
 	type ControlIdentity,

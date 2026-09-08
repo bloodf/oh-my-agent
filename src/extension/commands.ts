@@ -20,14 +20,11 @@
  * Definition refusals reopen the editor with the rejected text intact.
  * Destructive kills confirm through `ExtensionIO.confirm` before the wire call.
  *
- * Performance: one socket round trip per command; `/agents` reuses the
- * `agent_status` listing, so no N+1.
  */
 import { renderPeerDefinition } from "../daemon/peer-store";
 import { parsePeerDefinition } from "../shared/agent-definition";
 import type {
 	AgentSpawnResult,
-	AgentStatus,
 	AgentStatusResult,
 	ChatReadResult,
 	DefinitionData,
@@ -74,76 +71,6 @@ export class DaemonUnavailableError extends Error {
 }
 
 /**
- * The shield marks a real OS sandbox (ADR-005). The production wire type
- * predates the flag, so a daemon that never sets it — or sets it false —
- * renders no shield: claiming a sandbox the worker does not run under is a
- * false security claim, worse than no marker.
- */
-function shield(agent: AgentStatus & { sandboxed?: boolean }): string {
-	return agent.sandboxed === true ? "🛡 " : "";
-}
-
-function formatAgent(
-	agent: AgentStatus & { orphaned?: boolean; sandboxed?: boolean },
-	depth = 0,
-	orphan = false,
-): string {
-	const model = agent.model === undefined ? "" : ` ${agent.model}`;
-	const suffix =
-		orphan || agent.orphaned === true
-			? ` (orphan: ${agent.parent ?? "missing-parent"})`
-			: "";
-	return `${"  ".repeat(depth)}${shield(agent)}${agent.name} — ${agent.state} (${agent.account})${model}${suffix}`;
-}
-
-function formatAgentTree(agents: AgentStatus[]): string {
-	const byName = new Map(agents.map((agent) => [agent.name, agent]));
-	const children = new Map<string, Set<string>>();
-	for (const agent of agents) {
-		if (agent.parent !== undefined && byName.has(agent.parent)) {
-			(
-				children.get(agent.parent) ??
-				children.set(agent.parent, new Set()).get(agent.parent)
-			)?.add(agent.name);
-		}
-		for (const child of agent.children ?? []) {
-			if (byName.has(child)) {
-				(
-					children.get(agent.name) ??
-					children.set(agent.name, new Set()).get(agent.name)
-				)?.add(child);
-			}
-		}
-	}
-
-	const rendered = new Set<string>();
-	const lines: string[] = [];
-	const render = (name: string, depth: number): void => {
-		if (rendered.has(name)) return;
-		rendered.add(name);
-		const agent = byName.get(name);
-		if (agent === undefined) return;
-		lines.push(
-			formatAgent(
-				agent,
-				depth,
-				agent.parent !== undefined && !byName.has(agent.parent),
-			),
-		);
-		for (const child of [...(children.get(name) ?? [])].sort())
-			render(child, depth + 1);
-	};
-	const roots = agents
-		.filter((agent) => agent.parent === undefined || !byName.has(agent.parent))
-		.map((agent) => agent.name)
-		.sort();
-	for (const root of roots) render(root, 0);
-	for (const agent of [...agents].sort((a, b) => a.name.localeCompare(b.name)))
-		render(agent.name, 0);
-	return lines.join("\n");
-}
-
-/**
  * Run `body`, answering one clear notice when the daemon is absent and the
  * server's message when the protocol refuses. Nothing here may throw into
  * the TUI.
@@ -161,23 +88,6 @@ async function guard(
 		}
 		io.notify(error instanceof Error ? error.message : String(error));
 	}
-}
-
-/** `/agents` — live peer list from the daemon. */
-export async function agentsCommand(
-	client: DaemonClient,
-	io: ExtensionIO,
-	_args: string,
-): Promise<void> {
-	await guard(io, async () => {
-		const { agents } = await client.call<{ agents: AgentStatus[] }>(
-			"agent_status",
-			{},
-		);
-		io.notify(
-			agents.length === 0 ? "No agents registered." : formatAgentTree(agents),
-		);
-	});
 }
 
 const EDITABLE_DEFINITION_KEYS = [

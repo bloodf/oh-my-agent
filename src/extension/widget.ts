@@ -12,7 +12,7 @@
  * the import graph stays acyclic).
  *
  * Downstream consumers: `./commands`, `./index`, `tests/extension.test.ts`.
- * The live widget line names `ctrl+g manager` and never includes the
+ * The live widget line names `alt+g manager` and never includes the
  * console token.
  *
  * Failure modes: an absent socket raises `DaemonUnavailableError`, which
@@ -125,7 +125,7 @@ export async function refreshWidget(
 		});
 
 		io.setWidget(WIDGET_KEY, [
-			`agents: ${running} running, ${parked} parked · rooms: ${messages.length} unread · ctrl+g manager`,
+			`agents: ${running} running, ${parked} parked · rooms: ${messages.length} unread · alt+g manager`,
 		]);
 	} catch (error) {
 		io.setWidget(WIDGET_KEY, [

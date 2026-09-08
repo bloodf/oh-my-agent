@@ -42,12 +42,12 @@ From the OMP TUI after install:
 /console
 ```
 
-That prints the loopback URL, including the operator token. Paste it in a browser.
+Inside the TUI, `/console` opens a menu of **Open web UI**, **Copy URL**, or **Show URL**. The plain URL (with the operator token) is **Show URL**; nothing prints until you pick it. `/cli console` and `omp-agent console` are the explicit equivalent and always print the loopback URL with the token.
 
 From a shell, if the daemon is already up (the TUI auto-starts it):
 
 ```sh
-~/.omp/plugins/node_modules/.bin/omp-agent console
+omp-agent console
 ```
 
 A manual start still prints the URL once and detaches:

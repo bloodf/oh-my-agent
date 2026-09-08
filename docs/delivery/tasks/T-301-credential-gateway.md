@@ -17,6 +17,9 @@ Each worker sees only the credentials its token is bound to, through a loopback 
 
 - `src/daemon/credential-gateway.ts`
 - `tests/credential-gateway.test.ts`
+- `src/daemon/inference-gateway.ts`
+- `tests/inference-gateway.test.ts`
+- `src/worker/spawn-policy.ts`
 
 ## Modules and assets in play
 
@@ -24,6 +27,9 @@ Each worker sees only the credentials its token is bound to, through a loopback 
 |---|---|---|
 | [`src/daemon/credential-gateway.ts`](../../../src/daemon/credential-gateway.ts) | New | Token issuance, filtering, generations. |
 | [`tests/credential-gateway.test.ts`](../../../tests/credential-gateway.test.ts) | New | 44 tests. |
+| [`src/daemon/inference-gateway.ts`](../../../src/daemon/inference-gateway.ts) | New | Model-scoped pi-native inference with daemon-owned provider authentication. |
+| [`tests/inference-gateway.test.ts`](../../../tests/inference-gateway.test.ts) | New | Real local-provider streaming and scope/auth rejection proof. |
+| [`src/worker/spawn-policy.ts`](../../../src/worker/spawn-policy.ts) | New | Lightweight peer-vs-subtask classifier used by the worker toolbelt. |
 
 ## Steps
 

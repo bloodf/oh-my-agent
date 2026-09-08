@@ -48,8 +48,8 @@ A post to a room whose member is **stopped** is stored. Delivery waits until tha
 CLI, TUI, and console all use the same author. The console refuses a body that claims an agent name, so a transcript cannot impersonate a worker from the browser.
 
 ```sh
-omp-agent rooms post #research @researcher Please cite primary sources.
-omp-agent rooms read #research
+omp-agent rooms post '#research' @researcher Please cite primary sources.
+omp-agent rooms read '#research'
 ```
 
 TUI:

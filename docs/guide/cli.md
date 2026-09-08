@@ -192,7 +192,7 @@ Raise a metered account's ceiling and resume parked peers. `<account>` is the pr
 omp-agent console
 ```
 
-Reprint the console URL from `<agent-dir>/oh-my-agent/console-url`. Always plain text. If the daemon is headless (`OMA_CONSOLE=0`), the error is `oh-my-agent console is disabled for this daemon.` See [Console](console.md).
+Reprint the console URL from `<agent-dir>/oh-my-agent/console-url`. Always plain text. If the daemon is headless (`OMA_CONSOLE=0`), the error is `oh-my-agent console is disabled for this daemon.` The TUI counterpart is `/console`, which opens a menu (Open web UI / Copy URL / Show URL); use this verb or `/cli console` when you need the raw URL with the operator token. See [Console](console.md).
 
 ### daemon
 
@@ -228,15 +228,17 @@ Inside `omp`, after the extension loads:
 
 | Slash command | CLI equivalent |
 |---|---|
-| `/agents` | `omp-agent agents` |
+| `/cli agents` | `omp-agent agents` |
 | `/spawn <name>` | `omp-agent spawn <name>` |
 | `/kill <name>` | `omp-agent kill <name>` |
 | `/rooms read <room>` | `omp-agent rooms read <room>` |
 | `/rooms post <room> <message>` | `omp-agent rooms post <room> <message>` |
+| `/console` | Menu: Open web UI, Copy URL, or Show URL; Show URL deliberately reveals the operator token |
+| `/cli console` | `omp-agent console` |
 | `/schedule` | `omp-agent schedule` |
 | `/schedule <id> on\|off` | `omp-agent schedule <id> on\|off` |
 | `/logs <name> [n]` | `omp-agent logs <name> [n]` |
 | `/inject <name> <message>` | `omp-agent inject <name> <message>` |
-| `/manage` (shortcut `Ctrl+G`) | Full-screen manager; no CLI equivalent |
+| `/manage` (shortcut `Alt+G`) | Full-screen manager; no CLI equivalent |
 
 The status widget shows `agents: N running, M parked · rooms: K unread`. If the daemon is down, it shows the same daemon-down sentence as the CLI.

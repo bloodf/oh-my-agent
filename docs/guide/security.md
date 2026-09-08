@@ -47,7 +47,7 @@ sandbox: { enabled: true, extraRoots: ["/absolute/path"] }
 
 That wraps the **RPC** subprocess: macOS Seatbelt, Linux `bwrap`. If the adapter is missing, launch fails closed. The in-process backend (`omp-agent daemon --worker-backend in-process`) is not sandboxed. Use RPC when isolation matters.
 
-`/agents` shows a shield only when `sandboxed` is actually true. Claiming a sandbox the worker does not run under would be a false security claim.
+Inspect each peer's actual `sandboxed` field with `omp-agent --json agents` (or `/cli --json agents` in the TUI). The TUI does not currently render a visual indicator. Claiming a sandbox the worker does not run under would be a false security claim.
 
 ![Isolation](../diagrams/isolation.svg)
 

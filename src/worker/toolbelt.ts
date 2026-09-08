@@ -24,7 +24,7 @@ import { getAgentDir } from "@oh-my-pi/pi-utils";
 
 import type { AgentSpawnParams, MethodName } from "../shared/protocol";
 import { METHODS, type Validation } from "../shared/protocol-schemas";
-import { classifyAgentSpawn } from "./lifecycle";
+import { classifyAgentSpawn } from "./spawn-policy";
 
 const TOOL_NAMES = [
 	"chat_send",
@@ -147,20 +147,31 @@ const toolError = (message: string): ToolResult => ({
 	isError: true,
 });
 
-export default function toolbeltExtension(pi: ExtensionAPI): void {
+export interface ToolbeltConnection {
+	socketPath: string;
+	controlToken: string;
+	actor: string;
+}
+
+export default function toolbeltExtension(
+	pi: ExtensionAPI,
+	connection?: ToolbeltConnection,
+): void {
 	const agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir();
 	const materializedWorker =
 		basename(dirname(agentDir)) === ".omp" &&
 		basename(dirname(dirname(dirname(dirname(agentDir))))) === "workers";
-	const actor = materializedWorker
-		? basename(resolve(agentDir, "../../.."))
-		: undefined;
+	const actor =
+		connection?.actor ??
+		(materializedWorker ? basename(resolve(agentDir, "../../..")) : undefined);
 	const socketPath =
+		connection?.socketPath ??
 		process.env.OH_MY_AGENT_SOCKET ??
 		(materializedWorker
 			? resolve(agentDir, "../../../../../daemon.sock")
 			: join(agentDir, "oh-my-agent", "daemon.sock"));
-	const controlToken = process.env.OH_MY_AGENT_CONTROL_TOKEN;
+	const controlToken =
+		connection?.controlToken ?? process.env.OH_MY_AGENT_CONTROL_TOKEN;
 	let requestId = 0;
 
 	const callValidated = async <TParams, TResult>(

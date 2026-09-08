@@ -37,8 +37,8 @@ import type {
 	CreateAgentSessionResult,
 } from "@oh-my-pi/pi-coding-agent/sdk";
 import { DaemonDb } from "../src/daemon/db";
-import type { WorkerFactory } from "../src/daemon/main";
-import { bootDaemon } from "../src/daemon/main";
+import type { WorkerFactory } from "../src/daemon/runtime";
+import { bootDaemon } from "../src/daemon/runtime";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
 import type { PeerDefinition } from "../src/shared/agent-definition";
 import {
