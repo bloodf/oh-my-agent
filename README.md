@@ -115,7 +115,7 @@ Two rules up front:
 
 ## Status
 
-**1.2.0 is shipped.** Runtime, TUI, CLI, and browser console are in the npm package `@bloodf/oh-my-agent`. See [`CHANGELOG.md`](CHANGELOG.md).
+Runtime, TUI, CLI, and browser console ship in the npm package `@bloodf/oh-my-agent`. See [`CHANGELOG.md`](CHANGELOG.md) for the current release and its fixes.
 
 Known limitations, stated in the 1.0.0 notes and still true:
 

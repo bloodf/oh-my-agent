@@ -11,8 +11,11 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 ### Fixed
 
 - Launch daemon TypeScript with Bun when OMP is installed as a compiled binary, including TUI autostart and restart.
+- Validate CLI startup arguments before loading worker/model SDKs, and complete the detached readiness handshake even with the web console disabled.
 - Give supervised RPC workers a real, model-scoped inference gateway and native model discovery. Keep provider credentials in the daemon and load only the worker collaboration toolbelt, not the operator extension.
+- Authenticate in-process collaboration tools with session-local credentials, and preserve worker gateway ownership during concurrent starts and cleanup.
 - Open the web console from an explicit OMP menu with Open, Copy, and Show URL actions. Use Alt+G for the peer manager without colliding with OMP's external editor; use `/cli agents` without shadowing native `/agents`.
+- Close the fullscreen manager before opening definition/model editors, and refresh the status widget after manager actions.
 - Correct first-run scout prerequisites, shell room quoting, frontend dependency installation, and generated-console documentation.
 
 ## [1.2.0] - 2026-09-06
