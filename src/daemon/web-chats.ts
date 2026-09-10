@@ -93,6 +93,29 @@ function recordedPid(pidPath: string): number | undefined {
 }
 
 /**
+ * Write a chat's launch shim and clear any pid a previous launch recorded.
+ *
+ * Exported so the shim can be exercised around a stand-in CLI: the real one
+ * needs a configured model, which a fresh machine or a CI runner does not
+ * have, and a test that quietly depended on one passed here and failed
+ * inside `npm pack`.
+ */
+export async function writeChatShim(
+	shimDir: string,
+	id: string,
+	cliPath: string,
+): Promise<{ shimPath: string; pidPath: string }> {
+	const pidPath = join(shimDir, `${id}.pid`);
+	const shimPath = join(shimDir, `${id}.ts`);
+	await rm(pidPath, { force: true });
+	await writeFile(shimPath, chatShimSource(cliPath, pidPath), {
+		encoding: "utf8",
+		mode: 0o600,
+	});
+	return { shimPath, pidPath };
+}
+
+/**
  * The source of a per-chat launch shim: record this process's pid, then run
  * the OMP CLI with the client's arguments and environment, forwarding the
  * signals the client uses to stop it.
@@ -439,13 +462,11 @@ export async function createWebChats(
 		}
 		// Launched through a shim that records the child's pid, because the
 		// client exposes none outside this repository's patched copy.
-		const pidPath = chatPidPath(record.id);
-		const shimPath = join(shimDir, `${record.id}.ts`);
-		await rm(pidPath, { force: true });
-		await writeFile(shimPath, chatShimSource(resolveOmpCli(), pidPath), {
-			encoding: "utf8",
-			mode: 0o600,
-		});
+		const { shimPath, pidPath } = await writeChatShim(
+			shimDir,
+			record.id,
+			resolveOmpCli(),
+		);
 		const client = new RpcClient({
 			cwd,
 			cliPath: shimPath,

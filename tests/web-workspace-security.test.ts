@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,7 +19,11 @@ import { Scheduler } from "../src/daemon/scheduler";
 import type { PeerRecord } from "../src/daemon/socket";
 import { Supervisor } from "../src/daemon/supervisor";
 import { WebAttachments } from "../src/daemon/web-attachments";
-import { chatAlive, createWebChats } from "../src/daemon/web-chats";
+import {
+	chatAlive,
+	createWebChats,
+	writeChatShim,
+} from "../src/daemon/web-chats";
 import { RoomPlans } from "../src/rooms/plans";
 import { RoomStore } from "../src/rooms/store";
 import type { RoomInfo } from "../src/shared/protocol";
@@ -301,25 +312,68 @@ describe("web chat liveness", () => {
 		expect(chatAlive({ pid: gone.pid }, pidPath)).toBe(false);
 	});
 
-	test("a launched chat records its pid and reports itself running", async () => {
+	test("the launch shim records the pid of the process the client spawns", async () => {
+		// Around a stand-in CLI, not OMP: starting a real chat needs a
+		// configured model, which a fresh machine does not have. An earlier
+		// version of this test launched OMP and so passed here while failing
+		// inside `npm pack`, whose environment carries no model at all.
+		const dir = await tempDir("oma-chat-shim-");
+		const cli = join(dir, "fake-cli.ts");
+		await writeFile(cli, "setInterval(() => {}, 1_000);\n");
+		const { shimPath, pidPath } = await writeChatShim(dir, "chat-1", cli);
+
+		// Exactly how `RpcClient` launches its CLI: `bun <cliPath> ...args`.
+		const child = Bun.spawn(["bun", shimPath, "--mode", "rpc"], {
+			stdio: ["ignore", "ignore", "ignore"],
+		});
+		cleanups.push(async () => {
+			child.kill("SIGKILL");
+			await child.exited;
+		});
+		const deadline = Date.now() + 10_000;
+		while (!(await Bun.file(pidPath).exists()) && Date.now() < deadline) {
+			await Bun.sleep(20);
+		}
+
+		expect(Number.parseInt(await readFile(pidPath, "utf8"), 10)).toBe(
+			child.pid,
+		);
+		// A client with no pid accessor, as on a consumer's install.
+		expect(chatAlive({}, pidPath)).toBe(true);
+
+		child.kill("SIGTERM");
+		await child.exited;
+		expect(chatAlive({}, pidPath)).toBe(false);
+	});
+
+	test("a chat launch goes through the shim whether or not a model is configured", async () => {
 		const dir = await tempDir("oma-chat-launch-");
 		const chats = await createWebChats({ stateDir: join(dir, "state") });
 		cleanups.push(async () => {
 			await chats.close();
 			await rm(chats.storageDir, { recursive: true, force: true });
 		});
-		const chat = await chats.create({ cwd: dir });
+		// Succeeds on a machine with a model and fails on one without; the
+		// shim is written before the CLI starts, so its presence is the same
+		// fact either way.
+		await chats.create({ cwd: dir }).catch(() => undefined);
 
-		const state = await chats.state(chat.id);
-		expect(state.running).toBe(true);
-
-		const recorded = Number.parseInt(
-			await readFile(join(chats.storageDir, "shims", `${chat.id}.pid`), "utf8"),
-			10,
+		const shims = (await readdir(join(chats.storageDir, "shims"))).filter(
+			(name) => name.endsWith(".ts"),
 		);
-		expect(recorded).toBeGreaterThan(0);
+		expect(shims).toHaveLength(1);
 		expect(
-			chatAlive({}, join(chats.storageDir, "shims", `${chat.id}.pid`)),
+			await readFile(
+				join(chats.storageDir, "shims", shims[0] as string),
+				"utf8",
+			),
+		).toContain("pi-coding-agent");
+		// The shim records its pid before it starts OMP, so a pid on disk
+		// proves the client actually ran it. A launch that wrote the shim and
+		// then pointed the client straight at OMP leaves none.
+		const id = (shims[0] as string).replace(/\.ts$/, "");
+		expect(
+			await Bun.file(join(chats.storageDir, "shims", `${id}.pid`)).exists(),
 		).toBe(true);
 	});
 });
