@@ -458,7 +458,10 @@ export async function startWorker(
 		// Upstream accessor request: https://github.com/can1357/oh-my-pi/issues/10597
 		get pid() {
 			if (client === undefined) return undefined;
-			const direct = client.pid;
+			// Structural, not the patched type: the accessor exists only where the
+			// repository's patch applies, and this has to compile against the
+			// released OMP a consumer actually runs.
+			const direct = (client as { pid?: number }).pid;
 			if (direct !== undefined) return direct;
 			try {
 				const recorded = Number.parseInt(
