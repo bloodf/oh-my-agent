@@ -35,7 +35,7 @@ sure which document you need.
 
 Follow [`docs/develop/README.md`](docs/develop/README.md). That page is the first-hour path: clone and install, a green `test:fast`, architecture, modules, then picking work.
 
-Nothing is **Ready**. Remaining work is **Blocked** (T-1202, T-1205, T-1403, T-1503, T-1504). File a bug, or add a task in [`scripts/gen-delivery-docs.py`](scripts/gen-delivery-docs.py).
+Nothing is **Ready**. Remaining work is **Blocked** (T-1202, T-1205, T-1403, T-1503). File a bug, or add a task in [`scripts/gen-delivery-docs.py`](scripts/gen-delivery-docs.py).
 
 ## Related documents
 
@@ -60,7 +60,7 @@ Nothing is **Ready**. Remaining work is **Blocked** (T-1202, T-1205, T-1403, T-1
 
 ## Getting set up
 
-Requirements: Bun ≥ 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` ≥ 18.0.7).
+Requirements: Bun ≥ 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` ≥ 18.1.0).
 
 ```sh
 git clone https://github.com/bloodf/oh-my-agent.git
@@ -154,7 +154,7 @@ I have no tailnet" is a useful, welcome sentence. A silent gap is not.
   both before your first change.
 - [`docs/delivery/README.md`](docs/delivery/README.md) lists every task with its status.
   Nothing is **Ready**. Remaining work is **Blocked** (T-1202, T-1205, T-1403,
-  T-1503, T-1504). Each names its blocker in its `Out of scope` section. If you
+  T-1503). Each names its blocker in its `Out of scope` section. If you
   have the infrastructure one of them needs, that is genuinely valuable help.
   File a bug, or add a task in
   [`scripts/gen-delivery-docs.py`](scripts/gen-delivery-docs.py).

@@ -139,21 +139,10 @@ test("npm package contains runtime assets and excludes repository-only paths", a
 		expect([...paths].filter((path) => path.startsWith(prefix))).toEqual([]);
 	}
 
-	// Whether this patch ships is npm's decision, not ours: npm 12 strips the
-	// file a patchedDependencies entry names, while npm 11 still packs it. Both
-	// are acceptable because the patch is inert for consumers either way —
-	// ADR-013 established that Bun honors patchedDependencies only from the
-	// consumer's root manifest, so a tarball cannot alter a resolved peer
-	// dependency. What must hold on every npm is that nothing OTHER than that
-	// one patch ever appears under patches/, which is what the hygiene gate in
-	// scripts/check-patches.py assumes about the directory.
-	expect(
-		[...paths]
-			.filter((path) => path.startsWith("patches/"))
-			.filter(
-				(path) => path !== "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch",
-			),
-	).toEqual([]);
+	// The RpcClient.pid patch is gone (T-1504): pids come from the launch
+	// shim's record instead. Nothing under patches/ may ship, whichever npm
+	// packs the tarball.
+	expect([...paths].filter((path) => path.startsWith("patches/"))).toEqual([]);
 	expect(
 		[...paths].filter((path) =>
 			path.split("/").some((segment) => segment.startsWith(".")),

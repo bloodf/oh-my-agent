@@ -10,7 +10,7 @@ CI proves every file under patches/ is a code-only patch whose pin matches the l
 
 ## Read first
 
-- [The one patch under contract](../../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch)
+- [The pid patch this gate was built around, removed by T-1504](../../../docs/delivery/tasks/T-1504-drop-rpc-pid-patch.md)
 - [CI workflow](../../../.github/workflows/ci.yml)
 
 ## Files this task may change

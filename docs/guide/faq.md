@@ -36,13 +36,13 @@ Create may store an unqualified selector. Spawn then fails at materialize time.
 
 Expected. `workspace:` is `cwd` and project discovery. It is not a security boundary. Only `sandbox: true` (RPC workers, macOS Seatbelt or Linux `bwrap`) is a real filesystem fence, and it is opt-in. In-process workers are never sandboxed. See [Security](security.md).
 
-## npm install has no `RpcClient.pid` / supervision looks degraded
+## npm install has no `RpcClient.pid`
 
-By design until upstream lands the accessor ([ADR-013](../delivery/adr/ADR-013-release-channel.md)).
+That is expected, and supervision does not depend on it ([ADR-013](../delivery/adr/ADR-013-release-channel.md)).
 
-Bun honors `patchedDependencies` only from the **consumer's** root manifest. `@oh-my-pi/pi-coding-agent` reaches you as a peerDependency, so the repo patch cannot travel with the published package. npm 12 also strips the patch file from the tarball. `bun install` in this checkout applies the patch; npm consumers get an unpatched peer.
+Released OMP declares no `RpcClient.pid` accessor. The daemon does not need one: each worker and web chat starts through a small launch shim that records its own pid, which is the process the client spawned. Pids appear in `omp-agent agents` and the console on an npm install exactly as they do in a checkout.
 
-The consumer-install smoke asserts this degraded state on purpose (`EXPECTED_RPC_CLIENT_PID = "absent"`). Release notes name it. Do not assume pid-based supervision works on an npm install.
+The consumer-install smoke still asserts the accessor is absent (`EXPECTED_RPC_CLIENT_PID = "absent"`), so an upstream change is noticed rather than silently relied on.
 
 ## Every command says the daemon is not running
 

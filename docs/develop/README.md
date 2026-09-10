@@ -8,7 +8,7 @@ Contributor hub. Operator install and usage live in the [root README](../../READ
 2. Confirm the suite is green (`bun run test:fast` while iterating; `bun test` before a PR).
 3. Read [ARCHITECTURE.md §4](../../ARCHITECTURE.md#4-component-architecture) (component architecture). Then this folder's [architecture.md](architecture.md) for the onboarding tour.
 4. Skim [modules.md](modules.md) so file names map to jobs.
-5. Open the [delivery tree](../delivery/README.md). Nothing is **Ready**. Remaining work is **Blocked** (T-1202, T-1205, T-1403, T-1503, T-1504). File a bug, or add a task in [`scripts/gen-delivery-docs.py`](../../scripts/gen-delivery-docs.py). Those tickets still want help if you have the missing piece. See [delivery.md](delivery.md).
+5. Open the [delivery tree](../delivery/README.md). Nothing is **Ready**. Remaining work is **Blocked** (T-1202, T-1205, T-1403, T-1503). File a bug, or add a task in [`scripts/gen-delivery-docs.py`](../../scripts/gen-delivery-docs.py). Those tickets still want help if you have the missing piece. See [delivery.md](delivery.md).
 
 ## Pages
 
@@ -32,7 +32,7 @@ Contributor hub. Operator install and usage live in the [root README](../../READ
 
 ## Current tree
 
-**95 of 100 tasks Done.** Five remain Blocked:
+**97 of 101 tasks Done.** Four remain Blocked:
 
 | Task | Blocker |
 |---|---|
@@ -40,7 +40,6 @@ Contributor hub. Operator install and usage live in the [root README](../../READ
 | [T-1205](../delivery/tasks/T-1205-exposure-runbook.md) | Blocked on T-1202 |
 | [T-1403](../delivery/tasks/T-1403-first-live-session.md) | Live-account session |
 | [T-1503](../delivery/tasks/T-1503-drop-resolve-walk.md) | Released upstream fix |
-| [T-1504](../delivery/tasks/T-1504-drop-rpc-pid-patch.md) | Released upstream `RpcClient.pid` |
 
 Treat the delivery README as current. A pasted count here will rot.
 

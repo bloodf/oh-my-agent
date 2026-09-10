@@ -11,7 +11,7 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**96 of 101 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
+**97 of 101 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
 Every runtime subsystem and every operator surface is built and tested. Workers, isolation, credentials, rooms, scheduling, quota handling, the daemon binary, the control socket, the TUI extension, the CLI, and the browser console all ship; EP-05, EP-06, EP-09, EP-10, EP-11, and EP-16 are Done.
 

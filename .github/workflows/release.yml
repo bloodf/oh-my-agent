@@ -117,7 +117,7 @@ jobs:
       - name: Pack artifact assertions
         run: bun test --timeout 30000 tests/pack.test.ts
 
-      - name: "Consumer-install smoke (RpcClient.pid contract: absent, degraded supervision)"
+      - name: "Consumer-install smoke (RpcClient.pid contract: absent; pid recorded by the launch shim)"
         # Same reason as ci.yml: this smoke drives the real `omp` executable,
         # which ships as a bin of the pi-coding-agent dev dependency installed
         # above. Without it on PATH the OMP-installer variant throws before it

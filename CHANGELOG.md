@@ -19,6 +19,7 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 - Sandboxed peers can start on Linux via `sandbox.allowUnenforcedNetwork`, and macOS sandbox profiles can read the OMP CLI and `bun` they run. Worker pids are reported on installs without this repository's OMP patch.
 - The console no longer reads whole room histories on each post, reaction, and connect; its loopback page is no longer cached or leaked by Referer; the address bar drops the token after reading it; and loopback WebSocket upgrades from foreign origins are refused. Pasted chat images reach the model.
 - Web chats work on installs without this repository's OMP patch. They judged liveness from `RpcClient.pid`, which only the patch provides, so on a consumer install every chat was treated as dead: dropped a second after starting and refused every operation as closed.
+- The `RpcClient.pid` patch is removed. Pids come from the launch shim's record, so a checkout and an npm install report them the same way. The OMP peer floor is now 18.1.0, and development runs on 18.1.17.
 - A bare `omp-agent` prints usage instead of starting a daemon. Broker probes and the launcher's readiness wait are bounded, and `daemon restart` no longer deadlocks on a full pipe.
 
 ## [1.2.1] - 2026-09-08

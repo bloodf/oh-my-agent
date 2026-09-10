@@ -44,7 +44,7 @@ OMP task agents live inside the interactive session. Close the TUI, they die. oh
 
 ## Quick start
 
-Needs [Bun](https://bun.sh) ≥ 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` ≥ 18.0.7).
+Needs [Bun](https://bun.sh) ≥ 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` ≥ 18.1.0).
 
 ```sh
 omp install @bloodf/oh-my-agent
@@ -97,7 +97,7 @@ Community files: [SUPPORT.md](https://github.com/bloodf/oh-my-agent/blob/main/SU
 
 **Who this is for.** People already using OMP who want agents that outlive a TUI session. Operators who want rooms, schedules, and a browser console on a local daemon. Contributors who will treat claims as things that need tests.
 
-**What you need.** Bun ≥ 1.3.14, OMP with `@oh-my-pi/pi-coding-agent` ≥ 18.0.7, and a provider account the daemon can meter. This is a single-operator local plugin. It is not a hosted service and it is not multi-tenant.
+**What you need.** Bun ≥ 1.3.14, OMP with `@oh-my-pi/pi-coding-agent` ≥ 18.1.0, and a provider account the daemon can meter. This is a single-operator local plugin. It is not a hosted service and it is not multi-tenant.
 
 **First win.** Install the plugin, open `omp`, confirm the widget, paste the `researcher` definition from the [getting-started guide](https://github.com/bloodf/oh-my-agent/blob/main/docs/guide/getting-started.md), create it, spawn it, and post in `#research`. If that loop works, the rest of the operator surface is the same daemon.
 
@@ -106,7 +106,7 @@ Community files: [SUPPORT.md](https://github.com/bloodf/oh-my-agent/blob/main/SU
 1. **Setup.** Clone, `bun install --frozen-lockfile`, `bun install --cwd web --frozen-lockfile`, `bun run typecheck`.
 2. **Tests.** `bun test` for the full suite. `bun run test:fast` skips pack, consumer-install, and console-client while you iterate.
 3. **Read.** [ARCHITECTURE.md](https://github.com/bloodf/oh-my-agent/blob/main/ARCHITECTURE.md), then [CONTRIBUTING.md](https://github.com/bloodf/oh-my-agent/blob/main/CONTRIBUTING.md).
-4. **Pick work.** Nothing is **Ready**. Remaining work is **Blocked**: [T-1202](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/tasks/T-1202-tls-termination.md), [T-1205](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/tasks/T-1205-exposure-runbook.md), [T-1403](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/tasks/T-1403-first-live-session.md), [T-1503](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/tasks/T-1503-drop-resolve-walk.md), [T-1504](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/tasks/T-1504-drop-rpc-pid-patch.md). File a bug, or add a task in [`scripts/gen-delivery-docs.py`](https://github.com/bloodf/oh-my-agent/blob/main/scripts/gen-delivery-docs.py).
+4. **Pick work.** Nothing is **Ready**. Remaining work is **Blocked**: [T-1202](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/tasks/T-1202-tls-termination.md), [T-1205](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/tasks/T-1205-exposure-runbook.md), [T-1403](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/tasks/T-1403-first-live-session.md), [T-1503](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/tasks/T-1503-drop-resolve-walk.md). File a bug, or add a task in [`scripts/gen-delivery-docs.py`](https://github.com/bloodf/oh-my-agent/blob/main/scripts/gen-delivery-docs.py).
 
 Two rules up front:
 
@@ -117,9 +117,8 @@ Two rules up front:
 
 Runtime, TUI, CLI, and browser console ship in the npm package `@bloodf/oh-my-agent`. See [`CHANGELOG.md`](CHANGELOG.md) for the current release and its fixes.
 
-Known limitations, stated in the 1.0.0 notes and still true:
+Known limitations:
 
-- **npm consumers receive an unpatched `@oh-my-pi/pi-coding-agent` peer ([ADR-013](https://github.com/bloodf/oh-my-agent/blob/main/docs/delivery/adr/ADR-013-release-channel.md)).** `RpcClient.pid` is absent, so worker supervision cannot rely on the OMP patch. The consumer-install smoke asserts this degraded state on purpose. `bun install` from a checkout applies the repo patch; npm consumers do not.
 - **The `tailscale serve` recipe in [remote exposure](https://github.com/bloodf/oh-my-agent/blob/main/docs/remote-exposure.md) is UNVERIFIED.** It needs two tailnet devices and has not been run end to end. The Caddy and SSH-tunnel recipes were run against real Caddy-terminated TLS on an internal CA; public ACME issuance and renewal remain unproven.
 
 ## Security

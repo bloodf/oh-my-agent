@@ -18,14 +18,16 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `agents/example-researcher.md` | yes | [T-501](tasks/T-501-peer-store.md) | — |
 | `agents/example-reviewer.md` | yes | [T-501](tasks/T-501-peer-store.md) | — |
 | `biome.json` | yes | [T-702](tasks/T-702-biome-lint.md), [T-1303](tasks/T-1303-release-ci.md) | — |
-| `bun.lock` | yes | [T-1503](tasks/T-1503-drop-resolve-walk.md) | — |
+| `bun.lock` | yes | [T-1503](tasks/T-1503-drop-resolve-walk.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
+| `docs/develop/modules.md` | yes | [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
 | `docs/develop/release.md` | yes | [T-1303](tasks/T-1303-release-ci.md) | — |
+| `docs/develop/setup.md` | yes | [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
 | `docs/dogfooding.md` | yes | [T-1401](tasks/T-1401-dogfood-runbook.md), [T-1403](tasks/T-1403-first-live-session.md), [T-1404](tasks/T-1404-live-session-safety-rails.md), [T-1405](tasks/T-1405-daemon-backend-selector.md) | — |
+| `docs/guide/faq.md` | yes | [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
 | `docs/remote-exposure.md` | yes | [T-1202](tasks/T-1202-tls-termination.md), [T-1205](tasks/T-1205-exposure-runbook.md) | — |
 | `docs/web-console.md` | yes | [T-1001](tasks/T-1001-console-mounted-at-boot.md), [T-1101](tasks/T-1101-console-visual-system.md) | — |
 | `node_modules/@oh-my-pi/pi-ai/src/auth-broker/remote-store.ts` | yes | — | [T-303](tasks/T-303-client-integration.md) |
 | `package.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-502](tasks/T-502-daemon-entry-point.md), [T-702](tasks/T-702-biome-lint.md), [T-703](tasks/T-703-root-readme-and-metadata.md), [T-705](tasks/T-705-spawn-test-time-budget.md), [T-804](tasks/T-804-authoring-skills.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1301](tasks/T-1301-packable-artifact.md), [T-1303](tasks/T-1303-release-ci.md), [T-1306](tasks/T-1306-consumer-install-smoke.md), [T-1503](tasks/T-1503-drop-resolve-walk.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | [T-701](tasks/T-701-ci-workflow.md), [T-1613](tasks/T-1613-build-hygiene-test.md) |
-| `patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch` | yes | [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | [T-1301](tasks/T-1301-packable-artifact.md) |
 | `repro/bun-plugin-memo/README.md` | yes | [T-1501](tasks/T-1501-repro-import-meta-resolve.md) | — |
 | `repro/bun-plugin-memo/bun.lock` | yes | [T-1501](tasks/T-1501-repro-import-meta-resolve.md) | — |
 | `repro/bun-plugin-memo/package.json` | yes | [T-1501](tasks/T-1501-repro-import-meta-resolve.md) | — |
@@ -59,7 +61,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `src/daemon/startup.ts` | yes | [T-502](tasks/T-502-daemon-entry-point.md) | — |
 | `src/daemon/supervisor.ts` | yes | [T-405](tasks/T-405-supervisor.md), [T-505](tasks/T-505-definition-staleness.md), [T-506](tasks/T-506-metered-budget-wiring.md), [T-509](tasks/T-509-wake-filters.md), [T-605](tasks/T-605-console-management.md), [T-1601](tasks/T-1601-console-thread-parentage.md), [T-1604](tasks/T-1604-typed-daemon-events.md), [T-1617](tasks/T-1617-stopped-worker-backlog.md), [T-1618](tasks/T-1618-positive-budget-bump.md), [T-1619](tasks/T-1619-runtime-liveness-review.md) | [T-502](tasks/T-502-daemon-entry-point.md), [T-601](tasks/T-601-conversation-model.md), [T-602](tasks/T-602-console-api.md) |
 | `src/daemon/web-attachments.ts` | yes | [T-603](tasks/T-603-console-client.md) | — |
-| `src/daemon/web-chats.ts` | yes | [T-603](tasks/T-603-console-client.md), [T-1619](tasks/T-1619-runtime-liveness-review.md) | — |
+| `src/daemon/web-chats.ts` | yes | [T-603](tasks/T-603-console-client.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md), [T-1619](tasks/T-1619-runtime-liveness-review.md) | — |
 | `src/daemon/web-files.ts` | yes | [T-603](tasks/T-603-console-client.md) | — |
 | `src/daemon/web-routes.ts` | yes | [T-603](tasks/T-603-console-client.md) | — |
 | `src/daemon/workspace-changes.ts` | yes | [T-603](tasks/T-603-console-client.md) | — |
@@ -78,7 +80,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `src/shared/version.ts` | yes | [T-1619](tasks/T-1619-runtime-liveness-review.md) | — |
 | `src/shared/web-workspace.ts` | yes | [T-603](tasks/T-603-console-client.md) | — |
 | `src/worker/launch-gate.ts` | yes | [T-203](tasks/T-203-sandbox-launch-gate.md) | [T-401](tasks/T-401-worker-lifecycle.md) |
-| `src/worker/lifecycle.ts` | yes | [T-204](tasks/T-204-shared-policy-builder.md), [T-401](tasks/T-401-worker-lifecycle.md), [T-505](tasks/T-505-definition-staleness.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1005](tasks/T-1005-worker-env-allowlist.md), [T-1006](tasks/T-1006-in-process-worker-path.md), [T-1502](tasks/T-1502-file-upstream-issues.md), [T-1503](tasks/T-1503-drop-resolve-walk.md), [T-1619](tasks/T-1619-runtime-liveness-review.md) | [T-005](tasks/T-005-spawn-policy-contract.md), [T-503](tasks/T-503-agent-toolbelt.md) |
+| `src/worker/lifecycle.ts` | yes | [T-204](tasks/T-204-shared-policy-builder.md), [T-401](tasks/T-401-worker-lifecycle.md), [T-505](tasks/T-505-definition-staleness.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1005](tasks/T-1005-worker-env-allowlist.md), [T-1006](tasks/T-1006-in-process-worker-path.md), [T-1502](tasks/T-1502-file-upstream-issues.md), [T-1503](tasks/T-1503-drop-resolve-walk.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md), [T-1619](tasks/T-1619-runtime-liveness-review.md) | [T-005](tasks/T-005-spawn-policy-contract.md), [T-503](tasks/T-503-agent-toolbelt.md) |
 | `src/worker/sandbox.ts` | yes | [T-202](tasks/T-202-sandbox-policy-compiler.md) | [T-203](tasks/T-203-sandbox-launch-gate.md) |
 | `src/worker/spawn-policy.ts` | yes | [T-301](tasks/T-301-credential-gateway.md) | — |
 | `src/worker/toolbelt.ts` | yes | [T-503](tasks/T-503-agent-toolbelt.md), [T-604](tasks/T-604-reaction-toolbelt.md), [T-803](tasks/T-803-toolbelt-authoring.md), [T-1004](tasks/T-1004-control-socket-identity.md) | — |
@@ -89,7 +91,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/console-api.test.ts` | yes | [T-602](tasks/T-602-console-api.md), [T-1601](tasks/T-1601-console-thread-parentage.md), [T-1602](tasks/T-1602-reaction-removal-frames.md), [T-1603](tasks/T-1603-attribution-enforcement.md), [T-1604](tasks/T-1604-typed-daemon-events.md), [T-1605](tasks/T-1605-console-ops-panel.md) | — |
 | `tests/console-client.test.ts` | yes | [T-603](tasks/T-603-console-client.md), [T-1101](tasks/T-1101-console-visual-system.md), [T-1102](tasks/T-1102-console-accessibility.md), [T-1104](tasks/T-1104-console-focus-stability.md), [T-1105](tasks/T-1105-unread-reconcile-on-open.md), [T-1203](tasks/T-1203-remote-console-auth.md), [T-1601](tasks/T-1601-console-thread-parentage.md), [T-1602](tasks/T-1602-reaction-removal-frames.md), [T-1604](tasks/T-1604-typed-daemon-events.md), [T-1605](tasks/T-1605-console-ops-panel.md), [T-1607](tasks/T-1607-authoring-parity.md), [T-1608](tasks/T-1608-mentions-fidelity.md), [T-1614](tasks/T-1614-test-timing-hygiene.md), [T-1615](tasks/T-1615-repaint-focus-stability.md) | — |
 | `tests/console-storybook.test.ts` | yes | [T-603](tasks/T-603-console-client.md) | — |
-| `tests/consumer-install.test.ts` | yes | [T-1306](tasks/T-1306-consumer-install-smoke.md) | — |
+| `tests/consumer-install.test.ts` | yes | [T-1306](tasks/T-1306-consumer-install-smoke.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
 | `tests/contracts/broker.contract.test.ts` | yes | [T-004](tasks/T-004-broker-contract.md) | — |
 | `tests/contracts/discovery.contract.test.ts` | yes | [T-003](tasks/T-003-discovery-contract.md), [T-007](tasks/T-007-hermetic-child-environments.md) | — |
 | `tests/contracts/spawn-policy.contract.test.ts` | yes | [T-005](tasks/T-005-spawn-policy-contract.md) | — |

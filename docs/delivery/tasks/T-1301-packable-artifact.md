@@ -24,7 +24,6 @@
 | Path | Role | Note |
 |---|---|---|
 | [`package.json`](../../../package.json) | Edited | The files allowlist and a prepack script that runs the gates. |
-| [`patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`](../../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch) | Read-only | Reapplied by bun install for anyone working from a checkout. Whether it travels in the npm tarball depends on the packing npm: 12 strips the file a patchedDependencies entry names, 11 still packs it. Either is fine, because ADR-013 had already established the patch cannot reach a consumer through a tarball. |
 | [`tests/pack.test.ts`](../../../tests/pack.test.ts) | New | Parses `npm pack --dry-run --json` and asserts both directions: expected paths present, private paths absent. |
 
 ## Steps

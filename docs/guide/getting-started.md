@@ -4,7 +4,7 @@
 
 ![First run](../diagrams/first-run.svg)
 
-From install to a spawned example agent and a room post. Assumes [Bun](https://bun.sh) >= 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` >= 18.0.7) are already installed, and that OMP can already call the model you put in the definition.
+From install to a spawned example agent and a room post. Assumes [Bun](https://bun.sh) >= 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` >= 18.1.0) are already installed, and that OMP can already call the model you put in the definition.
 
 If a term is new, skim [Concepts](concepts.md) after this page.
 

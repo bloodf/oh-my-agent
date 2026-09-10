@@ -70,7 +70,7 @@ Console posts as the human. Worker chat methods have attribution overwritten wit
 | [ADR-008](../delivery/adr/ADR-008-tests-share-production-builders.md) | Tests share production builders |
 | [ADR-010](../delivery/adr/ADR-010-mit-license.md) | MIT |
 | [ADR-012](../delivery/adr/ADR-012-remote-exposure.md) | Daemon never terminates TLS; proxy in front |
-| [ADR-013](../delivery/adr/ADR-013-release-channel.md) | One npm package; consumers get an unpatched peer until T-1504 |
+| [ADR-013](../delivery/adr/ADR-013-release-channel.md) | One npm package with a `files` allowlist; the `RpcClient.pid` patch is gone since T-1504, and pids come from the launch shim |
 | [ADR-015](../delivery/adr/ADR-015-typed-daemon-events.md) | State changes are typed frames |
 
 The full set is [`docs/delivery/adr/`](../delivery/adr/). If a change contradicts an accepted ADR, the ADR is part of the change.

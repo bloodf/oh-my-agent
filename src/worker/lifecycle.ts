@@ -449,18 +449,16 @@ export async function startWorker(
 		get sessionId() {
 			return sessionId;
 		},
-		// The client's own accessor when the running copy has one, and the pid
-		// the launch shim recorded when it does not. `RpcClient` keeps its
-		// child in a true private field, so the accessor exists only where the
-		// repository's patch applies — never in a consumer's install, where
-		// `pid` was silently `undefined` and every wire and registry answer
-		// said "no process" for a live worker.
+		// The client's own accessor if a future OMP ships one, and otherwise
+		// the pid the launch shim recorded. Released `RpcClient` keeps its child
+		// in a true private field with no accessor, which left `pid` silently
+		// `undefined` and every wire and registry answer saying "no process"
+		// for a live worker.
 		// Upstream accessor request: https://github.com/can1357/oh-my-pi/issues/10597
 		get pid() {
 			if (client === undefined) return undefined;
-			// Structural, not the patched type: the accessor exists only where the
-			// repository's patch applies, and this has to compile against the
-			// released OMP a consumer actually runs.
+			// Structural: released OMP declares no `pid` on `RpcClient`, and this
+			// has to compile against the version a consumer actually runs.
 			const direct = (client as { pid?: number }).pid;
 			if (direct !== undefined) return direct;
 			try {

@@ -502,14 +502,13 @@ describe("worker lifecycle backend invariants", () => {
 		).rejects.toThrow(new RegExp(SANDBOX_NETWORK_UNENFORCED));
 	});
 
-	test("the launch shim records the worker pid for installs without the patch", async () => {
+	test("the launch shim records the worker pid without an RpcClient accessor", async () => {
 		const handle = await start();
 		try {
-			// `RpcClient` keeps its child in a true private field, so the `pid`
-			// accessor exists only where this repository's patch applies — a
-			// consumer's install has no patch and reported `undefined` for
-			// every live worker. The shim is the process the client spawns, so
-			// the pid it writes here is the same one the accessor would give.
+			// Released `RpcClient` keeps its child in a true private field with
+			// no `pid` accessor, which reported `undefined` for every live
+			// worker. The shim is the process the client spawns, so the pid it
+			// writes here is the one an accessor would give.
 			const recorded = Number.parseInt(
 				await readFile(join(handle.layout.root, "worker.pid"), "utf8"),
 				10,

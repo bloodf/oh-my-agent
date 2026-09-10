@@ -8,12 +8,12 @@ The plugin works from a checkout but has no version story: no `files` allowlist,
 
 ## Decision
 
-Distribution is a single npm package with an explicit `files` allowlist; versions are semver with a CHANGELOG; releases use an operator-dispatched CI run with a required tag input. Every dispatch verifies the tag, runs the full gate suite, packs once, and runs the consumer-install smoke against that tarball; npm publication then runs automatically using the same verified tarball, subject to the npm-publish environment gate. The `RpcClient.pid` patch cannot travel with the artifact because Bun honors `patchedDependencies` only from the consumer's root manifest, while pi-coding-agent reaches the consumer as a peerDependency. Publication therefore gates on the consumer-install smoke test (T-1306), which installs the packed tarball into a clean project and asserts the pid contract state of the resolved peer. Until EP-15 lands the accessor upstream, that state is 'pid absent, degraded supervision' and the release notes must state it; after T-1504 the state flips to 'pid present' and the same test enforces it. No silent drift in either direction.
+Distribution is a single npm package with an explicit `files` allowlist; versions are semver with a CHANGELOG; releases use an operator-dispatched CI run with a required tag input. Every dispatch verifies the tag, runs the full gate suite, packs once, and runs the consumer-install smoke against that tarball; npm publication then runs automatically using the same verified tarball, subject to the npm-publish environment gate. The `RpcClient.pid` patch cannot travel with the artifact because Bun honors `patchedDependencies` only from the consumer's root manifest, while pi-coding-agent reaches the consumer as a peerDependency. Publication therefore gates on the consumer-install smoke test (T-1306), which installs the packed tarball into a clean project and asserts the pid contract state of the resolved peer. Until EP-15 lands the accessor upstream, that state is 'pid absent, degraded supervision' and the release notes must state it; after T-1504 the state flips to 'pid present' and the same test enforces it. No silent drift in either direction. Amended 2026-09-10 by T-1504: the patch is removed without an upstream accessor, because the daemon now records each worker's pid from its launch shim. The resolved peer's state stays 'pid absent', which the same smoke test still enforces, but supervision no longer degrades on a consumer install.
 
 ## Consequences
 
-- A release may ship before EP-15 lands, but only with the degraded-supervision state named in its release notes — the smoke test makes the state explicit instead of letting a user discover it.
-- The patch pin (18.0.7) is already stale against the peer range (^18.0.7) and the registry head; T-1305's gate asserts patch keys match the lockfile-resolved version.
+- A consumer install no longer runs with degraded supervision: the launch shim records the worker pid, and the smoke test still asserts the resolved peer lacks the accessor, so an upstream change is noticed rather than silently relied on.
+- With the patch gone there is no pin to go stale; the peer range tracks the OMP minor the suites were verified on, and T-1305's gate passes with no patches at all.
 - Every release is reproducible: operator-supplied tag, gates, one verified tarball, then explicit publish, with no artifact rebuild between verification and publication.
 - Git-only installs stay supported for development but are not a release channel.
 
@@ -29,4 +29,4 @@ Distribution is a single npm package with an explicit `files` allowlist; version
 
 | Claim | Source |
 |---|---|
-| Patch that must travel with any release | [`patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`](../../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch) |
+| The pid patch, added in d374d76 and removed by T-1504 | `d374d76` |

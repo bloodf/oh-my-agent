@@ -742,11 +742,15 @@ ADRS = [
             "project and asserts the pid contract state of the resolved peer. Until EP-15 lands "
             "the accessor upstream, that state is 'pid absent, degraded supervision' and the "
             "release notes must state it; after T-1504 the state flips "
-            "to 'pid present' and the same test enforces it. No silent drift in either direction."
+            "to 'pid present' and the same test enforces it. No silent drift in either direction. "
+            "Amended 2026-09-10 by T-1504: the patch is removed without an upstream accessor, because "
+            "the daemon now records each worker's pid from its launch shim. The resolved peer's state "
+            "stays 'pid absent', which the same smoke test still enforces, but supervision no longer "
+            "degrades on a consumer install."
         ),
         consequences=[
-            "A release may ship before EP-15 lands, but only with the degraded-supervision state named in its release notes — the smoke test makes the state explicit instead of letting a user discover it.",
-            "The patch pin (18.0.7) is already stale against the peer range (^18.0.7) and the registry head; T-1305's gate asserts patch keys match the lockfile-resolved version.",
+            "A consumer install no longer runs with degraded supervision: the launch shim records the worker pid, and the smoke test still asserts the resolved peer lacks the accessor, so an upstream change is noticed rather than silently relied on.",
+            "With the patch gone there is no pin to go stale; the peer range tracks the OMP minor the suites were verified on, and T-1305's gate passes with no patches at all.",
             "Every release is reproducible: operator-supplied tag, gates, one verified tarball, then explicit publish, with no artifact rebuild between verification and publication.",
             "Git-only installs stay supported for development but are not a release channel.",
         ],
@@ -756,7 +760,7 @@ ADRS = [
             ("Publish on every commit", "Releases stop being a decision, and every main-branch breakage becomes a version someone may have installed."),
         ],
         evidence=[
-            ("Patch that must travel with any release", "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"),
+            ("The pid patch, added in d374d76 and removed by T-1504", "d374d76"),
         ],
     ),
     ADR(
@@ -3207,7 +3211,6 @@ TASKS += [
             "src/shared/protocol-schemas.ts",
             "tests/worker-lifecycle.test.ts",
             "tests/daemon-main.test.ts",
-            "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch",
             "package.json",
         ],
         assets=[
@@ -3216,7 +3219,6 @@ TASKS += [
             ("src/shared/protocol.ts", "Edited", "`AgentStatus.pid?: number` — optional, additive."),
             ("src/shared/protocol-schemas.ts", "Edited", "Accept the optional field."),
             ("src/daemon/socket.ts", "Edited", "`toAgentStatus` emits the live pid."),
-            ("patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch", "New", "Upstream `RpcClient.pid` accessor, reapplied by bun install; file the equivalent upstream."),
             ("package.json", "Edited", "`patchedDependencies` records the patch."),
             ("tests/worker-lifecycle.test.ts", "Edited", "A real child's pid is reported and dead after stop."),
             ("tests/daemon-main.test.ts", "Edited", "Status carries the pid of a running peer."),
@@ -3231,7 +3233,7 @@ TASKS += [
             "Status over the socket carries the pid for a running peer and none for a parked one.",
             "The agents row's worker_pid matches the live process while running.",
         ],
-                evidence=[("Patched RpcClient.pid accessor", "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"), ("Pid recorded and cleared across the lifecycle", "src/daemon/main.ts")],
+                evidence=[("Patched RpcClient.pid accessor, added here and later replaced by the launch shim's pid record (T-1504)", "d374d76"), ("Pid recorded and cleared across the lifecycle", "src/daemon/main.ts")],
         depends_on=["T-401"],
         out_of_scope=["Killing by pid from the operator surfaces (kill stays logical, by name)."],
     ),
@@ -3776,7 +3778,6 @@ TASKS += [
         ],
         assets=[
             ("package.json", "Edited", "The files allowlist and a prepack script that runs the gates."),
-            ("patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch", "Read-only", "Reapplied by bun install for anyone working from a checkout. Whether it travels in the npm tarball depends on the packing npm: 12 strips the file a patchedDependencies entry names, 11 still packs it. Either is fine, because ADR-013 had already established the patch cannot reach a consumer through a tarball."),
             ("tests/pack.test.ts", "New", "Parses `npm pack --dry-run --json` and asserts both directions: expected paths present, private paths absent."),
         ],
         steps=[
@@ -3909,7 +3910,7 @@ TASKS += [
         epic="EP-13", sprint="SP-14", status="Done",
         goal="CI proves every file under patches/ is a code-only patch whose pin matches the lockfile: no binary hunks, no stray files, no hunks touching non-source paths, no stale patch keys — the .DS_Store incident becomes a gate.",
         read_first=[
-            ("The one patch under contract", "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"),
+            ("The pid patch this gate was built around, removed by T-1504", "docs/delivery/tasks/T-1504-drop-rpc-pid-patch.md"),
             ("CI workflow", ".github/workflows/ci.yml"),
         ],
         files=[
@@ -4207,7 +4208,7 @@ TASKS += [
         read_first=[
             ("The repro task whose README is the issue body", "docs/delivery/tasks/T-1501-repro-import-meta-resolve.md"),
             ("Workaround site one", "src/worker/lifecycle.ts"),
-            ("Workaround site two", "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"),
+            ("Workaround site two, the pid patch, removed by T-1504", "docs/delivery/tasks/T-1504-drop-rpc-pid-patch.md"),
         ],
         files=[
             "scripts/gen-delivery-docs.py",
@@ -4233,7 +4234,7 @@ TASKS += [
             ),
             (
                 "[RpcClient.pid accessor requested as can1357/oh-my-pi#10597](https://github.com/can1357/oh-my-pi/issues/10597)",
-                "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch",
+                "d374d76",
             ),
         ],
         depends_on=["T-1501"],
@@ -4271,37 +4272,57 @@ TASKS += [
         out_of_scope=["Remaining blocker: wait for a released Bun containing the resolver fix (oven-sh/bun#41201), or a released pi-coding-agent whose compat hook no longer self-resolves. An upstream filing alone does not unblock removal, and a merged-but-unreleased fix does not either."],
     ),
     Task(
-        id="T-1504", slug="drop-rpc-pid-patch", title="Remove the RpcClient.pid patch once upstream ships",
-        epic="EP-15", sprint="SP-16", status="Blocked",
-        goal="When a released pi-coding-agent ships the RpcClient.pid accessor, the patchedDependencies entry and the patch file are deleted, the dependency floors rise to the fix version, and everything that references patches/ is updated.",
+        id="T-1504", slug="drop-rpc-pid-patch", title="Remove the RpcClient.pid patch",
+        epic="EP-15", sprint="SP-16", status="Done",
+        goal="The patchedDependencies entry and the patch file are gone because the daemon no longer needs the accessor: each worker's and web chat's launch shim records its own pid. Upstream still ships no RpcClient.pid, so the resolved peer's contract state stays 'pid absent', now without degraded supervision.",
         read_first=[
             ("patchedDependencies", "package.json"),
-            ("The patch", "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"),
-            ("The pack test that references patches/", "docs/delivery/tasks/T-1301-packable-artifact.md"),
+            ("Where the patch was introduced", "docs/delivery/tasks/T-1003-worker-pid-on-the-wire.md"),
+            ("The shim pid record that replaces it", "docs/delivery/tasks/T-1619-runtime-liveness-review.md"),
         ],
         files=[
             "package.json",
-            "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch",
+            "bun.lock",
             "tests/pack.test.ts",
+            "tests/consumer-install.test.ts",
             ".github/workflows/release.yml",
+            "src/worker/lifecycle.ts",
+            "src/daemon/web-chats.ts",
+            "docs/guide/faq.md",
+            "docs/develop/setup.md",
+            "docs/develop/modules.md",
         ],
         assets=[
-            ("package.json", "Edited", "The patchedDependencies entry is removed; the peer and dev dependency floors rise to the released fix version."),
-            ("patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch", "Edited", "Deleted; this row records the removal."),
-            ("tests/pack.test.ts", "Edited", "Created by T-1301; the patches/ presence assertions come out."),
-            (".github/workflows/release.yml", "Edited", "Created by T-1303; the pid contract state flips to 'pid present'."),
+            ("package.json", "Edited", "patchedDependencies and the patches allowlist entry are removed; the dev dependency moves to 18.1.17 and the peer floor to 18.1.0, which admits the OMP an operator runs today."),
+            ("bun.lock", "Edited", "Relocked on the unpatched 18.1.x dependency."),
+            ("tests/pack.test.ts", "Edited", "Created by T-1301; asserts nothing under patches/ is packed."),
+            ("tests/consumer-install.test.ts", "Edited", "Created by T-1306; the 'absent' assertion stays and now states why supervision is not degraded."),
+            (".github/workflows/release.yml", "Edited", "Created by T-1303; the smoke step no longer names degraded supervision."),
+            ("src/worker/lifecycle.ts", "Edited", "Comments name the shim record, not a patch, as the pid source outside an upstream accessor."),
+            ("src/daemon/web-chats.ts", "Edited", "Same, for web chat liveness."),
+            ("docs/guide/faq.md", "Edited", "The degraded-supervision entry becomes an explanation of the shim pid record."),
+            ("docs/develop/setup.md", "Edited", "The Patches section is removed."),
+            ("docs/develop/modules.md", "Edited", "The patches/ row is removed."),
         ],
         steps=[
-            "Pick this up WHEN a released pi-coding-agent contains the pid accessor (T-1502's accessor issue closed).",
-            "Remove the patchedDependencies entry and the patch file, raise the dependency floors to the fix version, and refresh the lockfile.",
-            "Update the consumers of patches/: the pack test's assertions and the release workflow's contract-state assert (per amended ADR-013, the state flips to 'pid present' and the same consumer smoke test enforces it).",
+            "Taken on the operator's decision rather than on an upstream release: T-1619 made pid reporting independent of the accessor, and the suites were verified against unpatched OMP 18.1.17 first.",
+            "Delete the patch file and the patchedDependencies entry, drop patches from the files allowlist, move the dev dependency to 18.1.17 and the peer floor to 18.1.0, and relock.",
+            "Update the consumers of patches/ and the pid contract wording: the pack test, the release workflow step, the consumer-install assertion's comment, and the contributor docs.",
         ],
         acceptance=[
-            "No patchedDependencies entry and no patch file remain; the suites are green on the upgraded dependency.",
-            "The pack test and release workflow no longer reference patches/, and the consumer smoke test asserts 'pid present'.",
+            "No patchedDependencies entry and no patch file remain, the patch hygiene gate passes with none, and the full suite is green on the unpatched dependency.",
+            "The pack test asserts nothing under patches/ is packed.",
+            "Worker and web chat pids are reported without the accessor, and the consumer smoke still asserts the resolved peer's 'pid absent' state.",
         ],
-        depends_on=["T-1502"],
-        out_of_scope=["Remaining blocker: wait for a released pi-coding-agent version containing the RpcClient.pid accessor tracked by T-1502; an upstream filing alone does not unblock patch removal."],
+        evidence=[
+            ("Worker pid reported from the shim record without the accessor", "tests/worker-lifecycle.test.ts"),
+            ("Web chat liveness from the shim record without the accessor", "tests/web-workspace-security.test.ts"),
+            ("Nothing under patches/ is packed", "tests/pack.test.ts"),
+            ("Patch hygiene passes with no patches", "scripts/check-patches.py"),
+            ("The patch being removed was added in", "d374d76"),
+        ],
+        depends_on=["T-1502", "T-1619"],
+        out_of_scope=["An upstream RpcClient.pid accessor. When one ships, the consumer smoke's 'absent' assertion fails and flags it; the shim record can then stay as the fallback or go."],
     ),
 ]
 

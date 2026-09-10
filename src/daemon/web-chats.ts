@@ -56,13 +56,12 @@ import { resolveOmpCli } from "../worker/lifecycle";
 /**
  * Whether a chat's OMP process is still running.
  *
- * `RpcClient` keeps its child in a private field, so the `pid` accessor exists
- * only where this repository's patch applies — a consumer's install has no
- * patch, `pid` was always `undefined` there, and every web chat was treated
- * as dead: dropped from the live set a second after starting, relaunched on
- * every request, and refused every operation as "closed". The launch shim
- * records its own pid, which is the process the client spawned, so liveness
- * no longer depends on the patch. A signal-0 probe answers the question for
+ * Released `RpcClient` keeps its child in a private field with no `pid`
+ * accessor, so judged by the client alone every web chat was treated as dead:
+ * dropped from the live set a second after starting, relaunched on every
+ * request, and refused every operation as "closed". The launch shim records
+ * its own pid, which is the process the client spawned, so liveness no longer
+ * depends on an accessor. A signal-0 probe answers the question for
  * both sources the same way.
  *
  * ponytail: signal 0 cannot tell a recycled pid from the original; the 1s
@@ -461,7 +460,7 @@ export async function createWebChats(
 			await persist();
 		}
 		// Launched through a shim that records the child's pid, because the
-		// client exposes none outside this repository's patched copy.
+		// released client exposes none.
 		const { shimPath, pidPath } = await writeChatShim(
 			shimDir,
 			record.id,

@@ -23,7 +23,6 @@ A running worker's OS pid is visible in status and recorded in the agents table,
 - `src/shared/protocol-schemas.ts`
 - `tests/worker-lifecycle.test.ts`
 - `tests/daemon-main.test.ts`
-- `patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`
 - `package.json`
 
 ## Modules and assets in play
@@ -35,7 +34,6 @@ A running worker's OS pid is visible in status and recorded in the agents table,
 | [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Edited | `AgentStatus.pid?: number` — optional, additive. |
 | [`src/shared/protocol-schemas.ts`](../../../src/shared/protocol-schemas.ts) | Edited | Accept the optional field. |
 | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) | Edited | `toAgentStatus` emits the live pid. |
-| [`patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`](../../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch) | New | Upstream `RpcClient.pid` accessor, reapplied by bun install; file the equivalent upstream. |
 | [`package.json`](../../../package.json) | Edited | `patchedDependencies` records the patch. |
 | [`tests/worker-lifecycle.test.ts`](../../../tests/worker-lifecycle.test.ts) | Edited | A real child's pid is reported and dead after stop. |
 | [`tests/daemon-main.test.ts`](../../../tests/daemon-main.test.ts) | Edited | Status carries the pid of a running peer. |
@@ -56,7 +54,7 @@ Evidence:
 
 | Claim | Anchor |
 |---|---|
-| Patched RpcClient.pid accessor | [`patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`](../../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch) |
+| Patched RpcClient.pid accessor, added here and later replaced by the launch shim's pid record (T-1504) | `d374d76` |
 | Pid recorded and cleared across the lifecycle | [`src/daemon/main.ts`](../../../src/daemon/main.ts) |
 
 ## Out of scope

@@ -292,9 +292,9 @@ describe("remote workspace full-control boundary", () => {
 
 describe("web chat liveness", () => {
 	test("a client without a pid accessor is judged by the recorded pid", async () => {
-		// A consumer's install has no `RpcClient.pid` — that accessor exists
-		// only where this repository's patch applies — and every web chat there
-		// was treated as dead. The launch shim records the pid instead.
+		// Released OMP has no `RpcClient.pid`, and judged by the client alone
+		// every web chat was treated as dead. The launch shim records the pid
+		// instead.
 		const dir = await tempDir("oma-chat-liveness-");
 		const pidPath = join(dir, "chat.pid");
 		const unpatched = {};

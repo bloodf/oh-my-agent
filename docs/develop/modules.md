@@ -80,7 +80,6 @@ Transport-free types and parsing.
 |---|---|
 | [`agents/`](../../agents/) | Example peer definitions (`example-researcher`, `example-reviewer`). |
 | [`skills/`](../../skills/) | OMP skills for agent authoring, subagent authoring, orchestration. |
-| [`patches/`](../../patches/) | `RpcClient.pid` patch for the checkout. Does not travel to npm consumers. |
 | [`scripts/gen-delivery-docs.py`](../../scripts/gen-delivery-docs.py) | Source of `docs/delivery/`. |
 | [`scripts/check-patches.py`](../../scripts/check-patches.py) | Patch-key / lockfile hygiene gate. |
 | [`scripts/dogfood.ts`](../../scripts/dogfood.ts) | Live-session harness driven by `omp-agent --json`. |
