@@ -979,11 +979,14 @@ export async function startConsoleApi(
 		fullControl: boolean,
 	): Promise<Response> => {
 		const path = url.pathname;
-		// The same predicate the web routes answer with. A console composed
-		// without them used to report `false` unconditionally — a wrong
-		// default one file away from the correct copy of a security check.
+		// Reached only when no web workspace routes are composed — with them,
+		// `handleWebRoute` answers first. `false` is the truthful answer here,
+		// not a stale default: the capability says whether the privileged
+		// workspace surface exists and is permitted, and in this composition
+		// it does not exist. Reporting the transport's control level instead
+		// sends the client after `/api/chats`, which 404s.
 		if (path === "/api/capabilities" && request.method === "GET")
-			return json(200, { fullControl });
+			return json(200, { fullControl: false });
 
 		// Every route below decodes the segments it captures, and a malformed
 		// escape makes `decodeURIComponent` throw. Caught here, once, rather
