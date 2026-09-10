@@ -30,8 +30,10 @@ import type {
 } from "@oh-my-pi/pi-coding-agent";
 /** `getAgentDir()` from pi-utils resolves the active profile's agent dir. */
 import { getAgentDir } from "@oh-my-pi/pi-utils";
+import type { StatusResult } from "../shared/protocol";
+import { PACKAGE_VERSION } from "../shared/version";
 import { cliCommand, consoleCommand } from "./cli";
-import type { ExtensionIO } from "./commands";
+import type { DaemonClient, ExtensionIO } from "./commands";
 import {
 	injectCommand,
 	killCommand,
@@ -45,7 +47,7 @@ import {
 import { ensureDaemon } from "./ensure-daemon";
 import type { ManagerHostContext } from "./manager";
 import { openManager } from "./manager";
-import { createDaemonClient, refreshWidget } from "./widget";
+import { createDaemonClient, markRoomsRead, refreshWidget } from "./widget";
 
 /** Adapt OMP's UI context onto the seam the commands are written against. */
 function ioFrom(ui: ExtensionUIContext): ExtensionIO {
@@ -77,6 +79,33 @@ export function managerHostFrom(ctx: ExtensionContext): ManagerHostContext {
 		hasUI: ctx.hasUI,
 		custom: ctx.ui.custom.bind(ctx.ui) as ManagerHostContext["custom"],
 	};
+}
+
+/**
+ * Say so when the daemon is running older code than this plugin.
+ *
+ * The daemon outlives the session that started it — an operator's ran for four
+ * days across a plugin upgrade — so a fix shipped in the plugin tree can be
+ * absent from the process actually answering. Never restarts on its own: a
+ * restart kills live workers, and that is the operator's call.
+ */
+async function warnOnVersionDrift(
+	client: DaemonClient,
+	io: ExtensionIO,
+): Promise<void> {
+	try {
+		const status = await client.call<StatusResult>("status", {});
+		// A daemon older than the field itself reports nothing, which is
+		// exactly the case worth surviving quietly rather than guessing about.
+		if (status.version === undefined || status.version === PACKAGE_VERSION) {
+			return;
+		}
+		io.notify(
+			`oh-my-agent daemon is running ${status.version} while this plugin is ${PACKAGE_VERSION}; restart it with \`/cli daemon restart\`.`,
+		);
+	} catch {
+		// A daemon that cannot be reached is already reported by the widget.
+	}
 }
 
 const ohMyAgentExtension = (pi: ExtensionAPI): void => {
@@ -127,11 +156,20 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 		description: "Read a room transcript or post into it as @you.",
 		handler: async (args, ctx) => {
 			const io = ioFrom(ctx.ui);
-			const [verb, room, ...rest] = args.trim().split(/\s+/);
+			// Split off the two leading tokens and keep the rest of the line
+			// exactly as typed: re-joining a `\s+` split collapses indentation
+			// and runs of spaces, which silently reformats the operator's post.
+			const match = /^\s*(\S+)(?:\s+(\S+)(?:\s+([\s\S]*))?)?$/.exec(args);
+			const verb = match?.[1];
+			const room = match?.[2];
+			const body = match?.[3] ?? "";
 			if (verb === "read" && room !== undefined) {
 				await roomsReadCommand(client, io, room);
+				// The transcript is on screen now, so the widget's unread count
+				// is answered — nothing else in the TUI shows message bodies.
+				markRoomsRead(client);
 			} else if (verb === "post" && room !== undefined) {
-				await roomsPostCommand(client, io, room, rest.join(" "));
+				await roomsPostCommand(client, io, room, body);
 			} else {
 				io.notify("usage: /rooms read <room> | /rooms post <room> <message>");
 			}
@@ -148,6 +186,10 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 			} else {
 				await scheduleArmCommand(client, io, args);
 			}
+			// Arming a schedule changes what the daemon will do next; every
+			// other mutating command repaints, and this one skipping it left a
+			// stale widget behind the operator's own action.
+			await refreshWidget(client, io);
 		},
 	});
 
@@ -197,13 +239,23 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 	// initialized until session start. Spawn uses the plugin-local main.ts
 	// so PATH is never required.
 	pi.on("session_start", async (_event, ctx) => {
+		const io = ioFrom(ctx.ui);
 		try {
-			await ensureDaemon(client);
-		} catch {
-			// Probe/spawn surprises must not throw into the TUI; the widget
-			// still paints whatever the socket looks like after this attempt.
+			const ensured = await ensureDaemon(client);
+			// The launcher's own words, not the generic daemon-down sentence:
+			// "already running for this profile" and "bun: command not found"
+			// send the operator to entirely different places.
+			if (ensured.state === "failed" && ensured.reason !== undefined) {
+				io.notify(`oh-my-agent daemon did not start: ${ensured.reason}`);
+			}
+		} catch (error) {
+			// Probe/spawn surprises must not throw into the TUI; an auth fault
+			// travels out of `ensureDaemon` deliberately, and it is worth saying
+			// out loud because the widget line alone reads like a dead daemon.
+			io.notify(error instanceof Error ? error.message : String(error));
 		}
-		await refreshWidget(client, ioFrom(ctx.ui));
+		await warnOnVersionDrift(client, io);
+		await refreshWidget(client, io);
 	});
 	pi.on("turn_end", async (_event, ctx) => {
 		await refreshWidget(client, ioFrom(ctx.ui));

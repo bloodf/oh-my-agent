@@ -57,6 +57,7 @@ import type {
 	RoomInfo,
 	ScheduleInfo,
 } from "../shared/protocol";
+import { PACKAGE_VERSION } from "../shared/version";
 import type { WorkerHandle } from "../worker/lifecycle";
 import { startInProcessWorker, startWorker } from "../worker/lifecycle";
 import { resolveBrokerHosting } from "./boot";
@@ -227,6 +228,27 @@ function definitionPathFor(peer: PeerDefinition): string {
 }
 
 /**
+ * Refusal from `claimPidfile` when a live daemon already owns this profile.
+ *
+ * A distinct type because it is not a malfunction: the operator asked for a
+ * daemon and there is one. `runDaemon` answers it by pointing the launcher at
+ * the daemon that exists, rather than letting it travel out as an uncaught
+ * exception — which is what filled the operator's `daemon.log` with 23 stack
+ * traces, one per TUI session start.
+ */
+export class AlreadyRunningError extends Error {
+	constructor(
+		readonly pid: number,
+		pidPath: string,
+	) {
+		super(
+			`oh-my-agent daemon is already running for this profile (pid ${pid}, ${pidPath})`,
+		);
+		this.name = "AlreadyRunningError";
+	}
+}
+
+/**
  * Claim the single-instance pidfile, or refuse. A pidfile naming a live process
  * is a running daemon; one naming a dead process is crash debris and is
  * replaced, because refusing forever after a crash would need manual cleanup.
@@ -243,11 +265,7 @@ async function claimPidfile(pidPath: string): Promise<void> {
 				// EPERM means it exists but belongs to someone else: still alive.
 				alive = (error as NodeJS.ErrnoException).code === "EPERM";
 			}
-			if (alive) {
-				throw new Error(
-					`oh-my-agent daemon is already running for this profile (pid ${pid}, ${pidPath})`,
-				);
-			}
+			if (alive) throw new AlreadyRunningError(pid, pidPath);
 		}
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -1283,6 +1301,8 @@ export async function bootDaemon(
 				rooms: peerRooms,
 				...(parent === undefined ? {} : { parent }),
 			});
+			// This peer is running; whatever stopped it last time is history.
+			startFailures.delete(name);
 			db.upsertAgent({
 				name,
 				definitionPath: definitionPathFor(definition),
@@ -1467,6 +1487,17 @@ export async function bootDaemon(
 		 */
 		const orphans = new Map<string, string>();
 
+		/**
+		 * Why a peer that should be running is not, keyed by name.
+		 *
+		 * A start that throws is caught so one bad definition cannot take the
+		 * daemon down with it — but until this map existed the only record was a
+		 * line in the daemon's own stderr, and the peer was simply missing from
+		 * `status` with no way to ask why from the TUI, the CLI, or the console.
+		 * Cleared by the next start that succeeds.
+		 */
+		const startFailures = new Map<string, string>();
+
 		// An agent whose ancestry no longer resolves is refused, not resumed
 		// (ADR-011): orphanhood is made an impossible steady state rather than
 		// swept up after the fact. The database walks the chain, so a grandchild
@@ -1553,7 +1584,9 @@ export async function bootDaemon(
 			} catch (error) {
 				// One peer that cannot start must not take the daemon with it: the
 				// operator needs a running socket to see what failed and why.
-				log(`peer ${definition.name} failed to start: ${String(error)}`);
+				const reason = error instanceof Error ? error.message : String(error);
+				log(`peer ${definition.name} failed to start: ${reason}`);
+				startFailures.set(definition.name, reason);
 			}
 		}
 
@@ -1755,6 +1788,49 @@ export async function bootDaemon(
 			daemonLog,
 		});
 
+		/**
+		 * Rewrite the credential files this daemon advertises itself with, if
+		 * they are gone.
+		 *
+		 * The token is the one minted at boot, held in memory: rewriting the
+		 * same bytes keeps every client that already has it working, where
+		 * minting a fresh one would revoke a credential nobody asked to rotate.
+		 * A file that is still there is left untouched, mode included — the
+		 * operator may have tightened it, and `verifySecretMode` is the thing
+		 * that judges it.
+		 */
+		const ensureCredentials = async (): Promise<void> => {
+			const restore = async (file: string, contents: string): Promise<void> => {
+				const path = join(stateDir, file);
+				try {
+					await stat(path);
+					return;
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+				}
+				await writeFile(path, contents, {
+					encoding: "utf8",
+					mode: TOKEN_MODE,
+				});
+				// umask can mask bits off the create mode; set them explicitly,
+				// exactly as `loadSecret` does.
+				await chmod(path, TOKEN_MODE);
+				log(`restored missing ${file}`);
+			};
+
+			try {
+				await restore(TOKEN_FILE, operatorToken);
+				if (consoleUrl !== undefined) {
+					await restore("console-url", consoleUrl);
+				}
+			} catch (error) {
+				// Healing is best effort: a state directory this daemon can no
+				// longer write to is a real problem, but not one worth failing
+				// every RPC over.
+				log(`restoring credential files failed: ${String(error)}`);
+			}
+		};
+
 		const context: DaemonContext = {
 			rooms,
 			plans,
@@ -1764,9 +1840,12 @@ export async function bootDaemon(
 			knownRooms,
 			schedules,
 			orphans,
+			startFailures,
 			store,
 			writeDefinition,
 			startedAt: now(),
+			version: PACKAGE_VERSION,
+			ensureCredentials,
 			now,
 			ensureRoom,
 			spawnPeer,
@@ -1962,6 +2041,28 @@ export async function bootDaemon(
 			await stopUsageLoop();
 			await stopAttachmentCleanup();
 
+			/**
+			 * Run one teardown step, and never let it cancel the rest.
+			 *
+			 * Shutdown is a sequence of independent releases, and an exception
+			 * partway through used to abandon every step after it: a SQLite
+			 * `disk I/O error` closing open runs left the database handle, the
+			 * gateways, the pidfile, and the socket file all behind, so the next
+			 * boot met a pidfile it could not claim and debris it had to clean.
+			 * Mirrors the `started` unwind on the failed-boot path below, which
+			 * has always run every entry regardless.
+			 */
+			const step = async (
+				label: string,
+				body: () => void | Promise<void>,
+			): Promise<void> => {
+				try {
+					await body();
+				} catch (error) {
+					log(`shutdown step ${label} failed: ${String(error)}`);
+				}
+			};
+
 			// Reverse order: the console and the socket first, so no new request
 			// arrives; then the workers, then the machinery they depend on, and
 			// only then the files that advertise this daemon's existence.
@@ -1970,11 +2071,11 @@ export async function bootDaemon(
 			// polls that store while a browser is connected, and closing the
 			// database under a running poller is a query against a closed
 			// handle.
-			await consoleApi?.close();
-			await socket.close();
-			await chats.close();
-			plans.close();
-			await supervisor.settled();
+			await step("console", async () => await consoleApi?.close());
+			await step("control socket", async () => await socket.close());
+			await step("chats", async () => await chats.close());
+			await step("plans", () => plans.close());
+			await step("supervisor", async () => await supervisor.settled());
 			await Promise.all(
 				[...spawnInFlight.values()].map(({ promise }) =>
 					promise.catch((error) =>
@@ -1991,35 +2092,50 @@ export async function bootDaemon(
 					await closeInferenceGateway(record.worker.name);
 				}
 			}
-			scheduler.stop();
+			await step("scheduler", () => scheduler.stop());
 
 			// A turn still in flight belongs to a process about to stop
 			// existing. Closing its row as interrupted is the last write; after
 			// it, `recording` is off so a late completion cannot reopen the
 			// question — or touch a closed database.
-			const interrupted = db.interruptOpenRuns(now());
-			if (interrupted > 0) {
-				log(`closed ${interrupted} interrupted run(s) at shutdown`);
-			}
-			for (const name of peers.keys()) markAgentRuntime(name, "stopped", null);
+			await step("interrupt open runs", () => {
+				const interrupted = db.interruptOpenRuns(now());
+				if (interrupted > 0) {
+					log(`closed ${interrupted} interrupted run(s) at shutdown`);
+				}
+			});
+			await step("mark agents stopped", () => {
+				for (const name of peers.keys()) {
+					markAgentRuntime(name, "stopped", null);
+				}
+			});
 			recording = false;
-			db.close();
+			await step("database", () => db.close());
 
 			for (const workerId of [...inferenceGateways.keys()]) {
-				await closeInferenceGateway(workerId);
+				await step(
+					`inference gateway ${workerId}`,
+					async () => await closeInferenceGateway(workerId),
+				);
 			}
-			await gateway.close();
-			await rooms.close();
-			await hosting.close();
+			await step("credential gateway", async () => await gateway.close());
+			await step("rooms", async () => await rooms.close());
+			await step("broker", async () => await hosting.close());
 			// Re-checked here, not just where the stop was requested: the close
 			// `daemon_stop` schedules runs a macrotask after its ack, and a
 			// successor daemon can claim the pidfile inside that window. An
 			// unconditional unlink would delete the new owner's lock.
-			if (await ownsPidfile(pidPath)) {
-				await rm(pidPath, { force: true });
-			}
-			await rm(socketPath, { force: true });
-			await rm(join(stateDir, "console-url"), { force: true });
+			await step("pidfile", async () => {
+				if (await ownsPidfile(pidPath)) {
+					await rm(pidPath, { force: true });
+				}
+			});
+			await step("socket file", async () => {
+				await rm(socketPath, { force: true });
+			});
+			await step("console url", async () => {
+				await rm(join(stateDir, "console-url"), { force: true });
+			});
 		});
 
 		return {
@@ -2054,19 +2170,50 @@ export async function bootDaemon(
  * handler it races.
  */
 export async function runDaemon(workerBackend: WorkerBackend): Promise<void> {
-	const handle = await bootDaemon({
-		inProcessWorkers: workerBackend === "in-process",
-		logger: (message) => {
-			process.stderr.write(`${message}\n`);
-		},
-		// The launcher holds this pipe open waiting for exactly this line. It is
-		// the only thing ever written to stdout, and stdout is closed straight
-		// after — including when there is no console to announce — so the
-		// launcher stops waiting instead of hanging for the daemon's lifetime.
-		announce: (url) => {
-			process.stdout.write(`${url ?? ""}\n`);
-			process.stdout.end();
-		},
-	});
+	const announce = (url: string | undefined): void => {
+		process.stdout.write(`${url ?? ""}\n`);
+		process.stdout.end();
+	};
+
+	let handle: DaemonHandle;
+	try {
+		handle = await bootDaemon({
+			inProcessWorkers: workerBackend === "in-process",
+			logger: (message) => {
+				process.stderr.write(`${message}\n`);
+			},
+			// The launcher holds this pipe open waiting for exactly this line. It
+			// is the only thing ever written to stdout, and stdout is closed
+			// straight after — including when there is no console to announce —
+			// so the launcher stops waiting instead of hanging for the daemon's
+			// lifetime.
+			announce,
+		});
+	} catch (error) {
+		if (!(error instanceof AlreadyRunningError)) throw error;
+		// Not a failure: the operator asked for a daemon and this profile has
+		// one. Announce the live daemon's console URL so the launcher — and
+		// through it the TUI's session start — sees a ready daemon instead of
+		// waiting out a child that died, then reporting "exited before
+		// readiness" for a socket that was answering the whole time.
+		process.stderr.write(`${error.message}\n`);
+		const stateDir = join(
+			process.env.PI_CODING_AGENT_DIR ?? getAgentDir(),
+			STATE_DIR,
+		);
+		let consoleUrl: string | undefined;
+		try {
+			const stored = (
+				await readFile(join(stateDir, "console-url"), "utf8")
+			).trim();
+			if (stored.length > 0) consoleUrl = stored;
+		} catch (readError) {
+			if ((readError as NodeJS.ErrnoException).code !== "ENOENT") {
+				throw readError;
+			}
+		}
+		announce(consoleUrl);
+		return;
+	}
 	postmortem.register("oh-my-agent-daemon", () => handle.close());
 }

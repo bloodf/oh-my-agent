@@ -13,7 +13,15 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import {
+	chmod,
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	stat,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -824,10 +832,66 @@ describe("omp-agent CLI — operator bearer", () => {
 
 // ── Worker backend selector (T-1405) ────────────────────────────────────────
 
-test("bare binary invocation retains the RPC daemon default", async () => {
+test("a second launch against a live daemon succeeds and points at it", async () => {
+	const agentDir = await tempAgentDir();
+	const first = await spawnDaemon(agentDir, ["daemon"]);
+
+	// What the TUI does on every session start. The second launcher must find
+	// the running daemon and report it, not die on the pidfile: that refusal
+	// used to travel out as an uncaught exception, so the launcher reported
+	// "exited before readiness" for a socket that was answering the whole time
+	// and the operator's log filled with stack traces, one per session.
+	const second = await spawnDaemon(agentDir, ["daemon"]);
+
+	expect(second.stdout).toContain("daemon.sock");
+	expect(second.stdout.trim()).toBe(first.stdout.trim());
+
+	// The detached child writes to the daemon log, not to the launcher's
+	// stderr, so that is where the refusal has to be legible — and where 23
+	// uncaught-exception stack traces used to pile up instead.
+	const daemonLog = await readFile(
+		join(agentDir, "oh-my-agent", "daemon.log"),
+		"utf8",
+	);
+	expect(daemonLog).toContain("already running");
+	expect(daemonLog).not.toContain("Uncaught");
+	expect(daemonLog).not.toContain("at claimPidfile");
+});
+
+test("bare binary invocation prints usage instead of starting a daemon", async () => {
+	const agentDir = await tempAgentDir();
+	const mainPath = join(import.meta.dir, "..", "src", "daemon", "main.ts");
+	const launcher = Bun.spawn({
+		cmd: [process.execPath, mainPath],
+		env: hermeticChildEnv({
+			PI_CODING_AGENT_DIR: agentDir,
+			OMP_AUTH_BROKER_URL: "",
+			OMP_AUTH_BROKER_TOKEN: "",
+		}),
+		cwd: agentDir,
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	const [exitCode, stdout, stderr] = await Promise.all([
+		launcher.exited,
+		new Response(launcher.stdout).text(),
+		new Response(launcher.stderr).text(),
+	]);
+
+	// USAGE names a verb as required. Booting a detached daemon from an empty
+	// argv handed an operator who typed the binary to see what it does a
+	// background process they never asked for — and no pidfile, socket, or
+	// state directory may be created on the way to saying so.
+	expect(exitCode).toBe(2);
+	expect(stdout).toBe("");
+	expect(stderr).toContain("Usage:");
+	expect(existsSync(join(agentDir, "oh-my-agent", "daemon.pid"))).toBe(false);
+	expect(existsSync(join(agentDir, "oh-my-agent", "daemon.sock"))).toBe(false);
+});
+
+test("the daemon verb retains the RPC backend default", async () => {
 	const agentDir = await tempAgentDir();
 	await writePeer(agentDir, "reviewer");
-	const { stdout, stderr } = await spawnDaemon(agentDir, []);
+	const { stdout, stderr } = await spawnDaemon(agentDir, ["daemon"]);
 	const agentsCli = await runBinaryCli(agentDir, ["--json", "agents"]);
 	const reviewer = (
 		JSON.parse(agentsCli.stdout) as AgentStatusResult

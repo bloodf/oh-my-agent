@@ -24,6 +24,8 @@
  *
  * @Environment bun
  */
+
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
@@ -61,6 +63,7 @@ import type {
 } from "../src/shared/protocol";
 import { ERROR_CODE, PROTOCOL_VERSION } from "../src/shared/protocol";
 import { METHODS } from "../src/shared/protocol-schemas";
+import { PACKAGE_VERSION } from "../src/shared/version";
 import {
 	controlCall,
 	operatorIdentities,
@@ -602,9 +605,98 @@ describe("bootDaemon — composition and the control socket", () => {
 		});
 		cleanups.push(() => handle.close());
 
-		// The operator needs a live socket to find out what failed and why.
+		// The operator needs a live socket to find out what failed and why —
+		// and "why" is on the wire, not only in the daemon's own log: a peer
+		// that threw on start is reported stopped with the reason attached,
+		// rather than being silently missing from status altogether.
 		const status = await call<StatusResult>(handle.socketPath, "status");
-		expect(status.agents.map((agent) => agent.name)).toEqual(["reviewer"]);
+		expect(status.agents.map((agent) => agent.name).sort()).toEqual([
+			"broken",
+			"reviewer",
+		]);
+		const broken = status.agents.find((agent) => agent.name === "broken");
+		expect(broken?.state).toBe("stopped");
+		expect(broken?.lastError).toContain("cannot materialize");
+		expect(
+			status.agents.find((agent) => agent.name === "reviewer")?.lastError,
+		).toBeUndefined();
+	});
+
+	test("a deleted operator token is restored on the next request", async () => {
+		const { handle, agentDir } = await boot();
+		const stateDir = join(agentDir, "oh-my-agent");
+		const tokenPath = join(stateDir, "console-token");
+		const minted = await operatorToken(stateDir);
+
+		// The state an operator was left in: a live daemon whose credential file
+		// is gone, so every surface authenticates against nothing and reads as a
+		// dead daemon. The bytes are the ones minted at boot, so a client that
+		// already holds the token is not silently locked out by the repair.
+		await rm(tokenPath, { force: true });
+		expect(existsSync(tokenPath)).toBe(false);
+
+		// Sent with the token this caller already holds, because that is the
+		// only kind of caller left once the file is gone — the helpers read it
+		// from disk on every call.
+		const response = await fetch("http://localhost/rpc", {
+			unix: handle.socketPath,
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${minted}`,
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "status",
+				params: {},
+			}),
+		});
+		expect(response.status).toBe(200);
+
+		expect(existsSync(tokenPath)).toBe(true);
+		expect(await operatorToken(stateDir)).toBe(minted);
+	});
+
+	test("status reports the daemon's own version", async () => {
+		const { handle } = await boot();
+		// A daemon outlives the session that started it, so the code answering
+		// can be older than the plugin asking; the version is how a client finds
+		// that out instead of guessing at strange behavior.
+		const status = await call<StatusResult>(handle.socketPath, "status");
+		expect(status.version).toBe(PACKAGE_VERSION);
+	});
+
+	test("a failing shutdown step does not abandon the ones after it", async () => {
+		const agentDir = await tempAgentDir();
+		const logs: string[] = [];
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: await tempAgentDir(),
+			workerFactory: stubWorkerFactory().factory,
+			logger: (message) => logs.push(message),
+		});
+
+		// A real failure partway through teardown, of the same family as the one
+		// seen in the field (a SQLite `disk I/O error` closing open runs): a
+		// second connection holds the database exclusively, so the daemon's own
+		// last writes and its `close()` throw. Everything after that used to be
+		// abandoned — including the pidfile, which the next boot then met as a
+		// claim it could not take.
+		const blocker = new Database(join(agentDir, "oh-my-agent", "daemon.db"));
+		blocker.exec("BEGIN EXCLUSIVE");
+		try {
+			await handle.close();
+		} finally {
+			blocker.exec("ROLLBACK");
+			blocker.close();
+		}
+
+		expect(logs.some((line) => line.includes("shutdown step"))).toBe(true);
+		// The file-level steps run after the database ones, and still ran.
+		expect(existsSync(handle.pidPath)).toBe(false);
+		expect(existsSync(handle.socketPath)).toBe(false);
 	});
 
 	test("registers every peer the store lists, with its rooms", async () => {

@@ -9,6 +9,9 @@ import {
 	UsageError,
 } from "./startup";
 
+/** How long the launcher waits for the detached daemon's readiness line. */
+const READINESS_TIMEOUT_MS = 30_000;
+
 const argv = process.argv.slice(2);
 let start: DaemonStartOptions | undefined;
 try {
@@ -35,6 +38,11 @@ if (start === undefined) {
 	const agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir();
 	const stateDir = join(agentDir, "oh-my-agent");
 	await mkdir(stateDir, { recursive: true, mode: 0o700 });
+	// `mkdir`'s mode applies only to a directory it creates, and this one
+	// usually already exists — from an older release, or from a profile copied
+	// between machines. The credential files inside are 0600, but a
+	// world-readable directory still leaks which daemons a machine runs.
+	await chmod(stateDir, 0o700);
 	const logPath = join(stateDir, "daemon.log");
 	const log = await open(logPath, "a", 0o600);
 	let child: Bun.Subprocess<"ignore", "pipe", number>;
@@ -46,16 +54,29 @@ if (start === undefined) {
 			stdio: ["ignore", "pipe", log.fd],
 			detached: true,
 		});
+		child.unref();
 	} finally {
+		// After the spawn has taken the descriptor: closing it in a `finally`
+		// that ran between constructing the child and its inheriting the fd is
+		// undefined behavior, and this log is the only crash record a detached
+		// daemon leaves.
 		await log.close();
 	}
-	child.unref();
 	let readiness = "";
 	const reader = child.stdout.getReader();
 	const decoder = new TextDecoder();
+	// A daemon wedged on a broker probe would otherwise hold this pipe open
+	// forever — and this launcher runs inside the TUI's session start, so the
+	// hang would be the whole editor, not just the daemon.
+	const deadline = new Promise<"timeout">((resolve) => {
+		const timer = setTimeout(() => resolve("timeout"), READINESS_TIMEOUT_MS);
+		timer.unref?.();
+	});
 	try {
 		while (!readiness.includes("\n")) {
-			const { done, value } = await reader.read();
+			const next = await Promise.race([reader.read(), deadline]);
+			if (next === "timeout") break;
+			const { done, value } = next;
 			if (done) break;
 			readiness += decoder.decode(value, { stream: true });
 		}

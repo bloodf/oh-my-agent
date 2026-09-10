@@ -71,6 +71,15 @@ export interface AgentStatus {
 	pid?: number;
 	parent?: string;
 	children?: string[];
+	/**
+	 * Why this peer is not running, when a start attempt failed.
+	 *
+	 * A boot-time start failure used to exist only as a line in the daemon's
+	 * own log: the operator saw a peer that was simply absent from `status`
+	 * with no way to ask why from any surface. Cleared by the next successful
+	 * start.
+	 */
+	lastError?: string;
 }
 
 export interface RoomMessage {
@@ -124,6 +133,15 @@ export interface StatusResult {
 	protocolVersion: number;
 	agents: AgentStatus[];
 	uptimeMs: number;
+	/**
+	 * The daemon's own package version.
+	 *
+	 * A long-lived daemon outlives plugin upgrades — the operator's install
+	 * ran 1.2.0 for four days against a 1.2.1 plugin tree — and nothing on the
+	 * wire said so. Optional because a daemon older than this field is exactly
+	 * the case a client needs to survive.
+	 */
+	version?: string;
 }
 
 export interface ChatSendParams {
@@ -152,6 +170,17 @@ export interface ChatWaitParams {
 }
 export interface ChatWaitResult {
 	messages: RoomMessage[];
+	/**
+	 * The highest message id this wait considered, whether or not anything
+	 * arrived.
+	 *
+	 * A caller keeping its own read cursor cannot derive this from `messages`:
+	 * a wait that returns nothing tells it neither where "now" was nor where to
+	 * resume, so its next call asks for "after now" again and it never advances
+	 * past an idle moment. Optional because a daemon older than this field
+	 * simply does not send it.
+	 */
+	latestId?: number;
 }
 
 export interface ChatReactionParams {

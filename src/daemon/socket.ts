@@ -357,6 +357,16 @@ export interface DaemonContext {
 	 */
 	orphans?: Map<string, string>;
 	/**
+	 * Why a registered peer is not running, keyed by name.
+	 *
+	 * A start that throws leaves nothing in `peers`, so the peer simply did not
+	 * appear in `status` and the only record of the failure was a line in the
+	 * daemon's own log. Kept beside `peers` rather than inside it for the same
+	 * reason `orphans` is: a failed start has no worker, and a stub in `peers`
+	 * would be reachable by `kill`, `inject`, and the shutdown sweep.
+	 */
+	startFailures?: Map<string, string>;
+	/**
 	 * Definitions as they sit on disk; the authoring methods read and write
 	 * here.
 	 *
@@ -382,6 +392,18 @@ export interface DaemonContext {
 		options: { overwrite: boolean },
 	): Promise<PeerDefinition>;
 	startedAt: number;
+	/** The daemon's own package version, so `status` can report code drift. */
+	version?: string;
+	/**
+	 * Restore this daemon's credential files if they went missing.
+	 *
+	 * Called once per request, before the bearer is resolved: an operator whose
+	 * `console-token` disappeared under a running daemon had no way back to it
+	 * except killing the process, because every surface authenticates with that
+	 * file and nothing rewrote it outside boot. Optional — a context assembled
+	 * for one narrow surface owns no files.
+	 */
+	ensureCredentials?(): Promise<void>;
 	now(): number;
 	/** Create the room if it does not exist yet, and index it. */
 	ensureRoom(id: string): Promise<void>;
@@ -580,6 +602,7 @@ function toWireMessage(message: StoredMessage): RoomMessage {
 function toAgentStatuses(
 	peers: Map<string, PeerRecord>,
 	orphans: Map<string, string>,
+	startFailures: Map<string, string> = new Map(),
 ): AgentStatus[] {
 	const parentOf = new Map<string, string>();
 	for (const [name, record] of peers) {
@@ -602,7 +625,24 @@ function toAgentStatuses(
 		...(record.worker.pid === undefined ? {} : { pid: record.worker.pid }),
 		...(record.parent === undefined ? {} : { parent: record.parent }),
 		children: childrenOf(name),
+		...(startFailures.has(name)
+			? { lastError: startFailures.get(name) as string }
+			: {}),
 	}));
+
+	// A peer whose start threw has no `peers` entry at all, so it would
+	// otherwise be missing from status entirely — indistinguishable from one
+	// that was never defined.
+	for (const [name, reason] of startFailures) {
+		if (peers.has(name) || orphans.has(name)) continue;
+		statuses.push({
+			name,
+			state: "stopped",
+			account: "unknown",
+			children: childrenOf(name),
+			lastError: reason,
+		});
+	}
 
 	for (const [name, parent] of orphans) {
 		if (peers.has(name)) continue;
@@ -851,8 +891,13 @@ export async function startControlSocket(
 	const handlers: Handlers = {
 		status: async (): Promise<StatusResult> => ({
 			protocolVersion: PROTOCOL_VERSION,
-			agents: toAgentStatuses(context.peers, context.orphans ?? new Map()),
+			agents: toAgentStatuses(
+				context.peers,
+				context.orphans ?? new Map(),
+				context.startFailures ?? new Map(),
+			),
 			uptimeMs: context.now() - context.startedAt,
+			...(context.version === undefined ? {} : { version: context.version }),
 		}),
 
 		chat_send: async (params): Promise<ChatSendResult> => await post(params),
@@ -879,11 +924,16 @@ export async function startControlSocket(
 
 			while (!closing) {
 				const messages = await collect(params.room, baseline);
-				if (messages.length > 0) return { messages };
+				if (messages.length > 0) {
+					return { messages, latestId: messages[messages.length - 1]?.id };
+				}
 				if (context.now() >= deadline) break;
 				await nap();
 			}
-			return { messages: [] };
+			// Reported even when nothing arrived: it is how a caller with its
+			// own read cursor learns where "now" was, and without it an idle
+			// wait leaves that cursor exactly where it started forever.
+			return { messages: [], latestId: baseline };
 		},
 
 		chat_react: async (params): Promise<ChatReactResult & { reacted: true }> =>
@@ -988,6 +1038,7 @@ export async function startControlSocket(
 			const agents = toAgentStatuses(
 				context.peers,
 				context.orphans ?? new Map(),
+				context.startFailures ?? new Map(),
 			);
 			if (params.name === undefined) return { agents };
 			const named = agents.find((agent) => agent.name === params.name);
@@ -1459,6 +1510,11 @@ export async function startControlSocket(
 			if (request.method !== "POST") {
 				return new Response("Method Not Allowed", { status: 405 });
 			}
+			// Before the bearer is read, so a caller that found no token on disk
+			// finds one on its next attempt. It cannot rescue this request — the
+			// credential is what the caller already failed to send — but it ends
+			// the state where every future request fails the same way.
+			await context.ensureCredentials?.();
 			const authorization = request.headers.get("Authorization");
 			const token = authorization?.startsWith("Bearer ")
 				? authorization.slice("Bearer ".length)

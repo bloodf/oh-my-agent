@@ -139,6 +139,8 @@ function explainAgentStatus(value: unknown): string | null {
 		);
 		if (invalid !== -1) return `children[${invalid}]`;
 	}
+	if (value.lastError !== undefined && typeof value.lastError !== "string")
+		return "lastError";
 	return null;
 }
 
@@ -709,6 +711,7 @@ export const METHODS: Record<MethodName, MethodContract> = {
 			const base = checkFields(v, [
 				(r) => requireNumber(r, "protocolVersion"),
 				(r) => requireNumber(r, "uptimeMs"),
+				(r) => optionalString(r, "version"),
 			]);
 			if (base) return fail(base.field, base.message);
 			const agents = checkList(v.agents, "agents", explainAgentStatus);
@@ -743,8 +746,15 @@ export const METHODS: Record<MethodName, MethodContract> = {
 					(r) => optionalNumber(r, "timeoutMs"),
 				]),
 			),
-		validateResult: (v): Validation<ChatWaitResult> =>
-			validateMessagesResult(v),
+		validateResult: (v): Validation<ChatWaitResult> => {
+			const messages = validateMessagesResult(v);
+			if (!messages.ok) return messages;
+			const latest = checkFields(messages.value, [
+				(r) => optionalNumber(r, "latestId"),
+			]);
+			if (latest) return fail(latest.field, latest.message);
+			return ok(messages.value as ChatWaitResult);
+		},
 	},
 	chat_react: {
 		validateParams: validateReactionParams,

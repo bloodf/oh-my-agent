@@ -14,6 +14,8 @@ __pycache__/
 .omp/
 # Browser binaries if a puppeteer install ever lands in-repo
 chrome-headless-shell/
+# oh-my-claudecode session/tool state
+.omc/
 # dinostack (agentic-engineering) - .agentic/ runtime state; see the !.agentic/<file> negations below for what is committed
 .agentic/*
 !.agentic/config.json

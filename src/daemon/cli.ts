@@ -692,18 +692,21 @@ async function consoleUrl(
 	stateDir: string,
 	io: CliIo,
 ): Promise<void> {
+	// Liveness first, unconditionally. `console-url` is removed by a graceful
+	// close but survives a `SIGKILL` or a crash, so a file that exists proves
+	// only that some daemon once served a console — and printing that URL sent
+	// the operator, and the TUI's "Open web UI" action, at a dead port.
+	await client.call("status", {});
 	let url: string;
 	try {
 		url = (await readFile(join(stateDir, CONSOLE_URL_FILE), "utf8")).trim();
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-		await client.call("status", {});
 		throw new DaemonRpcError(
 			"oh-my-agent console is disabled for this daemon.",
 		);
 	}
 	if (url.length === 0) {
-		await client.call("status", {});
 		throw new DaemonRpcError(
 			"oh-my-agent console is disabled for this daemon.",
 		);
@@ -790,17 +793,25 @@ async function daemon(
 		env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
 		stdio: ["ignore", "pipe", "pipe"],
 	});
-	const exitCode = await launcher.exited;
+	// Drained alongside the exit, never after it: both pipes are captured, and
+	// a launcher that writes more than a pipe buffer holds — a stack trace plus
+	// a list of peers that failed to start clears 64 KiB easily — blocks on the
+	// write while this side blocks on the exit, and neither ever moves.
+	const [exitCode, stdout, stderr] = await Promise.all([
+		launcher.exited,
+		new Response(launcher.stdout).text(),
+		new Response(launcher.stderr).text(),
+	]);
 	if (exitCode !== 0) {
-		const stderr = (await new Response(launcher.stderr).text()).trim();
+		const detail = stderr.trim();
 		throw new DaemonRpcError(
-			`oh-my-agent daemon failed to restart (exit ${exitCode})${stderr.length > 0 ? `: ${stderr}` : ""}`,
+			`oh-my-agent daemon failed to restart (exit ${exitCode})${detail.length > 0 ? `: ${detail}` : ""}`,
 		);
 	}
 	// The launcher exits only after the child announces, and the child announces
 	// only once its socket is served — so this line is proof the replacement is
 	// up, not merely spawned.
-	const started = (await new Response(launcher.stdout).text()).trim();
+	const started = stdout.trim();
 	output(
 		io,
 		{ stopped: stopped.pid, socket: started.split("\n", 1)[0] ?? "" },

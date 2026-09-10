@@ -71,6 +71,24 @@ export class DaemonUnavailableError extends Error {
 }
 
 /**
+ * Raised when the socket answered but refused the operator credential.
+ *
+ * Distinct from `DaemonUnavailableError` on purpose: a daemon that refuses a
+ * bearer is running, and treating the refusal as absence made the TUI spawn a
+ * second daemon on every session start — which then died on the pidfile the
+ * live one still held, leaving the operator with a "not running" widget and a
+ * log full of uncaught exceptions from a daemon that was answering fine.
+ */
+export class DaemonAuthError extends Error {
+	constructor(tokenPath: string) {
+		super(
+			`oh-my-agent daemon refused the operator token (${tokenPath}) — restart it with \`/cli daemon restart\`.`,
+		);
+		this.name = "DaemonAuthError";
+	}
+}
+
+/**
  * Run `body`, answering one clear notice when the daemon is absent and the
  * server's message when the protocol refuses. Nothing here may throw into
  * the TUI.
