@@ -46,6 +46,11 @@ export class AccountStateMachine {
 		this.parkedRuns = this.parkedRuns.filter((id) => id !== runId);
 	}
 
+	/** Whether this account is currently parked. The single source of truth. */
+	isParked(): boolean {
+		return this.parked;
+	}
+
 	updateMeter(value: number): void {
 		if (!Number.isFinite(value)) throw new Error("Meter value must be finite");
 		if (value < 0 || value > 1)
@@ -94,6 +99,12 @@ export class AccountStateMachine {
 					b.scope === scope
 				),
 		);
+		// Re-evaluated here rather than left to the next caller: clearing the
+		// last active block is exactly the event that unparks a subscription
+		// account, and the armed resume timer carries a generation this clear
+		// just superseded, so it fires into a no-op. Without this the account
+		// stays parked until something else happens to tick it.
+		this.tick();
 	}
 
 	/**

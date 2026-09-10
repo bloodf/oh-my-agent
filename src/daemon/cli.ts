@@ -189,7 +189,16 @@ function formatAgent(agent: AgentStatus): string {
 	]
 		.filter(Boolean)
 		.join(" ");
-	return [agent.name, agent.state, agent.account, tree]
+	// The failure reason last, and only when there is one: a peer that could
+	// not start is the row an operator is looking for, and until it reached the
+	// wire the only record was a line in the daemon's own log.
+	return [
+		agent.name,
+		agent.state,
+		agent.account,
+		tree,
+		agent.lastError === undefined ? "" : `error=${agent.lastError}`,
+	]
 		.filter(Boolean)
 		.join("\t");
 }

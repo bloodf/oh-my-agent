@@ -949,7 +949,9 @@ export async function bootDaemon(
 			worker: SupervisedWorker,
 			ownedGateway?: ScopedInferenceGateway,
 		): SupervisedWorker &
-			Partial<Pick<WorkerHandle, "sandboxed" | "fingerprint" | "pid">> => ({
+			Partial<
+				Pick<WorkerHandle, "sandboxed" | "fingerprint" | "pid" | "stderr">
+			> => ({
 			get name() {
 				return worker.name;
 			},
@@ -974,6 +976,13 @@ export async function bootDaemon(
 			get fingerprint() {
 				return (worker as Partial<Pick<WorkerHandle, "fingerprint">>)
 					.fingerprint;
+			},
+			// And the buffered stderr: `logs_tail` reads it off this wrapper,
+			// so dropping it made every worker log tail an empty string with no
+			// error — the debugging surface answered "nothing here" for every
+			// peer, however much it had written.
+			get stderr() {
+				return (worker as Partial<Pick<WorkerHandle, "stderr">>).stderr;
 			},
 			prompt: async (message) => {
 				if (!recording) return await worker.prompt(message);
@@ -1348,6 +1357,11 @@ export async function bootDaemon(
 					await closeInferenceGateway(peerName);
 				}
 				revokeControlToken(peerName);
+				// The supervisor and the account registry stop counting this
+				// peer here. Leaving it registered kept a dead agent's run on
+				// the account, so park and resume did their arithmetic over
+				// agents that no longer existed.
+				supervisor.unregister(peerName);
 				markAgentRuntime(peerName, "stopped", null);
 				// After the stop and the persisted row, per peer rather than
 				// once for the subtree: a cascade stops several agents and the

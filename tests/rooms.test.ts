@@ -39,6 +39,60 @@ describe("RoomStore lifecycle", () => {
 	});
 });
 
+describe("RoomStore migrations", () => {
+	test("a database written before threading gains parent_id", async () => {
+		await withTempDb(async (path) => {
+			// Exactly the shape an installation from before threading has on
+			// disk. `CREATE TABLE IF NOT EXISTS` skips the newer definition, so
+			// the column never appeared and `post`, `listMessages`, and
+			// `pendingForAgent` all threw "no such column: parent_id" — every
+			// room operation, on every call, for anyone upgrading.
+			const legacy = new Database(path);
+			legacy.exec(`
+				CREATE TABLE rooms (
+					id   TEXT PRIMARY KEY,
+					kind TEXT NOT NULL CHECK (kind IN ('channel', 'dm'))
+				);
+				CREATE TABLE messages (
+					id         INTEGER PRIMARY KEY AUTOINCREMENT,
+					room       TEXT NOT NULL,
+					author     TEXT NOT NULL,
+					body       TEXT NOT NULL,
+					created_at INTEGER NOT NULL,
+					FOREIGN KEY (room) REFERENCES rooms(id)
+				);
+				INSERT INTO rooms (id, kind) VALUES ('#general', 'channel');
+				INSERT INTO messages (room, author, body, created_at)
+					VALUES ('#general', '@you', 'from the old schema', 1);
+			`);
+			legacy.close();
+
+			const store = await RoomStore.open(path);
+			try {
+				const existing = await store.listMessages("#general", {});
+				expect(existing.map((message) => message.body)).toEqual([
+					"from the old schema",
+				]);
+
+				const root = await store.post({
+					room: "#general",
+					author: "@you",
+					body: "root",
+				});
+				const reply = await store.post({
+					room: "#general",
+					author: "reviewer",
+					body: "reply",
+					parentId: root.id,
+				});
+				expect(reply.parentId).toBe(root.id);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+});
+
 // ── RoomStore.createRoom ───────────────────────────────────────────────────────
 
 describe("RoomStore.createRoom", () => {

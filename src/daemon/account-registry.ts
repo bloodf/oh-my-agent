@@ -42,7 +42,6 @@ export interface AccountRegistryDeps {
 interface AccountEntry {
 	machine: AccountStateMachine;
 	mode: AccountMode;
-	parked: boolean;
 }
 
 export class AccountRegistry {
@@ -54,22 +53,21 @@ export class AccountRegistry {
 	register(accountId: string, mode: AccountMode): void {
 		if (this.#accounts.has(accountId)) return;
 
+		// Park state is read from the machine, never mirrored here. The
+		// callbacks below only fire when there are runs to move, so an account
+		// that parks or resumes with none left this copy disagreeing with the
+		// machine — and `wake` reads the copy, so an account could be refused
+		// every delivery forever, or keep burning quota while the machine
+		// considered it parked.
 		const entry: AccountEntry = {
 			mode,
-			parked: false,
 			machine: new AccountStateMachine({
 				accountId,
 				mode,
 				now: this.deps.now,
 				onWarning: () => this.deps.onWarning(accountId),
-				onPark: (runIds) => {
-					entry.parked = true;
-					this.deps.onPark(accountId, runIds);
-				},
-				onResume: (runIds) => {
-					entry.parked = false;
-					this.deps.onResume(accountId, runIds);
-				},
+				onPark: (runIds) => this.deps.onPark(accountId, runIds),
+				onResume: (runIds) => this.deps.onResume(accountId, runIds),
 			}),
 		};
 		this.#accounts.set(accountId, entry);
@@ -84,7 +82,7 @@ export class AccountRegistry {
 	}
 
 	isParked(accountId: string): boolean {
-		return this.#accounts.get(accountId)?.parked ?? false;
+		return this.#accounts.get(accountId)?.machine.isParked() ?? false;
 	}
 
 	/**
@@ -128,7 +126,7 @@ export class AccountRegistry {
 	 */
 	wake(accountId: string, runId: string): boolean {
 		const entry = this.#accounts.get(accountId);
-		if (!entry || entry.parked) return false;
+		if (!entry || entry.machine.isParked()) return false;
 		this.deps.onWake(runId);
 		return true;
 	}

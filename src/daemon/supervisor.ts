@@ -309,7 +309,7 @@ export class Supervisor {
 			await this.deps.rooms.subscribe(worker.name, room);
 		}
 
-		const existing = this.#validateAccountConfig(accountId, mode, budgetUsd);
+		const existing = this.#accountConfigs.get(accountId);
 		if (!existing) this.#accountConfigs.set(accountId, { mode, budgetUsd });
 		this.registry.register(accountId, mode);
 		this.registry.addRun(accountId, worker.name);
@@ -327,6 +327,23 @@ export class Supervisor {
 		} catch (error) {
 			this.deps.onError?.(error, accountId);
 		}
+	}
+
+	/**
+	 * Forget a killed peer.
+	 *
+	 * A kill stops the worker but used to leave the peer registered here and
+	 * counted as a live run on its account, so quota park and resume did their
+	 * arithmetic over agents that no longer exist — and `AccountRegistry`'s
+	 * `removeRun` was defined and never called by anything. The room
+	 * subscriptions stay in the store on purpose: the backlog waits there for
+	 * the peer's next spawn, which registers it again.
+	 */
+	unregister(peerName: string): void {
+		const peer = this.#peers.get(peerName);
+		if (!peer) return;
+		this.#peers.delete(peerName);
+		this.registry.removeRun(peer.accountId, peerName);
 	}
 
 	/**
@@ -555,11 +572,6 @@ export class Supervisor {
 			)
 			.join("\n");
 
-		// §10.3: the definition on disk is re-read and compared here, so a turn
-		// is never handled by a worker running a superseded policy. Held rather
-		// than thrown — a rebuild that cannot happen leaves the backlog pending.
-		if (!(await this.#ensureFresh(peerName, peer))) return false;
-
 		// A stopped worker holds its backlog: the pending rows stay
 		// unacknowledged, so a later `spawn` delivers them. Prompting one throws,
 		// and that exception travels out as a 500 from the console's POST —
@@ -567,7 +579,17 @@ export class Supervisor {
 		// which is what made a retrying browser duplicate the post. Parked is
 		// deliberately not included: a parked worker is resumed and prompted,
 		// which is the whole point of waking a parked peer.
+		//
+		// Checked before the freshness rebuild below, not after: a rebuild
+		// respawns the worker, so a stale definition plus an inbound message
+		// used to bring a peer the operator had killed back to life and then
+		// prompt it, undoing the kill.
 		if (peer.worker.state === "stopped") return false;
+
+		// §10.3: the definition on disk is re-read and compared here, so a turn
+		// is never handled by a worker running a superseded policy. Held rather
+		// than thrown — a rebuild that cannot happen leaves the backlog pending.
+		if (!(await this.#ensureFresh(peerName, peer))) return false;
 
 		await peer.worker.prompt(batch);
 		await this.#advanceCursors(peerName, pending);

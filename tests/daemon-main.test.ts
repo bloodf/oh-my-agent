@@ -1135,6 +1135,23 @@ describe("bootDaemon — composition and the control socket", () => {
 		expect(lastTwo.lines).toEqual(["line 59", "line 60"]);
 	});
 
+	test("logs_tail reaches a real supervised worker's stderr", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		const { handle, workers } = await boot({ agentDir });
+		workers.get("reviewer")?.setStderr("worker said something");
+
+		// Through the daemon's own composition, not a hand-built peer record:
+		// the run-recording wrapper the daemon puts around every worker forwards
+		// a fixed set of accessors, and `stderr` was not among them — so this
+		// answered an empty tail for every peer, however much it had written,
+		// while a test that built its own record passed.
+		const tail = await call<LogsTailResult>(handle.socketPath, "logs_tail", {
+			name: "reviewer",
+		});
+		expect(tail.lines).toEqual(["worker said something"]);
+	});
+
 	test("inject delivers to running workers and queues through the supervisor", async () => {
 		const dir = await tempAgentDir();
 		const rooms = await RoomStore.open(join(dir, "inject.db"));

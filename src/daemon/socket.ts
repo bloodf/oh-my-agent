@@ -125,7 +125,45 @@ import type { PeerDefinitionFields, PeerStore } from "./peer-store";
 import type { SupervisedWorker, Supervisor } from "./supervisor";
 
 /** Default ceiling for a parked `chat_wait`, per T-507's payload contract. */
+/**
+ * The methods a worker's scoped bearer may call.
+ *
+ * Exported because the identity suite asserts the complement of this set is
+ * operator-only: a copy of it in the test would drift silently, and the thing
+ * it guards is an authorization boundary.
+ */
+export const WORKER_CALLABLE_METHODS: Partial<Record<MethodName, true>> = {
+	chat_send: true,
+	chat_read: true,
+	chat_wait: true,
+	chat_react: true,
+	chat_unreact: true,
+	agent_status: true,
+	// ADR-011 makes creation two calls — `agent_create` writes a
+	// parse-validated definition, `agent_spawn` starts it — and the
+	// toolbelt tells every worker to do exactly that. Omitting it here
+	// answered `forbidden` on step one of the flow the agent was
+	// instructed to follow. It carries no attribution field: a definition
+	// names the peer being written, not the speaker.
+	agent_create: true,
+	agent_spawn: true,
+	task_handoff: true,
+	logs_tail: true,
+	room_plans_list: true,
+	room_plan_create: true,
+	room_plan_update: true,
+};
+
 const DEFAULT_WAIT_MS = 30_000;
+
+/**
+ * The longest a `chat_wait` may park, whatever it asks for.
+ *
+ * `timeoutMs` arrives from a worker, and nothing bounded it: a caller that
+ * asked for a year held a connection and a poll loop for a year. Five minutes
+ * is far past any legitimate wait and still recovers on its own.
+ */
+const MAX_WAIT_MS = 300_000;
 
 /** How often a parked wait re-reads the room. Woken early on close. */
 const WAIT_POLL_MS = 50;
@@ -920,7 +958,12 @@ export async function startControlSocket(
 			// backlog" — otherwise every bare wait returns instantly.
 			const baseline =
 				params.sinceId ?? (await collect(params.room, 0)).at(-1)?.id ?? 0;
-			const deadline = context.now() + (params.timeoutMs ?? DEFAULT_WAIT_MS);
+			// Clamped: `timeoutMs` crosses the boundary from a worker, and an
+			// unbounded one parks a connection and a poll loop for as long as
+			// the number says — years, if it asks for years.
+			const deadline =
+				context.now() +
+				Math.min(params.timeoutMs ?? DEFAULT_WAIT_MS, MAX_WAIT_MS);
 
 			while (!closing) {
 				const messages = await collect(params.room, baseline);
@@ -1269,20 +1312,7 @@ export async function startControlSocket(
 		},
 	};
 
-	const workerMethods: Partial<Record<MethodName, true>> = {
-		chat_send: true,
-		chat_read: true,
-		chat_wait: true,
-		chat_react: true,
-		chat_unreact: true,
-		agent_status: true,
-		agent_spawn: true,
-		task_handoff: true,
-		logs_tail: true,
-		room_plans_list: true,
-		room_plan_create: true,
-		room_plan_update: true,
-	};
+	const workerMethods = WORKER_CALLABLE_METHODS;
 
 	/**
 	 * The attribution field each method carries, and the reason ADR-014 has

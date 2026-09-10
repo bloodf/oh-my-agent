@@ -118,7 +118,6 @@ export class RoomStore {
         FOREIGN KEY (room) REFERENCES rooms(id),
         FOREIGN KEY (parent_id, room) REFERENCES messages(id, room)
       );
-      CREATE INDEX IF NOT EXISTS messages_parent_id_idx ON messages(parent_id);
       CREATE TABLE IF NOT EXISTS reactions (
         message_id INTEGER NOT NULL,
         actor      TEXT NOT NULL CHECK (length(trim(actor)) > 0),
@@ -154,6 +153,23 @@ export class RoomStore {
 				"ALTER TABLE messages ADD COLUMN mentions TEXT NOT NULL DEFAULT '[]'",
 			);
 		}
+		// Threading arrived in the same CREATE as `parent_id`, which a database
+		// written before it skips entirely — after which `post`, `listMessages`,
+		// and `pendingForAgent` every one of them threw "no such column". The
+		// `UNIQUE (id, room)` constraint and the self-referencing key cannot be
+		// added by ALTER; a pre-threading database keeps the column without
+		// them, which costs nothing an application-level parent check does not
+		// already cover.
+		if (!columns.some((column) => column.name === "parent_id")) {
+			db.exec("ALTER TABLE messages ADD COLUMN parent_id INTEGER");
+		}
+		// After the migration above, never inside the CREATE block: on a
+		// pre-threading database the column does not exist yet when that block
+		// runs, and indexing a missing column throws before the migration gets
+		// its turn.
+		db.exec(
+			"CREATE INDEX IF NOT EXISTS messages_parent_id_idx ON messages(parent_id)",
+		);
 		return new RoomStore(path, db);
 	}
 

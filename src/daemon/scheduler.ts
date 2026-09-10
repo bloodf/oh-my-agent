@@ -35,6 +35,19 @@ interface OneShotTask {
 
 const MAX_ITER = 5_256_000;
 
+/** Longest day each month can have; February takes its leap-year length. */
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/**
+ * The largest delay `setTimeout` can hold, in ms (2^31 - 1, about 24.8 days).
+ *
+ * Anything larger silently clamps to 1ms in Bun and Node, so a yearly cron
+ * fired immediately, re-armed, and fired again — a hot loop burning CPU for as
+ * long as the daemon lived. Longer waits are chained through this bound
+ * instead.
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+
 export function nextCronTime(expr: string, afterMs: number): number {
 	const fields = expr.trim().split(/\s+/);
 	if (fields.length !== 5)
@@ -52,6 +65,21 @@ export function nextCronTime(expr: string, afterMs: number): number {
 	const dayOfWeek = parseField(dayOfWeekField, 0, 6);
 	const dayOfMonthWildcard = dayOfMonthField === "*";
 	const dayOfWeekWildcard = dayOfWeekField === "*";
+
+	// Refuse a date that no calendar can produce — `0 0 30 2 *` is the classic
+	// one — before walking toward it a minute at a time. The scan below is
+	// synchronous and ten years long, so an unsatisfiable expression froze the
+	// daemon for seconds during `armCron` at boot and then threw anyway.
+	// Only when the day-of-week field is a wildcard: otherwise the two day
+	// fields are an OR, and a weekday can still match.
+	if (!dayOfMonthWildcard && dayOfWeekWildcard) {
+		const reachable = month.some((m) =>
+			dayOfMonth.some((day) => day <= DAYS_IN_MONTH[m - 1]),
+		);
+		if (!reachable) {
+			throw new Error(`Invalid cron expression: ${expr} never occurs`);
+		}
+	}
 
 	let candidate = Math.floor(afterMs / 60_000) * 60_000 + 60_000;
 
@@ -220,8 +248,7 @@ export class Scheduler {
 			this.timers.delete(name);
 		}
 
-		const delayMs = Math.max(0, task.atMs - this.deps.now());
-		const tid = this.deps.setTimer(() => {
+		this.armAt(name, jobVer, task.atMs, () => {
 			if (!this.running) return;
 			if (this.versions.get(name) !== jobVer) return;
 
@@ -238,9 +265,37 @@ export class Scheduler {
 			} catch (err) {
 				this.deps.onError?.(err, name);
 			}
-		}, delayMs);
+		});
+	}
 
-		this.timers.set(name, tid);
+	/**
+	 * Arm `fire` for an absolute instant, chaining through `MAX_TIMER_MS`.
+	 *
+	 * A delay past that bound clamps to 1ms rather than waiting, so a yearly
+	 * cron or a far-future quota resume fired at once and re-armed forever.
+	 * Each hop recomputes the remaining time from `atMs` rather than
+	 * subtracting a fixed step, so a suspended machine resumes on the real
+	 * deadline instead of one shifted by however long it slept.
+	 */
+	private armAt(
+		name: string,
+		jobVer: number,
+		atMs: number,
+		fire: () => void,
+	): void {
+		const delayMs = Math.max(0, atMs - this.deps.now());
+		if (delayMs > MAX_TIMER_MS) {
+			this.timers.set(
+				name,
+				this.deps.setTimer(() => {
+					if (!this.running) return;
+					if (this.versions.get(name) !== jobVer) return;
+					this.armAt(name, jobVer, atMs, fire);
+				}, MAX_TIMER_MS),
+			);
+			return;
+		}
+		this.timers.set(name, this.deps.setTimer(fire, delayMs));
 	}
 
 	private scheduleNext(name: string, task: ScheduledTask): void {
@@ -253,11 +308,9 @@ export class Scheduler {
 			this.timers.delete(name);
 		}
 
-		const afterMs = this.deps.now();
-		const nextMs = nextCronTime(task.cron, afterMs);
-		const delayMs = nextMs - afterMs;
+		const nextMs = nextCronTime(task.cron, this.deps.now());
 
-		const tid = this.deps.setTimer(() => {
+		this.armAt(name, jobVer, nextMs, () => {
 			if (!this.running) return;
 			if (this.versions.get(name) !== jobVer) return;
 
@@ -283,8 +336,6 @@ export class Scheduler {
 			}
 
 			onSuccess();
-		}, delayMs);
-
-		this.timers.set(name, tid);
+		});
 	}
 }
