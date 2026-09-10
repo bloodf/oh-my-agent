@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,7 +12,7 @@ import { Scheduler } from "../src/daemon/scheduler";
 import type { PeerRecord } from "../src/daemon/socket";
 import { Supervisor } from "../src/daemon/supervisor";
 import { WebAttachments } from "../src/daemon/web-attachments";
-import { createWebChats } from "../src/daemon/web-chats";
+import { chatAlive, createWebChats } from "../src/daemon/web-chats";
 import { RoomPlans } from "../src/rooms/plans";
 import { RoomStore } from "../src/rooms/store";
 import type { RoomInfo } from "../src/shared/protocol";
@@ -276,5 +276,50 @@ describe("remote workspace full-control boundary", () => {
 				await Bun.file(join(agentDir, "oh-my-agent", "daemon.pid")).exists(),
 			).toBe(false);
 		}
+	});
+});
+
+describe("web chat liveness", () => {
+	test("a client without a pid accessor is judged by the recorded pid", async () => {
+		// A consumer's install has no `RpcClient.pid` — that accessor exists
+		// only where this repository's patch applies — and every web chat there
+		// was treated as dead. The launch shim records the pid instead.
+		const dir = await tempDir("oma-chat-liveness-");
+		const pidPath = join(dir, "chat.pid");
+		const unpatched = {};
+
+		expect(chatAlive(unpatched, pidPath)).toBe(false);
+
+		await writeFile(pidPath, String(process.pid));
+		expect(chatAlive(unpatched, pidPath)).toBe(true);
+
+		// A process that has exited is dead, whichever source named it.
+		const gone = Bun.spawn(["true"]);
+		await gone.exited;
+		await writeFile(pidPath, String(gone.pid));
+		expect(chatAlive(unpatched, pidPath)).toBe(false);
+		expect(chatAlive({ pid: gone.pid }, pidPath)).toBe(false);
+	});
+
+	test("a launched chat records its pid and reports itself running", async () => {
+		const dir = await tempDir("oma-chat-launch-");
+		const chats = await createWebChats({ stateDir: join(dir, "state") });
+		cleanups.push(async () => {
+			await chats.close();
+			await rm(chats.storageDir, { recursive: true, force: true });
+		});
+		const chat = await chats.create({ cwd: dir });
+
+		const state = await chats.state(chat.id);
+		expect(state.running).toBe(true);
+
+		const recorded = Number.parseInt(
+			await readFile(join(chats.storageDir, "shims", `${chat.id}.pid`), "utf8"),
+			10,
+		);
+		expect(recorded).toBeGreaterThan(0);
+		expect(
+			chatAlive({}, join(chats.storageDir, "shims", `${chat.id}.pid`)),
+		).toBe(true);
 	});
 });
