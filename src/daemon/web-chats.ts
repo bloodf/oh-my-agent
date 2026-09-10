@@ -68,8 +68,11 @@ import { resolveOmpCli } from "../worker/lifecycle";
  * ponytail: signal 0 cannot tell a recycled pid from the original; the 1s
  * exit watch keeps that window small. Upgrade to an exit pipe if it matters.
  */
-export function chatAlive(client: { pid?: number }, pidPath: string): boolean {
-	const pid = client.pid ?? recordedPid(pidPath);
+export function chatAlive(client: object, pidPath: string): boolean {
+	// Read structurally: `{ pid?: number }` as a parameter type is a weak type,
+	// and a released `RpcClient`, which declares no `pid`, is rejected by it at
+	// compile time even though the value is fine at runtime.
+	const pid = (client as { pid?: number }).pid ?? recordedPid(pidPath);
 	if (pid === undefined) return false;
 	try {
 		process.kill(pid, 0);
