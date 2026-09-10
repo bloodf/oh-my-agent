@@ -457,12 +457,16 @@ describe("worker toolbelt", () => {
 			messageId: id,
 			emoji: "👀",
 		});
-		expect(first.details).toMatchObject({ messageId: id, reacted: true });
+		// `added` says whether the reaction was new. The tool used to report a
+		// `reacted` field that was a constant `true` on this method, so both
+		// calls looked identical and the worker could not tell a fresh
+		// reaction from a duplicate.
+		expect(first.details).toMatchObject({ messageId: id, added: true });
 		const duplicate = await invoke(tools, "chat_react", {
 			messageId: id,
 			emoji: "👀",
 		});
-		expect(duplicate.details).toMatchObject({ messageId: id, reacted: true });
+		expect(duplicate.details).toMatchObject({ messageId: id, added: false });
 
 		for (let reader = 0; reader < 2; reader++) {
 			const read = await invoke(tools, "chat_read", { room: "#general" });
@@ -519,7 +523,12 @@ describe("worker toolbelt", () => {
 				return Response.json({
 					jsonrpc: "2.0",
 					id: frame.id,
-					result: { messageId: 1, emoji: "🎉", reacted: true },
+					result: {
+						messageId: 1,
+						actor: "reviewer",
+						emoji: "🎉",
+						added: true,
+					},
 				});
 			},
 		} as unknown as Bun.Serve.Options<undefined>);

@@ -762,21 +762,23 @@ describe("bootDaemon — composition and the control socket", () => {
 		};
 
 		const reacted = await Promise.all([
-			call<ChatReactResult & { reacted: true }>(
+			call<ChatReactResult>(
 				handle.socketPath,
 				"chat_react",
 				params,
 				1,
 			),
-			call<ChatReactResult & { reacted: true }>(
+			call<ChatReactResult>(
 				handle.socketPath,
 				"chat_react",
 				params,
 				2,
 			),
 		]);
+		// `added` is the only field that carries information here: `reacted` was
+		// a compile-time constant on this method, so it said the same thing for
+		// a fresh reaction and a duplicate.
 		expect(reacted.map(({ added }) => added).sort()).toEqual([false, true]);
-		expect(reacted.every(({ reacted }) => reacted)).toBe(true);
 
 		for (const method of ["chat_read", "chat_wait"] as const) {
 			const result = await call<ChatReadResult | ChatWaitResult>(

@@ -189,6 +189,11 @@ function explainRoomInfo(value: unknown): string | null {
 	if (!isNonEmptyString(value.id)) return "id";
 	if (value.kind !== "channel" && value.kind !== "dm") return "kind";
 	if (!isNonEmptyString(value.name)) return "name";
+	// Declared on `RoomInfo` and unchecked until now, though it selects the
+	// working directory a peer runs in: a non-string crossing the boundary
+	// reached that decision unexamined.
+	if (value.workspace !== undefined && typeof value.workspace !== "string")
+		return "workspace";
 	return null;
 }
 

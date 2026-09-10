@@ -57,12 +57,6 @@ interface ReactionParams {
 	emoji: ReactionEmoji;
 }
 
-interface ReactionResult {
-	messageId: number;
-	emoji: ReactionEmoji;
-	reacted: boolean;
-}
-
 interface SpawnToolParams {
 	name: string;
 	rooms?: string[];
@@ -103,43 +97,28 @@ function validateReactionParams(value: unknown): Validation<ReactionParams> {
 	};
 }
 
-function validateReactionResult(value: unknown): Validation<ReactionResult> {
-	if (!isRecord(value)) {
-		return { ok: false, field: "result", message: "expected an object" };
-	}
-	if (
-		typeof value.messageId !== "number" ||
-		!Number.isSafeInteger(value.messageId) ||
-		value.messageId <= 0
-	) {
-		return {
-			ok: false,
-			field: "messageId",
-			message: "messageId must be a positive safe integer",
-		};
-	}
-	if (!REACTION_EMOJIS.includes(value.emoji as ReactionEmoji)) {
+/**
+ * The shared result contract, plus this tool's own emoji allowlist.
+ *
+ * The daemon's reaction methods accept any non-empty emoji string; the tool
+ * offers four, and a reply naming anything else is a daemon this worker does
+ * not understand.
+ */
+function validateReactionResult(
+	method: ReactionMethod,
+	value: unknown,
+): Validation<{ messageId: number; emoji: ReactionEmoji }> {
+	const shared = METHODS[method].validateResult(value);
+	if (!shared.ok) return shared;
+	const emoji = (shared.value as { emoji: string }).emoji;
+	if (!REACTION_EMOJIS.includes(emoji as ReactionEmoji)) {
 		return {
 			ok: false,
 			field: "emoji",
 			message: `emoji must be one of ${REACTION_EMOJIS.join(", ")}`,
 		};
 	}
-	if (typeof value.reacted !== "boolean") {
-		return {
-			ok: false,
-			field: "reacted",
-			message: "reacted must be a boolean",
-		};
-	}
-	return {
-		ok: true,
-		value: {
-			messageId: value.messageId,
-			emoji: value.emoji as ReactionEmoji,
-			reacted: value.reacted,
-		},
-	};
+	return shared as Validation<{ messageId: number; emoji: ReactionEmoji }>;
 }
 
 const toolError = (message: string): ToolResult => ({
@@ -268,11 +247,18 @@ export default function toolbeltExtension(
 				"reaction actor unavailable outside a materialized worker",
 			);
 		}
+		// The registry's contract first, then this tool's own narrower rule.
+		// A private copy of the whole shape required a `reacted` field the
+		// protocol never declared and ignored the `added`/`removed` ones it
+		// does, so a conforming daemon would have been refused and the worker
+		// never learned whether its reaction was new. The emoji allowlist is
+		// genuinely local — the protocol accepts any non-empty string — so it
+		// is layered on rather than folded in.
 		return await callValidated(
 			method,
 			input.value,
 			() => input,
-			validateReactionResult,
+			(value) => validateReactionResult(method, value),
 			signal,
 			(value) => ({ ...value, actor }),
 		);

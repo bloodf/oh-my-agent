@@ -30,7 +30,12 @@ import { parsePeerDefinition } from "../src/shared/agent-definition";
 import { PASSTHROUGH_ENV_VARS } from "../src/shared/env-scrub";
 import { resolveSandboxLaunch } from "../src/worker/launch-gate";
 import type { WorkerHandle } from "../src/worker/lifecycle";
-import { resolveOmpCli, startWorker } from "../src/worker/lifecycle";
+import {
+	buildWorkerPolicy,
+	resolveOmpCli,
+	startWorker,
+} from "../src/worker/lifecycle";
+import { SANDBOX_NETWORK_UNENFORCED } from "../src/worker/sandbox";
 import { classifyAgentSpawn } from "../src/worker/spawn-policy";
 import { supervisorContract } from "./contracts/supervisor-contract.test";
 
@@ -431,6 +436,92 @@ describe("worker env allowlist", () => {
 // ── RPC subprocess lifecycle (§9.1) ─────────────────────────────────────────
 
 describe("worker lifecycle backend invariants", () => {
+	test("a Linux peer that accepts an unenforced network gets a sandbox", async () => {
+		// The Linux adapter cannot enforce the loopback-only rule the macOS
+		// profile does, so it refuses to compile without an explicit
+		// acceptance — and until the definition could carry one, every
+		// `sandbox: true` peer on Linux failed closed at spawn with no way for
+		// its author to say yes.
+		const { layout, cwd } = await workerFixture();
+		const accepted = parsePeerDefinition(
+			"/tmp/reviewer.md",
+			[
+				"---",
+				"name: reviewer",
+				"description: Reviews changes.",
+				'model: "openai/gpt-4.1"',
+				'spawns: "*"',
+				"sandbox: { enabled: true, allowUnenforcedNetwork: true }",
+				"---",
+				"Review things.",
+			].join("\n"),
+		);
+
+		const plan = await resolveSandboxLaunch({
+			policy: buildWorkerPolicy(accepted, layout, cwd),
+			command: ["bun", "/path/to/cli.js"],
+			platform: "linux",
+			which: async (binary) => (binary === "bwrap" ? "/usr/bin/bwrap" : null),
+			probeBridge: async () => true,
+			allowUnenforcedNetwork:
+				accepted.sandbox !== undefined &&
+				typeof accepted.sandbox === "object" &&
+				accepted.sandbox.allowUnenforcedNetwork === true,
+		});
+
+		expect(plan.sandboxed).toBe(true);
+		// Accepted is not the same as enforced: the downgrade is still reported.
+		expect(plan.networkIsolation).toBe("unrestricted-host-network");
+		expect(plan.warnings).toContain(SANDBOX_NETWORK_UNENFORCED);
+	});
+
+	test("a Linux peer that has not accepted it still fails closed", async () => {
+		const { layout, cwd } = await workerFixture();
+		const plain = parsePeerDefinition(
+			"/tmp/reviewer.md",
+			[
+				"---",
+				"name: reviewer",
+				"description: Reviews changes.",
+				'model: "openai/gpt-4.1"',
+				'spawns: "*"',
+				"sandbox: true",
+				"---",
+				"Review things.",
+			].join("\n"),
+		);
+
+		await expect(
+			resolveSandboxLaunch({
+				policy: buildWorkerPolicy(plain, layout, cwd),
+				command: ["bun", "/path/to/cli.js"],
+				platform: "linux",
+				which: async (binary) => (binary === "bwrap" ? "/usr/bin/bwrap" : null),
+				probeBridge: async () => true,
+			}),
+		).rejects.toThrow(new RegExp(SANDBOX_NETWORK_UNENFORCED));
+	});
+
+	test("the launch shim records the worker pid for installs without the patch", async () => {
+		const handle = await start();
+		try {
+			// `RpcClient` keeps its child in a true private field, so the `pid`
+			// accessor exists only where this repository's patch applies — a
+			// consumer's install has no patch and reported `undefined` for
+			// every live worker. The shim is the process the client spawns, so
+			// the pid it writes here is the same one the accessor would give.
+			const recorded = Number.parseInt(
+				await readFile(join(handle.layout.root, "worker.pid"), "utf8"),
+				10,
+			);
+			expect(recorded).toBeGreaterThan(0);
+			expect(recorded).toBe(handle.pid as number);
+			process.kill(recorded, 0);
+		} finally {
+			await handle.stop();
+		}
+	});
+
 	test("reports the live child pid and clears it after stop", async () => {
 		const handle = await start();
 		const pid = handle.pid;

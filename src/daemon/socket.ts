@@ -979,7 +979,7 @@ export async function startControlSocket(
 			return { messages: [], latestId: baseline };
 		},
 
-		chat_react: async (params): Promise<ChatReactResult & { reacted: true }> =>
+		chat_react: async (params): Promise<ChatReactResult> =>
 			await serializeReaction(async () => {
 				const added = !(await hasReaction(params));
 				try {
@@ -997,12 +997,10 @@ export async function startControlSocket(
 					}
 					throw error;
 				}
-				return { ...params, added, reacted: true };
+				return { ...params, added };
 			}),
 
-		chat_unreact: async (
-			params,
-		): Promise<ChatUnreactResult & { reacted: false }> =>
+		chat_unreact: async (params): Promise<ChatUnreactResult> =>
 			await serializeReaction(async () => {
 				// The store's unreact is idempotent and never throws, so the
 				// handler owns the existence check that react gets for free.
@@ -1019,7 +1017,7 @@ export async function startControlSocket(
 					params.actor,
 					params.emoji,
 				);
-				return { ...params, removed, reacted: false };
+				return { ...params, removed };
 			}),
 
 		rooms_list: async (): Promise<RoomsListResult> => ({
