@@ -60,3 +60,4 @@ The two-model review (sol + m3) found the console advertises thread replies and 
 | [T-1616](../tasks/T-1616-control-cap-json-rpc.md) | A saturated audit stays readable on the control socket | Done |
 | [T-1617](../tasks/T-1617-stopped-worker-backlog.md) | A stopped worker holds its backlog instead of failing the post | Done |
 | [T-1618](../tasks/T-1618-positive-budget-bump.md) | A budget bump must be a positive number | Done |
+| [T-1619](../tasks/T-1619-runtime-liveness-review.md) | A live daemon, its peers, and its console behave as they report | Done |

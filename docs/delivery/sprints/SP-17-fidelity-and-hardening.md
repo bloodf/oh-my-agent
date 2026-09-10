@@ -30,3 +30,4 @@ Close what the two-model review found: threads, reactions, attribution, typed ev
 | [T-1616](../tasks/T-1616-control-cap-json-rpc.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | A saturated audit stays readable on the control socket | Done |
 | [T-1617](../tasks/T-1617-stopped-worker-backlog.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | A stopped worker holds its backlog instead of failing the post | Done |
 | [T-1618](../tasks/T-1618-positive-budget-bump.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | A budget bump must be a positive number | Done |
+| [T-1619](../tasks/T-1619-runtime-liveness-review.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | A live daemon, its peers, and its console behave as they report | Done |
