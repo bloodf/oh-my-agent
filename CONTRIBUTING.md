@@ -66,7 +66,8 @@ Requirements: Bun ≥ 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-age
 git clone https://github.com/bloodf/oh-my-agent.git
 cd oh-my-agent
 bun install
-bun run typecheck   # tsc --noEmit
+bun install --cwd web --frozen-lockfile
+bun run typecheck   # tsc --noEmit, then bun run --cwd web typecheck
 bun test            # full suite
 bun run lint        # biome check .
 ```

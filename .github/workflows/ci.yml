@@ -43,6 +43,11 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      - name: Generated console is current
+        run: |
+          bun run console:build
+          git diff --exit-code src/console/
+
       - name: Test
         # The consumer-install smoke drives the real `omp` executable, which
         # ships as a bin of the pi-coding-agent dev dependency. Without it on

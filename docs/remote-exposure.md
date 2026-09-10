@@ -9,8 +9,10 @@ Remote mode with the console enabled requires `OMA_CONSOLE_ORIGIN`: the daemon r
 
 ```sh
 OMA_REMOTE=1 OMA_CONSOLE_PORT=50561 OMA_CONSOLE_ORIGIN=https://console.example.com omp-agent daemon
-export OMA_PROXY_SECRET="$(cat "${OMA_AGENT_DIR:-$HOME/.omp/agent}/oh-my-agent/console-proxy-secret")"
+export OMA_PROXY_SECRET="$(cat "${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/oh-my-agent/console-proxy-secret")"
 ```
+
+The agent dir comes from `PI_CODING_AGENT_DIR`. When it is unset the daemon uses OMP's own agent dir, which is `$HOME/.omp/agent` by default but moves with OMP profiles and XDG settings, so the fallback in these commands is a guess. The reliable answer is what the daemon prints: the first line of `omp-agent daemon` output is the socket path, `<agent-dir>/oh-my-agent/daemon.sock`, and its directory is the state directory the commands on this page read from.
 
 Each usable recipe below forwards only to `127.0.0.1:50561`, the console listener. Never forward the credential gateway or its port. Keep `console-proxy-secret` mode `0600`; the trusted, host-local proxy overwrites `X-OMA-Proxy-Secret` before forwarding. Clients still need the operator token.
 
@@ -23,7 +25,7 @@ This model covers one operator exposing one installation. It does not provide te
 | Boundary or asset | Threat | Enforcing mechanism | Suite check |
 |---|---|---|---|
 | Remote-mode activation | Accidental proxy deployment silently changes trust rules. | `bootDaemon` enables remote enforcement only when `OMA_REMOTE=1` and logs active trust model. | `boot trust model logging` checks exact `trust model: remote` and `trust model: loopback` lines. |
-| Listener reachability | Flag or host override exposes plaintext daemon listener. | Before `claimPidfile`, `bootDaemon` checks `OMA_CONSOLE_HOST`, `OMA_CONTROL_HOST`, and `OMA_CREDENTIAL_GATEWAY_HOST`; every non-loopback value is refused in every mode. | `bind-address config refused unconditionally` checks all three variables, stderr reason, absent pidfile, and flag-off refusal. |
+| Listener reachability | Flag or host override exposes plaintext daemon listener. | Before `claimPidfile`, `bootDaemon` checks `OMA_CONSOLE_HOST`, `OMA_CONTROL_HOST`, and `OMA_CREDENTIAL_GATEWAY_HOST`; every non-loopback value is refused in every mode. None of the three moves a listener: they are read only to refuse a routable value, and a loopback value changes nothing. | `bind-address config refused unconditionally` checks all three variables, stderr reason, absent pidfile, and flag-off refusal. |
 | Room contents and operator authority | Unauthenticated caller reads rooms or exercises kill authority and other operator-only controls. | On proxied remote HTTP, `console-api.ts` serves unauthenticated `/` only as a 401 token-entry bootstrap and requires operator token for `/api/*` requests. After successful session authentication, one-time, path-bound, 30-second tickets authenticate full shell/assets and `/api/events` WebSocket upgrade. Separately, `socket.ts` resolves control-socket bearers to identities and requires operator identity for methods outside `workerMethods`; `kill` is outside that allowlist. | `remote mode authentication` checks anonymous shell/API and control-socket refusal. `remote console ticket authentication` checks token-authenticated minting plus ticket path, lifetime, and single-use enforcement. `remote mode control-socket hierarchy enforced` checks missing and unregistered bearer refusal, operator success, worker `chat_read` success, and worker refusal on representative operator-only `status`. |
 | Credentials used through gateway | Remote operator controls workers that can use gateway-held credentials, or credential gateway itself becomes remotely reachable. | `credential-gateway.ts` binds its listener to `127.0.0.1`; `bootDaemon` also refuses non-loopback `OMA_CREDENTIAL_GATEWAY_HOST` before opening listeners. Proxy recipes forward only to console listener. Operator authentication grants console/control authority, not a provider credential. | `bind-address config refused unconditionally` checks gateway host refusal. `remote mode authentication` and `remote mode control-socket hierarchy enforced` check console and control authority boundaries. |
 | Worker bearer scope | Scoped worker bearer becomes operator authority. | `runtime.ts` registers each active worker bearer as `{ kind: "worker", peerName }` in the control identity map. `socket.ts` resolves presented bearers against that map, permits worker identities only on `workerMethods`, and in remote mode refuses worker access to operator-only methods as unauthorized. | `a scoped worker token keeps its own surface in remote mode` proves worker `chat_read` succeeds while operator-only `status` returns... |
@@ -39,7 +41,7 @@ Operator token protects room contents and operator-only authority, including aut
 ## Before enabling remote mode
 
 1. Set `OMA_REMOTE=1`. If console is enabled, set `OMA_CONSOLE_ORIGIN` to exact external HTTPS origin with no credentials, path, query, or hash. `OMA_CONSOLE=0` is only origin-free remote configuration.
-2. Leave `OMA_CONSOLE_HOST`, `OMA_CONTROL_HOST`, and `OMA_CREDENTIAL_GATEWAY_HOST` unset or loopback. Daemon stderr is exactly: `daemon: <VARIABLE>=<ADDRESS> is not a loopback address. The daemon never binds a routable address in any mode, with or without OMA_REMOTE; expose it through a reverse proxy that forwards to the loopback listener (ADR-012).`
+2. Leave `OMA_CONSOLE_HOST`, `OMA_CONTROL_HOST`, and `OMA_CREDENTIAL_GATEWAY_HOST` unset. They are not bind settings: the daemon reads them only to refuse a routable value, and a loopback value does nothing. On refusal, daemon stderr is exactly: `daemon: <VARIABLE>=<ADDRESS> is not a loopback address. The daemon never binds a routable address in any mode, with or without OMA_REMOTE; expose it through a reverse proxy that forwards to the loopback listener (ADR-012).`
 3. Verify `console-token` is non-empty and belongs only to this installation; do not copy or share it. The daemon cannot detect token provenance: it reuses any non-empty stored value and mints a new random value only when the file is absent or empty. Rotate by stopping the daemon, deleting the file, and restarting. `loopback default` checks reuse across boots; `operator token file permissions` checks the `0600` gate. Neither test establishes that an operator-supplied stored value is unique or unshared.
 4. Verify `console-token` and `console-proxy-secret` are exactly mode `0600`. Boot refuses either loose file with `<PATH> has mode <MODE>, not 0600: any local process can read the console token. Run 'chmod 600 <PATH>' to keep this token, or delete the file to rotate it.`
 5. Verify proxy terminates valid TLS, injects `X-OMA-Proxy-Secret` from `console-proxy-secret`, overwrites any client-supplied value, forwards only to loopback console listener, redacts auth material, and enforces recipe rate limit. A successful proxied request must produce an `audit:` line with `"class":"console-proxied"`; ordinary API success alone does not prove secret injection.
@@ -48,7 +50,7 @@ Operator token protects room contents and operator-only authority, including aut
 On Linux, check files without printing secrets:
 
 ```sh
-state_dir="${OMA_AGENT_DIR:-$HOME/.omp/agent}/oh-my-agent"
+state_dir="${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/oh-my-agent"
 test -s "$state_dir/console-token"
 test "$(stat -c '%a' "$state_dir/console-token")" = 600
 test "$(stat -c '%a' "$state_dir/console-proxy-secret")" = 600
@@ -200,7 +202,7 @@ OMA_REMOTE=1 OMA_CONSOLE_PORT=50561 OMA_CONSOLE_ORIGIN=https://oma-console.test:
 Enforce mode `0600` before reading:
 
 ```sh
-proxy_secret="${OMA_AGENT_DIR:-$HOME/.omp/agent}/oh-my-agent/console-proxy-secret"
+proxy_secret="${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/oh-my-agent/console-proxy-secret"
 chmod 600 "$proxy_secret"
 export OMA_PROXY_SECRET="$(cat "$proxy_secret")"
 mkdir -p "$HOME/.local/state/caddy"

@@ -79,13 +79,17 @@ Validated by OMP's `parseAgent`. Unknown extras still fail in oh-my-agent's pars
 | `rooms` | string[] | `INVALID_ROOM` - array of strings, each starting with `#` (channel) or `@` (DM). |
 | `wake` | object | `INVALID_WAKE` - only keys `mention` and `rooms`, both boolean. |
 | `autonomy` | object | `INVALID_AUTONOMY` - only keys `maxTurns` (positive **integer**) and `budgetUsd` (positive **finite** number). |
-| `sandbox` | boolean \| object | `INVALID_SANDBOX` - `true`/`false`, or `{ enabled, extraRoots }`. `extraRoots` entries must be absolute. |
+| `sandbox` | boolean \| object | `INVALID_SANDBOX` - `true`/`false`, or `{ enabled, extraRoots, allowUnenforcedNetwork }`. `extraRoots` entries must be absolute; `allowUnenforcedNetwork` is a boolean. |
 | `mcps` | string[] | `INVALID_ARRAY` |
 | `skills` | string[] | `INVALID_ARRAY` - names to materialize into the worker root, e.g. `omp-orchestration`. |
 | `schedules` | object[] | `INVALID_SCHEDULE` - each item needs non-empty `cron` and `prompt`; optional `room` must start with `#`/`@`. Only keys `cron`, `prompt`, `room`. |
 | `automations` | object[] | `INVALID_AUTOMATION` - each item needs non-empty `event` and `prompt`; optional `room` as above. Only keys `event`, `prompt`, `room`. |
 
 Anything else at top level or inside a nested object → `UNKNOWN_KEY`. Malformed YAML or bad native fields → OMP's `AgentParsingError`. Wrong `spawns` type → `INVALID_TYPE`. Missing or whitespace-only body → `EMPTY_BODY`.
+
+Schedules run in UTC. `cron` is evaluated against UTC, not the host's local time: `0 9 * * 1-5` fires at 09:00 UTC on weekdays. A schedule whose date can never occur, such as `0 0 30 2 *`, passes the parser but is refused with `Invalid cron expression: <expr> never occurs` when the daemon arms it.
+
+A sandboxed peer on Linux needs `sandbox.allowUnenforcedNetwork: true`. The Linux adapter confines the filesystem but cannot enforce the loopback-only network rule the macOS profile does, so without this key the peer refuses to start with `SANDBOX_NETWORK_UNENFORCED`. Setting it accepts a filesystem-only sandbox with an open network. That is a real downgrade: the launch plan still carries a `SANDBOX_NETWORK_UNENFORCED` warning when it is accepted, though no status, log, or console view shows that warning yet. It has no effect on macOS. Use the object form, e.g. `sandbox: { enabled: true, allowUnenforcedNetwork: true }`; `sandbox: true` cannot carry it.
 
 `parent` is not a frontmatter key. It is a spawn argument. Putting it in YAML throws `UNKNOWN_KEY`.
 

@@ -10,7 +10,7 @@ Three listeners exist: the unix control socket, the console HTTP/WebSocket, and 
 
 - Console HTTP binds `127.0.0.1`
 - Credential gateway binds `127.0.0.1`
-- `OMA_CONSOLE_HOST`, `OMA_CONTROL_HOST`, and `OMA_CREDENTIAL_GATEWAY_HOST` are refused if they are not loopback, **with or without** `OMA_REMOTE`
+- `OMA_CONSOLE_HOST`, `OMA_CONTROL_HOST`, and `OMA_CREDENTIAL_GATEWAY_HOST` are not settings. The daemon reads them only to refuse a non-loopback value, **with or without** `OMA_REMOTE`. A loopback value is accepted and changes nothing.
 
 There is no `--host 0.0.0.0`. Going beyond loopback means a reverse proxy in front of the loopback console, plus an explicit remote mode. Follow [Remote exposure](../remote-exposure.md) before exposing anything. Do not forward the credential gateway.
 
@@ -22,6 +22,8 @@ The console and the control socket require the operator token.
 |---|---|---|
 | `<agent-dir>/oh-my-agent/console-token` | 0600 | Long-lived operator bearer |
 | `<agent-dir>/oh-my-agent/console-url` | 0600 | URL `omp-agent console` reprints (loopback URLs include `?token=`) |
+
+`<agent-dir>` is `PI_CODING_AGENT_DIR` when set, otherwise OMP's own agent dir. That is `$HOME/.omp/agent` by default, but OMP profiles and XDG settings can move it. To find the real path, read the first line `omp-agent daemon` prints: it is `<agent-dir>/oh-my-agent/daemon.sock`.
 
 A token file that is not 0600 fails the boot and names the path. The daemon does not silently replace it.
 

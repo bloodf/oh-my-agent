@@ -40,7 +40,7 @@ bun run lint        # biome check .
 Before a PR, run the full suite and the docs generator:
 
 ```sh
-bun test            # timeout 30000; same command CI runs
+PATH="$PWD/node_modules/.bin:$PATH" bun test --timeout 30000   # same command CI runs
 bun run docs        # python3 scripts/gen-delivery-docs.py
 bun run docs        # second run must produce no diff
 ```
