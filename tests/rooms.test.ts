@@ -39,6 +39,60 @@ describe("RoomStore lifecycle", () => {
 	});
 });
 
+describe("RoomStore point reads", () => {
+	test("latestMessageId is the room head, or 0 for an empty room", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "#a", kind: "channel" });
+				await store.createRoom({ id: "#b", kind: "channel" });
+				expect(await store.latestMessageId("#a")).toBe(0);
+				await store.post({ room: "#a", author: "@you", body: "one" });
+				const two = await store.post({
+					room: "#a",
+					author: "@you",
+					body: "two",
+				});
+				// Another room's newer message must not move this one's head.
+				await store.post({ room: "#b", author: "@you", body: "elsewhere" });
+				expect(await store.latestMessageId("#a")).toBe(two.id);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("getMessage returns the same shape listMessages does", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "#a", kind: "channel" });
+				const root = await store.post({
+					room: "#a",
+					author: "@you",
+					body: "root",
+				});
+				await store.post({
+					room: "#a",
+					author: "reviewer",
+					body: "reply",
+					parentId: root.id,
+				});
+				await store.react(root.id, "reviewer", "👀");
+
+				const listed = (await store.listMessages("#a", {})).find(
+					(message) => message.id === root.id,
+				);
+				expect(await store.getMessage(root.id)).toEqual(listed);
+				expect(await store.getMessage(999_999)).toBeUndefined();
+				expect(await store.getMessage(0)).toBeUndefined();
+			} finally {
+				await store.close();
+			}
+		});
+	});
+});
+
 describe("RoomStore migrations", () => {
 	test("a database written before threading gains parent_id", async () => {
 		await withTempDb(async (path) => {

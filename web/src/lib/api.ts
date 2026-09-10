@@ -2,14 +2,25 @@ export const AUTHENTICATION_REQUIRED = new Error(
 	"Operator authentication required",
 );
 
+const TOKEN_STORAGE_KEY = "oh-my-agent.operator-token";
+
 export function readToken(): { token: string; remoteMode: boolean } {
 	const params = new URLSearchParams(location.search);
 	const remoteMode = document.documentElement.dataset.authMode === "remote";
-	const token = remoteMode
-		? (sessionStorage.getItem("oh-my-agent.operator-token") ?? "")
-		: (params.get("token") ?? "");
-	if (remoteMode && params.has("ticket")) {
-		params.delete("ticket");
+	// A loopback token arrives once, in the URL, and is kept in session
+	// storage from then on — the same place remote mode keeps it. This is
+	// called on every request, and the address bar is stripped below after
+	// the first read, so reading the URL alone would hand every later call an
+	// empty token.
+	const fromUrl = remoteMode ? null : params.get("token");
+	if (fromUrl) sessionStorage.setItem(TOKEN_STORAGE_KEY, fromUrl);
+	const token = sessionStorage.getItem(TOKEN_STORAGE_KEY) ?? "";
+	// Strip the credential from the address bar once it has been read, in both
+	// modes. Loopback used to leave `?token=` there for the life of the tab —
+	// in history, session restore, and anything that later reads the URL.
+	const credential = remoteMode ? "ticket" : "token";
+	if (params.has(credential)) {
+		params.delete(credential);
 		history.replaceState(
 			null,
 			"",

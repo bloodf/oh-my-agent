@@ -2,7 +2,7 @@
  * @oh-my-agent/rooms - bun:sqlite RoomStore
  *
  * Purpose:        Persistent room, threaded-message, reaction, and subscription store for multi-agent collaboration.
- * Public API:      RoomStore.open(), createRoom(), listRooms(), setWorkspace(), post(), parseMentions(), listMessages(), react(), unreact(), subscribe(), markRead(), unreadCount(), pendingForAgent(), enqueueMention(), pendingMentionsForAgent(), acknowledgeMentions(), close();
+ * Public API:      RoomStore.open(), createRoom(), listRooms(), setWorkspace(), post(), parseMentions(), listMessages(), latestMessageId(), getMessage(), react(), unreact(), subscribe(), markRead(), unreadCount(), pendingForAgent(), enqueueMention(), pendingMentionsForAgent(), acknowledgeMentions(), close();
  *                  Room { id, kind, workspace? }, RoomKind; MessageReaction { actor, emoji };
  *                  RoomMessage { id, room, author, body, mentions, createdAt, parentId, threadRootId, replyCount, reactions };
  *                  CreateRoomInput { id, kind, workspace? }; PostMessageInput { room, author, body, createdAt?, parentId? }.
@@ -392,6 +392,42 @@ export class RoomStore {
 			if (message) messages.push(message);
 		}
 		return messages;
+	}
+
+	/**
+	 * The newest message id in a room, or 0 for an empty one.
+	 *
+	 * One aggregate over the room's index. Callers that only needed "where is
+	 * the head" used to read the room's entire history through `listMessages`
+	 * and take the last row — on every console post, twice, synchronously on
+	 * the daemon's event loop.
+	 */
+	async latestMessageId(roomId: string): Promise<number> {
+		const row = this.db
+			.prepare("SELECT MAX(id) AS id FROM messages WHERE room = ?")
+			.get(roomId) as { id: number | null } | undefined;
+		return row?.id ?? 0;
+	}
+
+	/**
+	 * One message by id, in the same shape `listMessages` returns.
+	 *
+	 * Reactions are addressed by message id alone, so resolving one used to
+	 * scan every known room's full history. This finds the room with a primary
+	 * key lookup, then reads exactly that one row through `listMessages` so the
+	 * thread and reaction fields are built by the one query that owns them.
+	 */
+	async getMessage(messageId: number): Promise<RoomMessage | undefined> {
+		if (!Number.isSafeInteger(messageId) || messageId < 1) return undefined;
+		const row = this.db
+			.prepare("SELECT room FROM messages WHERE id = ?")
+			.get(messageId) as { room: string } | undefined;
+		if (!row) return undefined;
+		const [message] = await this.listMessages(row.room, {
+			afterId: messageId - 1,
+			limit: 1,
+		});
+		return message?.id === messageId ? message : undefined;
 	}
 
 	async react(messageId: number, actor: string, emoji: string): Promise<void> {

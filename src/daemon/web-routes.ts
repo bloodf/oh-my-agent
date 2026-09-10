@@ -55,7 +55,7 @@ export async function handleWebRoute(
 		path.startsWith("/api/workspace/") ||
 		path === "/api/attachments" ||
 		path.startsWith("/api/attachments/");
-	if (path === "/api/capabilities")
+	if (path === "/api/capabilities" && request.method === "GET")
 		return json(200, {
 			fullControl: !remoteRequest || services.remoteFullControl,
 		});
@@ -223,9 +223,20 @@ export async function handleWebRoute(
 					)
 						throw new Error("Invalid chat message");
 					const refs = await attachmentReferences(body.paths);
-					if (!body.message.trim() && !refs)
+					if (body.images !== undefined && !Array.isArray(body.images))
+						throw new Error("images must be an array");
+					const images = body.images as
+						| Parameters<WebChats["prompt"]>[1]["images"]
+						| undefined;
+					if (!body.message.trim() && !refs && !images?.length)
 						throw new Error("Message is empty");
-					await services.chats.prompt(id, { message: body.message + refs });
+					// Forwarded: `web-chats` validates and sends pasted images, but
+					// this route built the prompt from the text alone, so every
+					// image a browser attached was silently dropped here.
+					await services.chats.prompt(id, {
+						message: body.message + refs,
+						...(images === undefined ? {} : { images }),
+					});
 					return json(202, { accepted: true });
 				}
 			}
@@ -237,6 +248,13 @@ export async function handleWebRoute(
 			},
 		});
 	} catch (error) {
+		// Oversized bodies answer 413 here exactly as on the console's own
+		// routes; the same limit used to be 400 on one surface and 413 on the
+		// other for the identical condition.
+		if (error instanceof Error && error.message === "JSON body exceeds 1 MiB")
+			return json(413, {
+				error: { code: "payload_too_large", message: error.message },
+			});
 		const status =
 			error instanceof RoomPlanError && error.code === "PLAN_REVISION_CONFLICT"
 				? 409

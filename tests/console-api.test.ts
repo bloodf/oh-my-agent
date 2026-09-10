@@ -822,6 +822,31 @@ describe("messages", () => {
 		expect(stub.prompts[0]).toContain("Please review PR 12.");
 	});
 
+	test("a post lands in a room that already has a long history", async () => {
+		const h = await harness();
+		await h.ensureRoom("#busy");
+		// More history than any fixed read-back window. The head has to be the
+		// newest message, not the oldest: reading it with an ascending
+		// `limit: 1` returned the first message ever posted, and the post was
+		// then reported as "did not land" in every room past 50 messages.
+		for (let index = 0; index < 60; index++) {
+			await h.rooms.post({
+				room: "#busy",
+				author: "@you",
+				body: `old ${index}`,
+			});
+		}
+
+		const res = await h.call("/api/channels/%23busy/messages", {
+			method: "POST",
+			body: JSON.stringify({ body: "the new one" }),
+		});
+
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as { message: { body: string } };
+		expect(body.message.body).toBe("the new one");
+	});
+
 	test("messages carry the store's thread and reaction fields", async () => {
 		const h = await harness();
 		await h.ensureRoom("#reviews");
@@ -1191,6 +1216,42 @@ describe("websocket", () => {
 				body: "Review done.",
 			},
 		});
+	});
+
+	test("a loopback upgrade from a foreign page is refused", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+		// A WebSocket handshake is exempt from CORS, so the Origin check is the
+		// only thing standing between the live room feed and any other page
+		// open in the operator's browser that has learned the token.
+		const res = await fetch(`${h.api.url}/api/events`, {
+			headers: {
+				Authorization: `Bearer ${TOKEN}`,
+				Origin: "https://evil.example",
+				Connection: "Upgrade",
+				Upgrade: "websocket",
+				"Sec-WebSocket-Version": "13",
+				"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+			},
+		});
+		expect(res.status).toBe(403);
+	});
+
+	test("a loopback upgrade from the console's own page is accepted under any loopback name", async () => {
+		const h = await harness({ pollIntervalMs: 10 });
+		const port = new URL(h.api.url).port;
+		// The printed URL says 127.0.0.1, but an operator may open localhost;
+		// both are this console's own page.
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{
+				headers: {
+					Authorization: `Bearer ${TOKEN}`,
+					Origin: `http://localhost:${port}`,
+				},
+			},
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
 	});
 
 	test("a connected websocket receives a reaction", async () => {

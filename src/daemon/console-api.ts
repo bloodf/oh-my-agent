@@ -376,6 +376,13 @@ function tokenMatches(presented: string, expected: string): boolean {
 	return timingSafeEqual(left, right);
 }
 
+/** Every origin a browser may present for this console's own loopback page. */
+function loopbackOrigins(port: number): Set<string> {
+	return new Set(
+		["127.0.0.1", "localhost", "[::1]"].map((host) => `http://${host}:${port}`),
+	);
+}
+
 export async function startConsoleApi(
 	options: StartConsoleApiOptions,
 ): Promise<ConsoleApi> {
@@ -608,6 +615,11 @@ export async function startConsoleApi(
 	};
 
 	const tick = async (): Promise<void> => {
+		// A cursor for a room that has left the index is never read again, so
+		// a long-lived console would otherwise keep one per room it ever saw.
+		for (const roomId of [...cursors.keys()]) {
+			if (!knownRooms.has(roomId)) cursors.delete(roomId);
+		}
 		for (const roomId of knownRooms.keys()) {
 			let cursor = cursors.get(roomId);
 			if (!cursor) {
@@ -629,11 +641,13 @@ export async function startConsoleApi(
 		for (const roomId of knownRooms.keys()) {
 			const cursor: RoomCursor = { lastMessageId: 0, reactions: new Map() };
 			try {
-				const messages = await rooms.listMessages(roomId, {});
-				cursor.lastMessageId = messages.at(-1)?.id ?? 0;
+				// Only the reaction window is read. Priming used to load every
+				// room's complete history on the first connect just to learn its
+				// head, then discard everything below the window anyway.
+				cursor.lastMessageId = await rooms.latestMessageId(roomId);
 				const floor = Math.max(0, cursor.lastMessageId - REACTION_WINDOW);
+				const messages = await rooms.listMessages(roomId, { afterId: floor });
 				for (const message of messages) {
-					if (message.id <= floor) continue;
 					for (const reaction of message.reactions) {
 						// Seeding the *current* state is what keeps the first
 						// tick silent in both directions: an addition it holds
@@ -746,7 +760,11 @@ export async function startConsoleApi(
 		body: string,
 		parentId: number | null,
 	): Promise<RoomMessage> => {
-		const before = (await rooms.listMessages(roomId, {})).at(-1)?.id ?? 0;
+		// The head by aggregate, not by reading the room's whole history and
+		// taking the last row: that ran on every post, synchronously, and grew
+		// with the room. The read-back below is bounded by `afterId` alone —
+		// only what landed during this post.
+		const before = await rooms.latestMessageId(roomId);
 		await supervisor.post({ room: roomId, author, body, parentId });
 		const landed = (await rooms.listMessages(roomId, { afterId: before }))
 			.filter(
@@ -761,22 +779,18 @@ export async function startConsoleApi(
 	};
 
 	/**
-	 * Locate a message by id across known rooms.
+	 * Locate a message by id, within the rooms this console knows about.
 	 *
-	 * The store has no point lookup and reactions are addressed by message id
-	 * alone, so the room has to be recovered before anything can be checked
-	 * against it.
+	 * A point lookup in the store. It used to scan every known room's full
+	 * history for each reaction toggle.
 	 */
 	const findMessage = async (
 		messageId: number,
 	): Promise<RoomMessage | undefined> => {
-		for (const roomId of knownRooms.keys()) {
-			const found = (await rooms.listMessages(roomId, {})).find(
-				(message) => message.id === messageId,
-			);
-			if (found) return found;
-		}
-		return undefined;
+		const found = await rooms.getMessage(messageId);
+		return found !== undefined && knownRooms.has(found.room)
+			? found
+			: undefined;
 	};
 
 	/** JSON body capped independently of Bun's server-wide attachment allowance. */
@@ -965,8 +979,11 @@ export async function startConsoleApi(
 		fullControl: boolean,
 	): Promise<Response> => {
 		const path = url.pathname;
+		// The same predicate the web routes answer with. A console composed
+		// without them used to report `false` unconditionally — a wrong
+		// default one file away from the correct copy of a security check.
 		if (path === "/api/capabilities" && request.method === "GET")
-			return json(200, { fullControl: false });
+			return json(200, { fullControl });
 
 		// Every route below decodes the segments it captures, and a malformed
 		// escape makes `decodeURIComponent` throw. Caught here, once, rather
@@ -1766,7 +1783,8 @@ export async function startConsoleApi(
 		return new Response(html, {
 			headers: {
 				"content-type": "text/html;charset=utf-8",
-				...(remoteRequest ? { "Referrer-Policy": "no-referrer" } : {}),
+				"Cache-Control": "no-store",
+				"Referrer-Policy": "no-referrer",
 			},
 		});
 	};
@@ -1844,9 +1862,14 @@ export async function startConsoleApi(
 				if (isStatic) {
 					if (!consumeTicket(url)) {
 						if (url.pathname === "/") {
-							const shell = await Bun.file(
-								join(consoleRoot, "index.html"),
-							).text();
+							let shell: string;
+							try {
+								shell = await Bun.file(join(consoleRoot, "index.html")).text();
+							} catch {
+								// A missing or unreadable bundle answers in the same
+								// error shape as every other route, not a bare 500.
+								return fail(404, "not_found", "Console bundle unavailable");
+							}
 							const bootstrap = shell
 								.replace(
 									'<html lang="en"',
@@ -1908,6 +1931,20 @@ export async function startConsoleApi(
 				? "console-proxied"
 				: "console-loopback";
 			if (isUpgrade) {
+				// A browser always sends Origin on a WebSocket handshake, and the
+				// handshake is exempt from CORS: without this, any page open in
+				// the operator's browser could subscribe to the live room feed
+				// once it had the token. Loopback only — a proxied console
+				// arrives from its external origin and is already bound by the
+				// single-use ticket. An absent Origin is a non-browser client.
+				const origin = request.headers.get("Origin");
+				if (
+					!remoteRequest &&
+					origin !== null &&
+					!loopbackOrigins(self.port ?? 0).has(origin)
+				) {
+					return fail(403, "forbidden", "WebSocket Origin mismatch");
+				}
 				return await audited(connectionClass, source, async (connection) => {
 					const upgraded = self.upgrade(request, {
 						data: {

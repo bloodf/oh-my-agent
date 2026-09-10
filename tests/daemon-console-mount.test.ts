@@ -293,6 +293,12 @@ describe("serving the console", () => {
 		const body = await response.text();
 		expect(body).toContain("oh-my-agent console");
 		expect(body).toContain("app.js");
+
+		// The loopback shell's asset URLs carry the operator token, so the page
+		// must be neither cached nor leaked through a Referer. Both headers used
+		// to be sent only to remote requests.
+		expect(response.headers.get("cache-control")).toBe("no-store");
+		expect(response.headers.get("referrer-policy")).toBe("no-referrer");
 	});
 
 	test("/index.html serves the same shell", async () => {

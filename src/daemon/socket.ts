@@ -295,9 +295,16 @@ async function createConnectionAuditRecorder(
 			return connection;
 		},
 		disconnect: async (connection) => {
-			connections = connections.filter(
+			const remaining = connections.filter(
 				(candidate) => candidate.id !== connection.id,
 			);
+			// Idempotent in the log as well as in the list. A failed console
+			// request is released twice — once in its own `finally`, again in
+			// the outer handler's catch — and the operator reads this log as
+			// the connection record, where a second disconnect for one
+			// connection is a lie.
+			if (remaining.length === connections.length) return;
+			connections = remaining;
 			emit("disconnect", connection);
 			persist();
 		},
@@ -796,17 +803,12 @@ export async function startControlSocket(
 		return collected.sort((left, right) => left.id - right.id);
 	};
 
+	// A point lookup, not a scan of every room's full history: reactions are
+	// addressed by message id alone, and the scan ran on every unreact.
 	const findMessage = async (
 		messageId: number,
-	): Promise<StoredMessage | undefined> => {
-		for (const room of context.knownRooms.keys()) {
-			const message = (await context.rooms.listMessages(room, {})).find(
-				(candidate) => candidate.id === messageId,
-			);
-			if (message) return message;
-		}
-		return undefined;
-	};
+	): Promise<StoredMessage | undefined> =>
+		await context.rooms.getMessage(messageId);
 
 	const bears = (
 		message: StoredMessage | undefined,

@@ -762,18 +762,8 @@ describe("bootDaemon — composition and the control socket", () => {
 		};
 
 		const reacted = await Promise.all([
-			call<ChatReactResult>(
-				handle.socketPath,
-				"chat_react",
-				params,
-				1,
-			),
-			call<ChatReactResult>(
-				handle.socketPath,
-				"chat_react",
-				params,
-				2,
-			),
+			call<ChatReactResult>(handle.socketPath, "chat_react", params, 1),
+			call<ChatReactResult>(handle.socketPath, "chat_react", params, 2),
 		]);
 		// `added` is the only field that carries information here: `reacted` was
 		// a compile-time constant on this method, so it said the same thing for
