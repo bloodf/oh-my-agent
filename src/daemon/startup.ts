@@ -9,6 +9,7 @@ never JSON.
 
 Verbs:
   status
+  setup
   audit
   agents
   agent create <name> <file|->

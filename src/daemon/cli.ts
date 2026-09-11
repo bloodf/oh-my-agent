@@ -45,6 +45,8 @@ import type {
 	StatusResult,
 } from "../shared/protocol";
 import { METHODS } from "../shared/protocol-schemas";
+import { collectSetupReport } from "../shared/setup-report";
+import { PACKAGE_VERSION } from "../shared/version";
 import { USAGE, UsageError } from "./startup";
 
 const STATE_DIR = "oh-my-agent";
@@ -1006,6 +1008,13 @@ export async function runCli(
 
 	try {
 		switch (args[0]) {
+			case "setup":
+				if (args.length !== 1) throw new UsageError();
+				{
+					const report = await collectSetupReport(client, PACKAGE_VERSION);
+					output(io, report, json, report.lines.join("\n"));
+				}
+				return 0;
 			case "status":
 				if (args.length !== 1) throw new UsageError();
 				await status(client, io, json);
