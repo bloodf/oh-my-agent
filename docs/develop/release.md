@@ -8,7 +8,7 @@ Manual dispatch only. Nothing publishes because a tag landed on `main`. Dispatch
 2. Run **prepare-release** with the new semver (no `v`).
 3. Merge the `release/vX.Y.Z` PR.
 4. Tag `main`: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-5. Run **release** once with tag `vX.Y.Z`. After verification, the workflow creates the GitHub Release and automatically runs npm publication. Approve the `npm-publish` environment if it asks; no second dispatch or publish checkbox is needed.
+5. Run **release** once with tag `vX.Y.Z`. After verification, the workflow creates the GitHub Release and publishes to npm in the same run. The `npm-publish` environment has no required reviewers: the dispatch is the approval.
 
 About 20 minutes of operator time plus the suite.
 
@@ -34,9 +34,8 @@ Do these once. About 10 minutes.
    - Check **Allow GitHub Actions to create and approve pull requests**.
 
 2. **Settings → Environments → New environment: `npm-publish`**
-   - Required reviewers: you.
-   - Deployment branches: `main` only, or leave unrestricted because this job checks out a tag, not a branch.
-   - The **publish** job refuses to run until you approve it in the Actions UI.
+   - No required reviewers: dispatching **release** is the approval, and a reviewer gate left the publish job waiting after every release.
+   - Deployment branches: leave unrestricted; this job checks out a tag, not a branch.
 
 3. **Secret `NPM_TOKEN`**
    - npmjs.com → Access Tokens → Granular Access Token.
