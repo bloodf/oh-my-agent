@@ -622,6 +622,55 @@ describe("bootDaemon — composition and the control socket", () => {
 		).toBeUndefined();
 	});
 
+	test("seeded staff peers boot on the daemon's default model; a declared model is left alone", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer", { model: "openai/gpt-4.1" });
+		const received = new Map<string, string | undefined>();
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: await tempAgentDir(),
+			seedDefaultPeers: true,
+			defaultModel: "acme/default-1",
+			workerFactory: async (options) => {
+				received.set(options.peer.name, options.model);
+				return {
+					name: options.peer.name,
+					state: "running",
+					prompt: async () => {},
+					park: async () => {},
+					resume: async () => {},
+					stop: async () => {},
+				};
+			},
+		});
+		cleanups.push(() => handle.close());
+
+		const status = await call<StatusResult>(handle.socketPath, "status");
+		const byName = new Map(status.agents.map((a) => [a.name, a]));
+		for (const name of [
+			"staff-backend",
+			"staff-frontend",
+			"staff-pm",
+			"staff-qa",
+		]) {
+			// Ready by default: running, on the operator's OMP default, with the
+			// override handed to the factory only because the definition has none.
+			expect(byName.get(name)?.state).toBe("running");
+			expect(byName.get(name)?.model).toBe("acme/default-1");
+			expect(received.get(name)).toBe("acme/default-1");
+		}
+		// The operator's own choice always wins and is never overridden.
+		expect(byName.get("reviewer")?.model).toBe("openai/gpt-4.1");
+		expect(received.get("reviewer")).toBeUndefined();
+	});
+
+	test("a harness boot seeds nothing", async () => {
+		const { handle } = await boot();
+		const status = await call<StatusResult>(handle.socketPath, "status");
+		expect(status.agents.map((a) => a.name)).not.toContain("staff-pm");
+	});
+
 	test("a deleted operator token is restored on the next request", async () => {
 		const { handle, agentDir } = await boot();
 		const stateDir = join(agentDir, "oh-my-agent");

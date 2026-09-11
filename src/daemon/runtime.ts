@@ -66,6 +66,8 @@ import { isLoopback, startConsoleApi } from "./console-api";
 import { startCredentialGateway } from "./credential-gateway";
 import type { RunTrigger } from "./db";
 import { DaemonDb } from "./db";
+import { resolveDefaultModel } from "./default-model";
+import { seedDefaultPeers } from "./default-peers";
 import type { ScopedInferenceGateway } from "./inference-gateway";
 import { startScopedInferenceGateway } from "./inference-gateway";
 import { materializeWorker } from "./materializer";
@@ -120,6 +122,12 @@ export interface WorkerFactoryOptions {
 	socketPath: string;
 	/** Bearer credential for this worker's control-socket identity. */
 	controlToken: string;
+	/**
+	 * The `provider/id` to run on when the peer's definition declares none:
+	 * OMP's own default model role. Set only in that case, because it
+	 * overrides the definition's `model:` wherever it is passed.
+	 */
+	model?: string;
 	/**
 	 * True when the daemon was booted with `inProcessWorkers: true`. The
 	 * default factory uses this to route the call to the in-process OMP
@@ -176,6 +184,17 @@ export interface BootDaemonOptions {
 	 * `src/worker/lifecycle.ts` for the full boundary this trades away.
 	 */
 	inProcessWorkers?: boolean;
+	/**
+	 * Copy the shipped staff peers into the user store before definitions
+	 * load, once per store. Off by default so a harness boots exactly the
+	 * peers it wrote; the real launcher turns it on.
+	 */
+	seedDefaultPeers?: boolean;
+	/**
+	 * The `provider/id` a peer runs on when it declares no model. Defaults
+	 * to OMP's default model role for `agentDir`; a test passes its own.
+	 */
+	defaultModel?: string;
 }
 
 export interface DaemonHandle {
@@ -381,6 +400,7 @@ const defaultWorkerFactory: WorkerFactory = async (options) => {
 		const spawns = peerSpawns === "*" ? "*" : peerSpawns.join(",");
 		return await startInProcessWorker({
 			peer: options.peer,
+			...(options.model === undefined ? {} : { modelPattern: options.model }),
 			cwd: options.cwd,
 			agentDir: options.agentDir,
 			fingerprint: fingerprintPeerDefinition(options.peer),
@@ -409,6 +429,7 @@ const defaultWorkerFactory: WorkerFactory = async (options) => {
 		// A peer's `spawns:` closure must be materialized alongside it, or
 		// `materializeWorker` refuses to build the root at all.
 		sourceSpawnAgents: options.sourceSpawnAgents,
+		...(options.model === undefined ? {} : { model: options.model }),
 	});
 	// Point the toolbelt at the daemon explicitly; the path heuristic in
 	// src/worker/toolbelt.ts remains the fallback for non-standard layouts.
@@ -846,6 +867,7 @@ export async function bootDaemon(
 							socketPath,
 							controlToken,
 							inProcess: inProcessWorkers,
+							...modelOverrideFor(definition),
 						}),
 						scopedGateway,
 					);
@@ -886,6 +908,40 @@ export async function bootDaemon(
 			const kind = id.startsWith("@") ? "dm" : "channel";
 			await rooms.createRoom({ id, kind });
 			knownRooms.set(id, { id, kind, name: id });
+		};
+
+		// Before the listing, so the seeded peers boot with everyone else. The
+		// real launcher asks for this; a harness boots only what it wrote.
+		const storeRoots = resolvePeerStoreRoots({ agentDir, projectDir });
+		if (options.seedDefaultPeers === true) {
+			await seedDefaultPeers({ userRoot: storeRoots.user, log });
+		}
+		// What a peer with no `model:` runs on. Resolved once: it is the
+		// operator's OMP default, and a change to it takes effect on the next
+		// spawn, which is also when a definition edit takes effect.
+		const defaultModel =
+			options.defaultModel ?? (await resolveDefaultModel(agentDir));
+		/** The definition's model, or the daemon default it falls back to. */
+		const modelFor = (definition: PeerDefinition): string | undefined => {
+			const declared = Array.isArray(definition.model)
+				? definition.model[0]
+				: definition.model;
+			return typeof declared === "string" && declared.trim().length > 0
+				? declared
+				: defaultModel;
+		};
+		/** The override handed to the worker factory: only when the peer has none. */
+		const modelOverrideFor = (
+			definition: PeerDefinition,
+		): { model?: string } => {
+			const declared = Array.isArray(definition.model)
+				? definition.model[0]
+				: definition.model;
+			return typeof declared === "string" && declared.trim().length > 0
+				? {}
+				: defaultModel === undefined
+					? {}
+					: { model: defaultModel };
 		};
 
 		const listing = await store.list();
@@ -1269,6 +1325,7 @@ export async function bootDaemon(
 						socketPath,
 						controlToken,
 						inProcess: inProcessWorkers,
+						...modelOverrideFor(definition),
 					}),
 					scopedGateway,
 				);
@@ -1304,9 +1361,9 @@ export async function bootDaemon(
 			peers.set(name, {
 				worker,
 				accountId,
-				model: Array.isArray(definition.model)
-					? definition.model[0]
-					: definition.model,
+				// The model it actually runs on: the daemon default when the
+				// definition declares none, so status names something real.
+				model: modelFor(definition),
 				rooms: peerRooms,
 				...(parent === undefined ? {} : { parent }),
 			});
@@ -2193,6 +2250,7 @@ export async function runDaemon(workerBackend: WorkerBackend): Promise<void> {
 	try {
 		handle = await bootDaemon({
 			inProcessWorkers: workerBackend === "in-process",
+			seedDefaultPeers: true,
 			logger: (message) => {
 				process.stderr.write(`${message}\n`);
 			},
