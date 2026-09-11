@@ -685,6 +685,37 @@ describe("bootDaemon — composition and the control socket", () => {
 		expect(listed.default).toBe("acme/default-1");
 	});
 
+	test("the default model reaches the scoped inference gateway on the real RPC path", async () => {
+		// No worker factory: the daemon's own RPC path, where a per-worker
+		// inference gateway is scoped to the peer's model before the worker is
+		// built. That gateway used to read the definition and refuse a peer
+		// with no `model:` outright, so the default never reached it — and a
+		// stub-factory test never exercised it.
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		// Written by hand: `writePeer` always renders a model, and a peer with
+		// none is exactly the case under test.
+		await writeFile(
+			join(agentDir, "oh-my-agent", "agents", "modelless.md"),
+			'---\nname: "modelless"\ndescription: "No model."\nspawns: ["scout"]\n---\nYou are modelless.\n',
+			"utf8",
+		);
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: await tempAgentDir(),
+			defaultModel: "acme/default-1",
+		});
+		cleanups.push(() => handle.close());
+
+		const status = await call<StatusResult>(handle.socketPath, "status");
+		const peer = status.agents.find((agent) => agent.name === "modelless");
+		// It may not start here — no credential routes to acme — but the reason
+		// must be about that model, never "declares no model".
+		expect(peer?.lastError ?? "").not.toContain("declares no model");
+		expect(peer?.lastError ?? peer?.model ?? "").toContain("acme/default-1");
+	});
+
 	test("a harness boot seeds nothing", async () => {
 		const { handle } = await boot();
 		const status = await call<StatusResult>(handle.socketPath, "status");

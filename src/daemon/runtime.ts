@@ -692,7 +692,11 @@ export async function bootDaemon(
 			credentialIds: number[],
 		): Promise<ScopedInferenceGateway> => {
 			if (shuttingDown) throw new Error("Daemon is shutting down");
-			const selector = Array.isArray(peer.model) ? peer.model[0] : peer.model;
+			// The effective model, not the declared one: a peer with no `model:`
+			// runs on the daemon default, and this gateway is scoped to whatever
+			// the worker is about to be pointed at. Reading the definition here
+			// refused every default-team peer before the override was reached.
+			const selector = modelFor(peer);
 			if (typeof selector !== "string")
 				throw new Error(`Peer ${peer.name} declares no model`);
 			const trimmed = selector.trim();
@@ -925,6 +929,11 @@ export async function bootDaemon(
 		// spawn, which is also when a definition edit takes effect.
 		const defaultModel =
 			options.defaultModel ?? (await resolveDefaultModel(agentDir));
+		log(
+			defaultModel === undefined
+				? "default model: none (OMP has no provider-qualified default role)"
+				: `default model: ${defaultModel}`,
+		);
 		/** The definition's model, or the daemon default it falls back to. */
 		const modelFor = (definition: PeerDefinition): string | undefined => {
 			const declared = Array.isArray(definition.model)
