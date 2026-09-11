@@ -13,6 +13,7 @@ Close what the two-model review found: threads, reactions, attribution, typed ev
 | Task | Epic | Title | Status |
 |---|---|---|---|
 | [T-1620](../tasks/T-1620-default-staff-team.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | A default staff team, ready on first boot, on the operator's model | Done |
+| [T-1621](../tasks/T-1621-themed-tui-no-keys.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | The TUI renders through the OMP theme and binds no keys | Done |
 | [T-1601](../tasks/T-1601-console-thread-parentage.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Console thread replies preserve parentage | Done |
 | [T-1602](../tasks/T-1602-reaction-removal-frames.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Reaction removal frames | Done |
 | [T-1603](../tasks/T-1603-attribution-enforcement.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Enforce attribution from connection identity | Done |

@@ -51,7 +51,7 @@ omp install @bloodf/oh-my-agent
 omp
 ```
 
-The TUI starts the daemon on session start. Widget shows running/parked counts. `Alt+G` opens the manager. `/cli status` runs the shell verb with no PATH. `/console` opens a menu: **Open web UI**, **Copy URL**, or **Show URL**. `/cli console` prints the loopback URL explicitly.
+The TUI starts the daemon on session start. Widget shows running/parked counts in your OMP theme. `/manage` opens the manager; every surface is a slash command, and the plugin binds no keys. `/cli status` runs the shell verb with no PATH. `/console` opens a menu: **Open web UI**, **Copy URL**, or **Show URL**. `/cli console` prints the loopback URL explicitly.
 
 Choose **Open web UI** to open the browser console. **Show URL** deliberately reveals its operator token; **Copy URL** copies it without printing it.
 

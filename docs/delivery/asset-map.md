@@ -72,11 +72,12 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `src/defaults/agents/staff-pm.md` | yes | [T-1620](tasks/T-1620-default-staff-team.md) | — |
 | `src/defaults/agents/staff-qa.md` | yes | [T-1620](tasks/T-1620-default-staff-team.md) | — |
 | `src/extension/cli.ts` | yes | [T-504](tasks/T-504-tui-surface.md) | — |
-| `src/extension/commands.ts` | yes | [T-504](tasks/T-504-tui-surface.md), [T-511](tasks/T-511-operator-steering.md), [T-901](tasks/T-901-tui-tree.md), [T-903](tasks/T-903-tui-editing.md), [T-1620](tasks/T-1620-default-staff-team.md) | — |
+| `src/extension/commands.ts` | yes | [T-504](tasks/T-504-tui-surface.md), [T-511](tasks/T-511-operator-steering.md), [T-901](tasks/T-901-tui-tree.md), [T-903](tasks/T-903-tui-editing.md), [T-1620](tasks/T-1620-default-staff-team.md), [T-1621](tasks/T-1621-themed-tui-no-keys.md) | — |
 | `src/extension/ensure-daemon.ts` | yes | [T-504](tasks/T-504-tui-surface.md), [T-1619](tasks/T-1619-runtime-liveness-review.md) | — |
-| `src/extension/index.ts` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-504](tasks/T-504-tui-surface.md), [T-902](tasks/T-902-tui-manager.md) | — |
-| `src/extension/manager.ts` | yes | [T-902](tasks/T-902-tui-manager.md), [T-903](tasks/T-903-tui-editing.md) | — |
-| `src/extension/widget.ts` | yes | [T-504](tasks/T-504-tui-surface.md), [T-901](tasks/T-901-tui-tree.md), [T-1004](tasks/T-1004-control-socket-identity.md), [T-1619](tasks/T-1619-runtime-liveness-review.md) | — |
+| `src/extension/index.ts` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-504](tasks/T-504-tui-surface.md), [T-902](tasks/T-902-tui-manager.md), [T-1621](tasks/T-1621-themed-tui-no-keys.md) | — |
+| `src/extension/manager.ts` | yes | [T-902](tasks/T-902-tui-manager.md), [T-903](tasks/T-903-tui-editing.md), [T-1621](tasks/T-1621-themed-tui-no-keys.md) | — |
+| `src/extension/theme.ts` | yes | [T-1621](tasks/T-1621-themed-tui-no-keys.md) | — |
+| `src/extension/widget.ts` | yes | [T-504](tasks/T-504-tui-surface.md), [T-901](tasks/T-901-tui-tree.md), [T-1004](tasks/T-1004-control-socket-identity.md), [T-1621](tasks/T-1621-themed-tui-no-keys.md), [T-1619](tasks/T-1619-runtime-liveness-review.md) | — |
 | `src/rooms/plans.ts` | yes | [T-603](tasks/T-603-console-client.md) | — |
 | `src/rooms/store.ts` | yes | [T-402](tasks/T-402-room-store.md), [T-509](tasks/T-509-wake-filters.md), [T-601](tasks/T-601-conversation-model.md), [T-1619](tasks/T-1619-runtime-liveness-review.md) | [T-508](tasks/T-508-daemon-persistence.md), [T-503](tasks/T-503-agent-toolbelt.md), [T-506](tasks/T-506-metered-budget-wiring.md), [T-602](tasks/T-602-console-api.md), [T-604](tasks/T-604-reaction-toolbelt.md), [T-605](tasks/T-605-console-management.md) |
 | `src/shared/agent-definition.ts` | yes | [T-101](tasks/T-101-peer-definition-parser.md), [T-1002](tasks/T-1002-usage-feeds-the-meter.md) | [T-201](tasks/T-201-materialization-engine.md), [T-501](tasks/T-501-peer-store.md), [T-505](tasks/T-505-definition-staleness.md), [T-509](tasks/T-509-wake-filters.md) |
@@ -114,7 +115,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/dogfood.test.ts` | yes | [T-1402](tasks/T-1402-dogfood-harness.md), [T-1404](tasks/T-1404-live-session-safety-rails.md), [T-1405](tasks/T-1405-daemon-backend-selector.md) | — |
 | `tests/end-to-end.test.ts` | yes | [T-405](tasks/T-405-supervisor.md) | — |
 | `tests/ensure-daemon.test.ts` | yes | [T-504](tasks/T-504-tui-surface.md) | — |
-| `tests/extension.test.ts` | yes | [T-504](tasks/T-504-tui-surface.md), [T-511](tasks/T-511-operator-steering.md), [T-901](tasks/T-901-tui-tree.md), [T-902](tasks/T-902-tui-manager.md), [T-903](tasks/T-903-tui-editing.md) | — |
+| `tests/extension.test.ts` | yes | [T-504](tasks/T-504-tui-surface.md), [T-511](tasks/T-511-operator-steering.md), [T-901](tasks/T-901-tui-tree.md), [T-902](tasks/T-902-tui-manager.md), [T-903](tasks/T-903-tui-editing.md), [T-1621](tasks/T-1621-themed-tui-no-keys.md) | — |
 | `tests/fixtures/control-client.ts` | yes | [T-1004](tasks/T-1004-control-socket-identity.md) | — |
 | `tests/fixtures/fake-broker.ts` | yes | [T-002](tasks/T-002-test-harness.md) | — |
 | `tests/fixtures/hermetic-env.ts` | yes | [T-007](tasks/T-007-hermetic-child-environments.md), [T-205](tasks/T-205-worker-env-scrub.md) | — |
