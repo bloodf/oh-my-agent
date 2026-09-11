@@ -30,6 +30,7 @@ const EXPECTED_SKILLS = [
 	"omp-agent-authoring",
 	"omp-subagent-authoring",
 	"omp-orchestration",
+	"oh-my-agent-setup",
 ] as const;
 
 async function withTempRoot<T>(fn: (root: string) => Promise<T>): Promise<T> {

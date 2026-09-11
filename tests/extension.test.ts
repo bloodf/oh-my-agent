@@ -60,6 +60,7 @@ import {
 	ManagerState,
 	openManager,
 } from "../src/extension/manager";
+import { setupCommand } from "../src/extension/setup";
 import { PLAIN_THEME, type TuiTheme, themeFrom } from "../src/extension/theme";
 import {
 	createDaemonClient,
@@ -424,6 +425,99 @@ async function startDaemon(
 }
 
 // ── /rooms ───────────────────────────────────────────────────────────────────
+
+describe("/setup", () => {
+	test("reports the daemon down with the restart command and offers nothing else", async () => {
+		const io = fakeIo();
+		await setupCommand(
+			createDaemonClient("/nonexistent/oh-my-agent/daemon.sock"),
+			io,
+		);
+		const text = io.notices.join("\n");
+		expect(text).toContain("✗ daemon:");
+		expect(text).toContain("/cli daemon restart");
+		expect(io.selects).toHaveLength(0);
+		expect(io.confirms).toHaveLength(0);
+	});
+
+	test("a ready install prints only ✓ lines and the mate's address", async () => {
+		const daemon = await startDaemon([
+			{ name: "mate", rooms: ["#bridge", "#team"] },
+			{ name: "staff-pm", rooms: ["#team"] },
+			{ name: "staff-backend", rooms: ["#team"] },
+			{ name: "staff-frontend", rooms: ["#team"] },
+			{ name: "staff-qa", rooms: ["#team"] },
+		]);
+		const io = fakeIo();
+		await setupCommand(daemon.client, io);
+		const lines = io.notices.join("\n").split("\n").slice(1);
+		expect(lines.every((line) => line.startsWith("✓"))).toBe(true);
+		expect(lines.at(-1)).toContain("/rooms post #bridge @mate");
+		expect(io.selects).toHaveLength(0);
+	});
+
+	test("an unroutable default offers a model picker and writes the choice to crew peers on the default; stopped crew are offered a start", async () => {
+		const daemon = await startDaemon(
+			[
+				{ name: "mate", rooms: ["#bridge", "#team"] },
+				{ name: "staff-pm", rooms: ["#team"] },
+			],
+			{
+				definitions: ["mate", "staff-pm"].map((name) => ({
+					name,
+					description: `${name} peer.`,
+					spawns: "*" as const,
+					rooms: ["#team"],
+					body: `You are ${name}.`,
+				})),
+			},
+		);
+		daemon.context.listModels = async () => ({
+			models: [{ provider: "openai", id: "gpt-5", name: "GPT-5" }],
+			default: "durindoor/cx/gpt-5.6-sol",
+			defaultRoutable: false,
+		});
+		daemon.workers.get("staff-pm")?.setState("stopped");
+		const calls: { method: string; params: unknown }[] = [];
+		const spy = {
+			call: <T>(method: never, params?: unknown): Promise<T> => {
+				calls.push({ method, params });
+				return daemon.client.call(method, params);
+			},
+		};
+		const io = fakeIo(true);
+		io.selectAnswer = "openai/gpt-5";
+		await setupCommand(spy as never, io);
+
+		const text = io.notices.join("\n");
+		expect(text).toContain(
+			"✗ OMP default durindoor/cx/gpt-5.6-sol is not routable",
+		);
+		expect(text).toContain("✗ staff-pm stopped");
+		expect(text).toContain(
+			"✗ missing: staff-backend, staff-frontend, staff-qa",
+		);
+		// The pick lands on every crew peer still on the default.
+		const updates = calls.filter((c) => c.method === "definition_update");
+		expect(
+			updates.map((c) => (c.params as { name: string }).name).sort(),
+		).toEqual(["mate", "staff-pm"]);
+		expect(updates[0]?.params).toMatchObject({
+			changes: { model: ["openai/gpt-5"] },
+		});
+		expect(text).toContain("set openai/gpt-5 on mate, staff-pm");
+		// Then the stopped peer is offered a start and, confirmed, spawned.
+		expect(io.confirms[0]?.title).toBe("Start the stopped crew?");
+		expect(
+			calls.some(
+				(c) =>
+					c.method === "agent_spawn" &&
+					(c.params as { name: string }).name === "staff-pm",
+			),
+		).toBe(true);
+		expect(text).toContain("started staff-pm");
+	});
+});
 
 describe("/rooms", () => {
 	test("read renders a room transcript", async () => {

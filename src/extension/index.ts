@@ -51,6 +51,7 @@ import {
 import { ensureDaemon } from "./ensure-daemon";
 import type { ManagerHostContext } from "./manager";
 import { openManager } from "./manager";
+import { setupCommand } from "./setup";
 import { themeFrom } from "./theme";
 import { createDaemonClient, markRoomsRead, refreshWidget } from "./widget";
 
@@ -133,6 +134,15 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 			"Run an omp-agent CLI verb without PATH: /cli status, /cli console.",
 		handler: async (args, ctx) => {
 			await cliCommand(ioFrom(ctx.ui), args);
+		},
+	});
+
+	pi.registerCommand("setup", {
+		description:
+			"Check the install: daemon, models, crew, rooms; fix what it can.",
+		handler: async (_args, ctx) => {
+			await setupCommand(client, ioFrom(ctx.ui));
+			await refreshWidget(client, ioFrom(ctx.ui));
 		},
 	});
 

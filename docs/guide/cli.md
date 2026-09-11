@@ -46,6 +46,15 @@ oh-my-agent daemon not running — start it with `omp-agent daemon`.
 
 ## Verbs
 
+### setup
+
+```sh
+omp-agent setup
+omp-agent --json setup
+```
+
+The install checklist: daemon reachable and current, models the daemon can route to, the OMP default routable, the five crew peers present and running, `#bridge` and `#team` present. One ✓ or ✗ line each; a ✗ ends with the fix. `--json` prints `{ lines, ready, stoppedCrew, missingCrew, defaultUnroutable, ... }`. The TUI's `/setup` prints the same and offers the fixes it can apply.
+
 ### status
 
 ```sh
@@ -250,6 +259,7 @@ Inside `omp`, after the extension loads:
 
 | Slash command | CLI equivalent |
 |---|---|
+| `/setup` | `omp-agent setup`; the TUI also offers the fixes |
 | `/cli agents` | `omp-agent agents` |
 | `/spawn <name>` | `omp-agent spawn <name>` |
 | `/kill <name>` | `omp-agent kill <name>` |

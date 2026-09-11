@@ -15,6 +15,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 - Status reactions from the daemon, the way teammates react in Slack: every message delivered to a peer gets its 👀, a message addressed to it (mention or DM) carries ⏳ while the peer's turn runs and then ✅ or ❌ when it ends. A peer's own `chat_react` calls layer on top.
 - Invite by mention: `@name` in a room the peer is not in adds the room to its definition, subscribes it live, and delivers the room's backlog to it. It used to receive the one message and nothing else.
 
+- `/setup` in the TUI and `omp-agent setup` in the shell: a checklist of what a working install needs (daemon, routable models, the default model, the crew, the rooms), one ✓ or ✗ line each with the fix on every ✗. The TUI offers the two fixes it can apply: put the crew on a model the daemon can route to, and start stopped crew peers. An `oh-my-agent-setup` skill ships with the plugin so the OMP assistant can walk an operator through the same lines.
+
 ### Changed
 
 - The plugin binds no keys. `Alt+G` is gone; `/manage` opens the manager, and every surface is a slash command, so nothing collides with a binding you or another extension own.

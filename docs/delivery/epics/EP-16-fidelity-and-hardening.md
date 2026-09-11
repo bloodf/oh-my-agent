@@ -47,6 +47,7 @@ The two-model review (sol + m3) found the console advertises thread replies and 
 | [T-1622](../tasks/T-1622-presets-and-first-mate.md) | A preset library and the first mate orchestrator | Done |
 | [T-1623](../tasks/T-1623-channels-and-invites.md) | Channels from every surface, membership with history, invite by mention | Done |
 | [T-1624](../tasks/T-1624-status-reactions.md) | Status reactions set by the daemon on delivery | Done |
+| [T-1625](../tasks/T-1625-setup-checklist.md) | A setup checklist for operators and the OMP assistant | Done |
 | [T-1601](../tasks/T-1601-console-thread-parentage.md) | Console thread replies preserve parentage | Done |
 | [T-1602](../tasks/T-1602-reaction-removal-frames.md) | Reaction removal frames | Done |
 | [T-1603](../tasks/T-1603-attribution-enforcement.md) | Enforce attribution from connection identity | Done |

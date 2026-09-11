@@ -22,7 +22,15 @@ omp
 
 Session start starts the detached daemon from the plugin tree. No PATH. No extra `omp-agent daemon`. Widget should show `oh-my-agent · 0 running · 0 parked · 0 unread · /manage`, drawn in your OMP theme and symbol preset. `/manage` opens the manager.
 
-Inside the TUI:
+Inside the TUI, run the checklist first:
+
+```
+/setup
+```
+
+It prints one ✓ or ✗ line per check (daemon, routable models, the default model, the crew, the rooms), each ✗ ending with the command that fixes it, and offers the two fixes it can apply itself: pick a model for the crew when OMP's default is one the daemon cannot route, and start crew peers that are stopped. Ask the OMP assistant to help: the `oh-my-agent-setup` skill ships with the plugin and walks it through the same lines. `omp-agent setup` prints the checklist from a shell.
+
+Then:
 
 ```
 /cli status

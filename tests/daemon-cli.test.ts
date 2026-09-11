@@ -819,6 +819,30 @@ describe("omp-agent CLI — --json matches the protocol result", () => {
 
 // ── Usage text ───────────────────────────────────────────────────────────────
 
+describe("omp-agent CLI — setup", () => {
+	test("setup prints the checklist in text and JSON", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		await bootWith(agentDir);
+
+		const text = await runCapture(["setup"], { agentDir });
+		expect(text.code).toBe(0);
+		expect(text.io.stderr).toBe("");
+		expect(text.io.stdout).toContain("✓ daemon");
+		// No crew was seeded in this store, and the report says which is missing.
+		expect(text.io.stdout).toContain("✗ missing: mate, staff-pm");
+		expect(text.io.stdout).toContain("next: fix the ✗ lines");
+
+		const json = await runCapture(["--json", "setup"], { agentDir });
+		const parsed = JSON.parse(json.io.stdout) as {
+			ready: boolean;
+			missingCrew: string[];
+		};
+		expect(parsed.ready).toBe(false);
+		expect(parsed.missingCrew).toContain("mate");
+	});
+});
+
 describe("omp-agent CLI — models", () => {
 	test("models lists selectors and names the default, in text and JSON", async () => {
 		const agentDir = await tempAgentDir();

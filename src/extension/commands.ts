@@ -107,7 +107,7 @@ export class DaemonAuthError extends Error {
  * server's message when the protocol refuses. Nothing here may throw into
  * the TUI.
  */
-async function guard(
+export async function guard(
 	io: ExtensionIO,
 	body: () => Promise<void>,
 ): Promise<void> {
