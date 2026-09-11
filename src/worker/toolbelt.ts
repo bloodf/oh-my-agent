@@ -33,6 +33,8 @@ const TOOL_NAMES = [
 	"agent_create",
 	"presets_list",
 	"agent_spawn",
+	"room_create",
+	"room_join",
 	"agent_status",
 	"task_handoff",
 	"room_plans_list",
@@ -488,6 +490,35 @@ export default function toolbeltExtension(
 			}
 			return await call("agent_spawn", daemonParams, signal);
 		},
+	});
+
+	pi.registerTool({
+		name: "room_create",
+		label: "Create channel",
+		description:
+			"Open a channel (id starting with #) for a piece of work. Then room_join the peers who should be in it, or @mention them there: a mention invites a peer into the room and hands it the whole history.",
+		loadMode: "essential",
+		parameters: z.object({
+			room: z.string().describe("Channel id, e.g. #login-page"),
+		}),
+		approval: "write",
+		execute: async (_id, params, signal) =>
+			await call("room_create", params, signal),
+	});
+
+	pi.registerTool({
+		name: "room_join",
+		label: "Add peer to room",
+		description:
+			"Assign a peer to a channel or DM. Persisted in its definition; a running peer is subscribed at once and receives the room's backlog as its next turn.",
+		loadMode: "essential",
+		parameters: z.object({
+			room: z.string().describe("Room id starting with # or @"),
+			agent: z.string().describe("Peer name"),
+		}),
+		approval: "write",
+		execute: async (_id, params, signal) =>
+			await call("room_join", params, signal),
 	});
 
 	pi.registerTool({

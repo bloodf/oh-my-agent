@@ -239,6 +239,8 @@ describe("worker toolbelt", () => {
 				"room_plan_update",
 				"agent_create",
 				"presets_list",
+				"room_create",
+				"room_join",
 				"agent_spawn",
 				"agent_status",
 				"task_handoff",

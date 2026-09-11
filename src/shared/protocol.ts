@@ -44,6 +44,9 @@ export const METHOD_NAMES = [
 	"inject",
 	"task_handoff",
 	"rooms_list",
+	"room_create",
+	"room_join",
+	"room_leave",
 	"rooms_post",
 	"room_plans_list",
 	"room_plan_create",
@@ -287,6 +290,30 @@ export interface RoomsListResult {
 	rooms: RoomInfo[];
 }
 
+export interface RoomCreateParams {
+	room: string;
+}
+export interface RoomCreateResult {
+	room: RoomInfo;
+	/** False when the room already existed. */
+	created: boolean;
+}
+export interface RoomJoinParams {
+	room: string;
+	agent: string;
+}
+export interface RoomJoinResult {
+	agent: string;
+	room: string;
+	/** The peer's membership after the change, as written to its definition. */
+	rooms: string[];
+	/** Whether the peer was registered, so the change took effect at once. */
+	live: boolean;
+	/** Whether the room's backlog was delivered to the peer as a turn. */
+	delivered: boolean;
+}
+export type RoomLeaveParams = RoomJoinParams;
+export type RoomLeaveResult = Omit<RoomJoinResult, "delivered">;
 export type RoomsPostParams = ChatSendParams;
 export type RoomsPostResult = ChatSendResult;
 

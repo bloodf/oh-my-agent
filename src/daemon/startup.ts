@@ -19,8 +19,11 @@ Verbs:
   daemon [--worker-backend rpc|in-process]
   kill <name> [--keep-children]
   rooms
+  rooms create <room>
   rooms read <room>
   rooms post <room> <text...>
+  rooms join <room> <agent>
+  rooms leave <room> <agent>
   schedule
   schedule <id> on|off
   logs <name|daemon> [n]

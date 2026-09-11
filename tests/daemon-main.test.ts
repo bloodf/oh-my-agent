@@ -49,6 +49,7 @@ import type {
 	ChatUnreactResult,
 	ChatWaitResult,
 	DaemonStopResult,
+	DefinitionGetResult,
 	InjectResult,
 	JsonRpcFailure,
 	JsonRpcSuccess,
@@ -57,6 +58,9 @@ import type {
 	MethodName,
 	ModelsListResult,
 	PresetsListResult,
+	RoomCreateResult,
+	RoomJoinResult,
+	RoomLeaveResult,
 	RoomsListResult,
 	SchedulesArmResult,
 	SchedulesListResult,
@@ -883,6 +887,98 @@ describe("bootDaemon — composition and the control socket", () => {
 		expect(read.messages[0]?.author).toBe("@you");
 	});
 
+	test("room_create, room_join with history, room_leave, and invite by mention over the real socket", async () => {
+		const agentDir = await tempAgentDir();
+		// Mention wake on: the invite path is gated on it, as documented.
+		await writePeer(agentDir, "reviewer", { wake: { mention: true } });
+		const { handle, workers } = await boot({ agentDir });
+		const reviewer = workers.get("reviewer");
+
+		const created = await call<RoomCreateResult>(
+			handle.socketPath,
+			"room_create",
+			{
+				room: "#ops",
+			},
+		);
+		expect(created).toMatchObject({
+			created: true,
+			room: { id: "#ops", kind: "channel" },
+		});
+		expect(
+			(
+				await call<RoomCreateResult>(handle.socketPath, "room_create", {
+					room: "#ops",
+				})
+			).created,
+		).toBe(false);
+
+		// Traffic before the reviewer is in the room does not reach it.
+		await call(handle.socketPath, "chat_send", { room: "#ops", body: "first" });
+		await call(handle.socketPath, "chat_send", {
+			room: "#ops",
+			body: "second",
+		});
+		expect(reviewer?.prompts).toHaveLength(0);
+
+		const joined = await call<RoomJoinResult>(handle.socketPath, "room_join", {
+			room: "#ops",
+			agent: "reviewer",
+		});
+		expect(joined).toEqual({
+			agent: "reviewer",
+			room: "#ops",
+			rooms: ["#ops", "#reviews"],
+			live: true,
+			delivered: true,
+		});
+		// The backlog arrives as one turn, and the definition on disk agrees.
+		expect(reviewer?.prompts).toHaveLength(1);
+		expect(reviewer?.prompts[0]).toContain("first");
+		expect(reviewer?.prompts[0]).toContain("second");
+		const shown = await call<DefinitionGetResult>(
+			handle.socketPath,
+			"definition_get",
+			{
+				name: "reviewer",
+			},
+		);
+		expect(shown.definition.rooms).toEqual(["#ops", "#reviews"]);
+		const left = await call<RoomLeaveResult>(handle.socketPath, "room_leave", {
+			room: "#ops",
+			agent: "reviewer",
+		});
+		expect(left).toEqual({
+			agent: "reviewer",
+			room: "#ops",
+			rooms: ["#reviews"],
+			live: true,
+		});
+		await call(handle.socketPath, "chat_send", { room: "#ops", body: "third" });
+		expect(reviewer?.prompts).toHaveLength(1);
+
+		// An @mention from a room it left invites it back, history included.
+		await call(handle.socketPath, "chat_send", {
+			room: "#ops",
+			body: "@reviewer back in",
+		});
+		expect(reviewer?.prompts).toHaveLength(2);
+		expect(reviewer?.prompts[1]).toContain("third");
+		expect(reviewer?.prompts[1]).toContain("@reviewer back in");
+		expect(
+			(
+				await call<DefinitionGetResult>(handle.socketPath, "definition_get", {
+					name: "reviewer",
+				})
+			).definition.rooms,
+		).toEqual(["#ops", "#reviews"]);
+
+		// An unknown peer is a refusal, not a silent no-op.
+		await expect(
+			call(handle.socketPath, "room_join", { room: "#ops", agent: "ghost" }),
+		).rejects.toThrow("Unknown peer: ghost");
+	});
+
 	test("reactions preserve actor, report idempotency, and remain visible", async () => {
 		const { handle } = await boot();
 		const posted = await call<ChatSendResult>(handle.socketPath, "chat_send", {
@@ -1494,6 +1590,9 @@ describe("bootDaemon — protocol errors", () => {
 				summary: "done",
 			},
 			rooms_list: {},
+			room_create: { room: "#ops" },
+			room_join: { room: "#ops", agent: "reviewer" },
+			room_leave: { room: "#ops", agent: "reviewer" },
 			rooms_post: { room: "#reviews", body: "hello again" },
 			room_plans_list: { room: "#reviews" },
 			room_plan_create: {

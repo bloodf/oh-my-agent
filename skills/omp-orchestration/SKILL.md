@@ -28,6 +28,10 @@ Bounded to your run. Default when the subtask ends with this run. Format and pol
 
 `presets_list` returns the shipped role library: each entry is a complete `agent_create` payload (`name`, `description`, `body`, `spawns`, and usually `rooms` and `wake`). Copy it, replace `name` with what the peer is for, send it to `agent_create`, then `agent_spawn` with yourself as `parent`. Write a body by hand only when no preset fits.
 
+## 1c. A channel per piece of work — `room_create` + `room_join`
+
+`room_create` opens `#<topic>`; `room_join` puts a peer in it, persisted in its definition, and a running peer reads the room's whole history as its next turn. An `@mention` of a peer that is not in the room does the same invite. Brief the crew in the channel, not in DMs, so every member sees the same history.
+
 ## 2. Persistent child — `agent_create` + `agent_spawn` with `parent`
 
 Two calls minimum, validation checkpoint in the middle. `agent_create` takes

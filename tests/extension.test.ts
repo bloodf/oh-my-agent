@@ -41,6 +41,8 @@ import {
 	killCommand,
 	logsCommand,
 	presetCommand,
+	roomsCreateCommand,
+	roomsMembershipCommand,
 	roomsPostCommand,
 	roomsReadCommand,
 	scheduleArmCommand,
@@ -446,6 +448,33 @@ describe("/rooms", () => {
 		expect(out).toContain("second");
 		expect(out).toContain("@you");
 		expect(out).toContain("reviewer");
+	});
+
+	test("create opens a channel; join and leave report what the daemon did", async () => {
+		const daemon = await startDaemon([
+			{ name: "reviewer", rooms: ["#reviews"] },
+		]);
+		const io = fakeIo();
+		await roomsCreateCommand(daemon.client, io, "#ops");
+		expect(io.notices.at(-1)).toBe("created #ops");
+		await roomsCreateCommand(daemon.client, io, "#ops");
+		expect(io.notices.at(-1)).toBe("#ops already exists");
+
+		// The stub daemon has no definition store: the seam is stubbed to
+		// answer for a stopped peer, and the notice reads back what it said.
+		const changes: string[] = [];
+		daemon.context.setMembership = async (agent, room, action) => {
+			changes.push(`${action} ${agent} ${room}`);
+			return action === "join" ? ["#ops", "#reviews"] : ["#reviews"];
+		};
+		await roomsMembershipCommand(daemon.client, io, "join", "#ops", "newbie");
+		expect(io.notices.at(-1)).toBe("newbie will join #ops when it next starts");
+		await roomsMembershipCommand(daemon.client, io, "leave", "#ops", "newbie");
+		expect(io.notices.at(-1)).toBe("newbie left #ops");
+		expect(changes).toEqual(["join newbie #ops", "leave newbie #ops"]);
+
+		await roomsMembershipCommand(daemon.client, io, "join", "#ops", "");
+		expect(io.notices.at(-1)).toBe("usage: /rooms join <room> <agent>");
 	});
 
 	test("post lands as @you and wakes a subscribed parked peer", async () => {

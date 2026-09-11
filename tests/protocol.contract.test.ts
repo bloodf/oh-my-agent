@@ -97,6 +97,9 @@ const VALID_PARAMS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 		artifacts: ["#research:41"],
 	},
 	rooms_list: {},
+	room_create: { room: "#ops" },
+	room_join: { room: "#ops", agent: "reviewer" },
+	room_leave: { room: "#ops", agent: "reviewer" },
 	rooms_post: { room: "#reviews", body: "shipping", author: "@you" },
 	room_plans_list: { room: "#reviews" },
 	room_plan_create: {
@@ -172,6 +175,23 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 		rooms: [{ id: "#reviews", kind: "channel", name: "#reviews" }],
 	},
 	rooms_post: { messageId: 43, createdAt: 1750000000000 },
+	room_create: {
+		room: { id: "#ops", kind: "channel", name: "#ops" },
+		created: true,
+	},
+	room_join: {
+		agent: "reviewer",
+		room: "#ops",
+		rooms: ["#ops", "#reviews"],
+		live: true,
+		delivered: true,
+	},
+	room_leave: {
+		agent: "reviewer",
+		room: "#ops",
+		rooms: ["#reviews"],
+		live: true,
+	},
 	room_plans_list: {
 		plans: [
 			{
@@ -279,6 +299,9 @@ describe("declared method set", () => {
 				"kill",
 				"inject",
 				"rooms_list",
+				"room_create",
+				"room_join",
+				"room_leave",
 				"logs_tail",
 				"models_list",
 				"presets_list",
