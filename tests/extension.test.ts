@@ -163,6 +163,7 @@ function stubWorker(name: string): SupervisedWorker & {
 }
 
 interface TestDaemon {
+	context: DaemonContext;
 	socket: ControlSocket;
 	client: ReturnType<typeof createDaemonClient>;
 	supervisor: Supervisor;
@@ -371,6 +372,7 @@ async function startDaemon(
 			{ provider: "openai", id: "gpt-5", name: "GPT-5" },
 		],
 		default: "openai/gpt-4.1",
+		defaultRoutable: true,
 	});
 	const socket = await startControlSocket({
 		socketPath,
@@ -383,6 +385,7 @@ async function startDaemon(
 	await writeFile(join(stateDir, "console-token"), TEST_OPERATOR_TOKEN, "utf8");
 	return {
 		socket,
+		context,
 		client: createDaemonClient(socketPath),
 		supervisor,
 		workers,
@@ -1315,6 +1318,26 @@ describe("editing flows", () => {
 			definition: { model?: string[] };
 		}>("definition_get", { name: "alpha" });
 		expect(fetched.definition.model).toEqual(["openai/gpt-4.1"]);
+	});
+
+	test("an unroutable default is offered, but labelled as such", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }], {
+			definitions: [definition()],
+		});
+		daemon.context.listModels = async () => ({
+			models: [{ provider: "openai", id: "gpt-5", name: "GPT-5" }],
+			default: "durindoor/cx/gpt-5.6-sol",
+			defaultRoutable: false,
+		});
+		const io = fakeIo();
+		io.selectAnswers = ["Model", "openai/gpt-5"];
+		await editCommand(daemon.client, io, "alpha");
+		expect(io.selects[1]?.options).toContain(
+			"durindoor/cx/gpt-5.6-sol (default, not routable by the daemon)",
+		);
+		expect(io.selects[1]?.options).not.toContain(
+			"durindoor/cx/gpt-5.6-sol (default)",
+		);
 	});
 
 	test("model editing selects a configured role or free input", async () => {

@@ -699,6 +699,9 @@ export async function bootDaemon(
 			const selector = modelFor(peer);
 			if (typeof selector !== "string")
 				throw new Error(`Peer ${peer.name} declares no model`);
+			const declared = Array.isArray(peer.model) ? peer.model[0] : peer.model;
+			const onDefault =
+				typeof declared !== "string" || declared.trim().length === 0;
 			const trimmed = selector.trim();
 			const slash = trimmed.indexOf("/");
 			if (slash < 1 || slash === trimmed.length - 1)
@@ -714,6 +717,18 @@ export async function bootDaemon(
 					workerId: `inference:${workerId}`,
 					credentialIds,
 				}).token;
+				// A peer left on the OMP default is not the one that chose the
+				// model; say where the choice lives when it cannot be routed.
+				const describeUnroutable = (error: unknown): Error =>
+					onDefault &&
+					error instanceof Error &&
+					error.message.startsWith("Unknown configured model")
+						? new Error(
+								`${error.message}: this is OMP's default model and the daemon cannot route to it (it is not in models.yml or the credential broker). Pick one from \`omp-agent models\` with \`/edit ${peer.name}\`.`,
+							)
+						: error instanceof Error
+							? error
+							: new Error(String(error));
 				try {
 					const scoped = await startScopedInferenceGateway({
 						brokerUrl: gateway.url,
@@ -727,7 +742,7 @@ export async function bootDaemon(
 					return scoped;
 				} catch (error) {
 					gateway.revokeWorkerToken(brokerToken);
-					throw error;
+					throw describeUnroutable(error);
 				}
 			});
 		};
@@ -1942,7 +1957,14 @@ export async function bootDaemon(
 				});
 				return {
 					models,
-					...(defaultModel === undefined ? {} : { default: defaultModel }),
+					...(defaultModel === undefined
+						? {}
+						: {
+								default: defaultModel,
+								defaultRoutable: models.some(
+									(model) => `${model.provider}/${model.id}` === defaultModel,
+								),
+							}),
 				};
 			} finally {
 				gateway.revokeWorkerToken?.(issued.token);

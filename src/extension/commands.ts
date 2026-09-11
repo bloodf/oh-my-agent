@@ -217,6 +217,14 @@ async function editModel(
 			const selector = `${model.provider}/${model.id}`;
 			return selector === listed.default ? `${selector} (default)` : selector;
 		});
+		// A default the daemon cannot route to is still the default a peer
+		// with no model runs on; it is offered, marked, so choosing it is
+		// deliberate rather than the picker hiding where the failure comes from.
+		if (listed.default !== undefined && listed.defaultRoutable === false) {
+			catalog.unshift(
+				`${listed.default} (default, not routable by the daemon)`,
+			);
+		}
 	} catch {
 		catalog = [];
 	}
@@ -237,7 +245,9 @@ async function editModel(
 		"definition_update",
 		{
 			name: fetched.name,
-			changes: { model: [model.replace(/ \(default\)$/, "").trim()] },
+			changes: {
+				model: [model.replace(/ \(default[^)]*\)$/, "").trim()],
+			},
 		},
 	);
 	return updateMessage(result);

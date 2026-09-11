@@ -298,6 +298,13 @@ async function models(
 					? `${selector}\t${model.name}\t(default)`
 					: `${selector}\t${model.name}`;
 			})
+			.concat(
+				result.default !== undefined && result.defaultRoutable === false
+					? [
+							`${result.default}\t(OMP default; not routable by the daemon — add it to models.yml or the broker, or pick one above)`,
+						]
+					: [],
+			)
 			.join("\n"),
 	);
 }

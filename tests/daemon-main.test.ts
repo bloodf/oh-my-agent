@@ -683,6 +683,9 @@ describe("bootDaemon — composition and the control socket", () => {
 		);
 		expect(Array.isArray(listed.models)).toBe(true);
 		expect(listed.default).toBe("acme/default-1");
+		// Nothing routes to acme here, and the answer says so rather than
+		// marking a default the operator's peers would fail on.
+		expect(listed.defaultRoutable).toBe(false);
 	});
 
 	test("the default model reaches the scoped inference gateway on the real RPC path", async () => {
@@ -714,6 +717,10 @@ describe("bootDaemon — composition and the control socket", () => {
 		// must be about that model, never "declares no model".
 		expect(peer?.lastError ?? "").not.toContain("declares no model");
 		expect(peer?.lastError ?? peer?.model ?? "").toContain("acme/default-1");
+		// And the reason names where the choice lives, since this peer never
+		// chose the model itself.
+		expect(peer?.lastError ?? "").toContain("OMP's default model");
+		expect(peer?.lastError ?? "").toContain("/edit modelless");
 	});
 
 	test("a harness boot seeds nothing", async () => {

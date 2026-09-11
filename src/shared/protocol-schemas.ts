@@ -984,6 +984,11 @@ export const METHODS: Record<MethodName, MethodContract> = {
 			if (!isRecord(v)) return fail("result", "expected an object");
 			const base = checkFields(v, [(r) => optionalString(r, "default")]);
 			if (base) return fail(base.field, base.message);
+			if (
+				v.defaultRoutable !== undefined &&
+				typeof v.defaultRoutable !== "boolean"
+			)
+				return fail("defaultRoutable", "expected a boolean");
 			const models = checkList(v.models, "models", (value) => {
 				if (!isRecord(value)) return "";
 				if (!isNonEmptyString(value.provider)) return "provider";

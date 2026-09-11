@@ -65,6 +65,8 @@ The daemon seeds four peers into `~/.omp/agent/oh-my-agent/agents/` on its first
 
 To put one on a different model, `/edit staff-backend` → Model. The picker lists every model the daemon's credentials can reach, with the default marked; `omp-agent models` prints the same list. The seed is offered once: a definition you edit is never overwritten, and one you delete is not recreated.
 
+If a staff peer shows `stopped` with an error naming OMP's default model, the daemon cannot route to that model: it only routes providers in `~/.omp/agent/models.yml` and broker credentials, not ones a TUI extension adds. Add the provider to `models.yml`, or pick a listed model with `/edit <name>` → Model.
+
 The rest of this guide writes a peer of your own.
 
 ## 3. Install the native scout

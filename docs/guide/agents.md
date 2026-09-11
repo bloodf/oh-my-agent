@@ -12,6 +12,8 @@ Four staff peers ship with the package: `staff-pm`, `staff-backend`, `staff-fron
 
 They declare no `model`. A peer without one runs on OMP's default model role (`/model`, or `modelRoles.default` in `config.yml`), with any `:thinking` suffix dropped. `status` and `agents` report the model a peer actually runs on. Change it per peer with `/edit <name>` → Model, whose list comes from `models_list`: every model the daemon's credentials can route to, with the default marked. The console's agent form offers the same list, and `omp-agent models` prints it.
 
+The daemon routes only what it can see: providers in `~/.omp/agent/models.yml` and credentials in the broker. A default that comes from a TUI extension is not among them. A peer left on such a default fails to start, and its `agents` row says so and names `/edit <name>`; `omp-agent models` marks the default as not routable. Either add the provider to `models.yml` or pick a listed model per peer.
+
 ## Where definitions live
 
 | Root | Role |

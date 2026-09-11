@@ -331,6 +331,13 @@ export interface ModelsListResult {
 	models: ModelChoice[];
 	/** The `provider/id` a peer with no `model:` runs on, when OMP has one. */
 	default?: string;
+	/**
+	 * Whether `default` appears in `models`. OMP's default may come from a
+	 * TUI extension the daemon's gateway cannot route to; a peer left on it
+	 * fails to start, and a picker that marked it as the default without
+	 * saying so would be sending the operator to that failure.
+	 */
+	defaultRoutable?: boolean;
 }
 export interface SchedulesListResult {
 	schedules: ScheduleInfo[];
