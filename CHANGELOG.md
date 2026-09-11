@@ -6,6 +6,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-11
+
 ### Added
 
 - `mate`, the first mate, joins the default crew: the one peer you talk to. Post in `#bridge`; it picks the task shape (ship or scout), briefs the staff, supervises through the rooms, escalates only real decisions, and reports outcomes there.
