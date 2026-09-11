@@ -37,7 +37,7 @@
  * Performance: per-peer delivery is serialized; it reads subscribed and mentioned pending messages, then writes acknowledgements after prompting. The staleness check re-reads the peer store once per delivered turn.
  */
 
-import type { RoomStore } from "../rooms/store";
+import type { RoomMessage, RoomStore } from "../rooms/store";
 import type { PeerDefinition } from "../shared/agent-definition";
 import { fingerprintPeerDefinition } from "../shared/agent-definition";
 import type { AccountMode } from "./account-registry";
@@ -626,13 +626,61 @@ export class Supervisor {
 		// than thrown — a rebuild that cannot happen leaves the backlog pending.
 		if (!(await this.#ensureFresh(peerName, peer))) return false;
 
-		await peer.worker.prompt(batch);
+		// Status the way a teammate would show it in Slack, set by the daemon
+		// so it is never forgotten: 👀 on everything delivered (seen), ⏳ on
+		// the messages addressed to this peer while it works, then ✅ or ❌
+		// on those when the turn ends. The worker may add its own on top.
+		const delivered = rooms.flatMap((entry) => entry.messages);
+		const addressed = delivered.filter(
+			(message) =>
+				message.mentions.includes(peerName) || message.room === `@${peerName}`,
+		);
+		await this.#react(peerName, delivered, "👀");
+		await this.#react(peerName, addressed, "⏳");
+		try {
+			await peer.worker.prompt(batch);
+		} catch (error) {
+			await this.#unreact(peerName, addressed, "⏳");
+			await this.#react(peerName, addressed, "❌");
+			throw error;
+		}
+		await this.#unreact(peerName, addressed, "⏳");
+		await this.#react(peerName, addressed, "✅");
 		await this.#advanceCursors(peerName, pending);
 		await this.deps.rooms.acknowledgeMentions(
 			peerName,
 			mentionPending.map((message) => message.id),
 		);
 		return true;
+	}
+
+	/** Set one status reaction on each message; a failed write never blocks delivery. */
+	async #react(
+		peerName: string,
+		messages: readonly RoomMessage[],
+		emoji: "👀" | "⏳" | "✅" | "❌",
+	): Promise<void> {
+		for (const message of messages) {
+			try {
+				await this.deps.rooms.react(message.id, peerName, emoji);
+			} catch (error) {
+				this.deps.onError?.(error, peerName);
+			}
+		}
+	}
+
+	async #unreact(
+		peerName: string,
+		messages: readonly RoomMessage[],
+		emoji: "⏳",
+	): Promise<void> {
+		for (const message of messages) {
+			try {
+				await this.deps.rooms.unreact(message.id, peerName, emoji);
+			} catch (error) {
+				this.deps.onError?.(error, peerName);
+			}
+		}
 	}
 
 	/**

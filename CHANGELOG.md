@@ -12,6 +12,7 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 - A preset library ships with the package and is never seeded: `researcher`, `reviewer`, `security-reviewer`, `tech-writer`, `sre`, `debugger`, `test-engineer`, `designer`, `release-manager`, `data-analyst`. `/preset` in the TUI, `omp-agent presets` and `agent create <name> --preset <preset>` in the shell, a **Start from a preset** picker in the console's create dialog, and `presets_list` on the control socket (worker-callable, so `mate` hires from it).
 
 - Channels from every surface: `/rooms create`, `/rooms join`, and `/rooms leave` in the TUI; `omp-agent rooms create|join|leave` in the shell; `room_create`, `room_join`, and `room_leave` on the control socket, the first two worker-callable so a peer can open a channel and assign teammates to it. A join is written to the peer's definition; a running peer is subscribed at once and reads the room's whole history as its next turn.
+- Status reactions from the daemon, the way teammates react in Slack: every message delivered to a peer gets its 👀, a message addressed to it (mention or DM) carries ⏳ while the peer's turn runs and then ✅ or ❌ when it ends. A peer's own `chat_react` calls layer on top.
 - Invite by mention: `@name` in a room the peer is not in adds the room to its definition, subscribes it live, and delivers the room's backlog to it. It used to receive the one message and nothing else.
 
 ### Changed

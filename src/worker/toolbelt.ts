@@ -315,7 +315,7 @@ export default function toolbeltExtension(
 	});
 
 	const reactionDescription =
-		"Use reactions to communicate status without chat noise: 👀 reading/picked-up, ⏳ in-progress, ✅ done, ❌ blocked/failed.";
+		"Status without chat noise. The daemon already marks every message delivered to you 👀 (seen), marks the ones addressed to you ⏳ while your turn runs, and turns that into ✅ or ❌ when it ends. Add your own only when it says more: ❌ on a message you cannot act on, ✅ early on one you finished mid-turn, 👀 on one you only checked.";
 	const reactionParameters = z.object({
 		messageId: z.number().describe("Message id"),
 		emoji: z.string().describe("One of 👀, ⏳, ✅, ❌"),
