@@ -13,15 +13,20 @@
  * @Environment bun
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { WorkerLayout } from "../src/daemon/materializer";
 import { materializeWorker } from "../src/daemon/materializer";
 import type { PeerDefinition } from "../src/shared/agent-definition";
 import { parsePeerDefinition } from "../src/shared/agent-definition";
 import { resolveSandboxLaunch } from "../src/worker/launch-gate";
-import { buildWorkerPolicy } from "../src/worker/lifecycle";
+import {
+	buildWorkerPolicy,
+	resolveOmpCli,
+	sandboxRuntimePaths,
+} from "../src/worker/lifecycle";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -90,6 +95,29 @@ async function profileFor(
 }
 
 // ── Profile reflects the materialized layout ─────────────────────────────────
+
+describe("sandbox runtime roots", () => {
+	test("the compiled profile can read the OMP CLI and the bun that runs it", async () => {
+		// The profile is `(deny default)`, and the shim execs
+		// `bun <package>/dist/cli.js`. A hardcoded FHS list plus this package's
+		// own `src` left both outside every readable subpath, so the gate
+		// probed clean and the grandchild died on a read denial. Asserted
+		// through the profile the production builder compiles, not through the
+		// helper alone: a policy that stopped calling it would still pass that.
+		const { profile } = await profileFor(9_100);
+		const cliRoot = dirname(dirname(resolveOmpCli()));
+		expect(profile).toContain(`(allow file-read* (subpath "${cliRoot}"))`);
+		const bun = Bun.which("bun");
+		if (bun !== null) {
+			expect(profile).toContain(
+				`(allow file-read* (subpath "${dirname(bun)}"))`,
+			);
+		}
+		for (const root of sandboxRuntimePaths()) {
+			expect(existsSync(root)).toBe(true);
+		}
+	});
+});
 
 describe("seatbelt profile matches the materialized worker", () => {
 	test("writes are scoped to the real synthetic home, not a fixture path", async () => {

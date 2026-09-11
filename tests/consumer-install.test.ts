@@ -21,6 +21,11 @@ const COMMAND_TIMEOUT_MS = 120_000;
  * reports a real packaging failure rather than a timeout wearing one's face.
  */
 const PACK_TIMEOUT_MS = 600_000;
+/**
+ * Released OMP still declares no `RpcClient.pid`. Supervision does not depend
+ * on it — the launch shim records each worker's pid — but the assertion stays,
+ * so an upstream accessor landing is noticed rather than silently relied on.
+ */
 const EXPECTED_RPC_CLIENT_PID = "absent" as const;
 
 function extractNpmPackMetadata(stdout: string): { filename: string } {

@@ -1,6 +1,6 @@
 # Setup
 
-Requirements: [Bun](https://bun.sh) >= 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` >= 18.0.7). Root and `web/` have separate locked dependency trees; install both.
+Requirements: [Bun](https://bun.sh) >= 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` >= 18.1.0). Root and `web/` have separate locked dependency trees; install both.
 
 BASE_BRANCH: `main`.
 
@@ -40,7 +40,7 @@ bun run lint        # biome check .
 Before a PR, run the full suite and the docs generator:
 
 ```sh
-bun test            # timeout 30000; same command CI runs
+PATH="$PWD/node_modules/.bin:$PATH" bun test --timeout 30000   # same command CI runs
 bun run docs        # python3 scripts/gen-delivery-docs.py
 bun run docs        # second run must produce no diff
 ```
@@ -91,4 +91,4 @@ A stale `docs/delivery/` tree, or a hand-edit of it, fails that last step.
 
 ## Patches
 
-[`patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`](../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch) adds `RpcClient.pid`. Bun applies it only from this checkout's root manifest. npm consumers of the published package get the unpatched peer ([ADR-013](../delivery/adr/ADR-013-release-channel.md)). Do not invent a second patch path. Removal is [T-1504](../delivery/tasks/T-1504-drop-rpc-pid-patch.md), blocked on an upstream release.
+There are none. The `RpcClient.pid` patch was removed in [T-1504](../delivery/tasks/T-1504-drop-rpc-pid-patch.md): worker and web chat pids come from the launch shim's record, so a checkout and an npm install behave the same. `scripts/check-patches.py` still gates `patches/` if one is ever added; prefer fixing the problem in this repository over patching a peer dependency, which cannot reach consumers ([ADR-013](../delivery/adr/ADR-013-release-channel.md)).

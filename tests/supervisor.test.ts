@@ -1127,6 +1127,43 @@ describe("definition staleness", () => {
 		expect(h.errors).toEqual([]);
 	});
 
+	test("a killed peer is not resurrected by a stale definition", async () => {
+		const disk = await peerStoreOnDisk();
+		await disk.write(reviewerFrontmatter());
+		const fingerprint = fingerprintPeerDefinition(await disk.definition());
+
+		const respawns: RespawnRequest[] = [];
+		const killed = stubWorker("reviewer", fingerprint);
+		const h = await harness({
+			peers: disk.store,
+			respawn: async (request) => {
+				respawns.push(request);
+				return stubWorker("reviewer", "rebuilt").worker;
+			},
+		});
+		await h.rooms.createRoom({ id: "#reviews", kind: "channel" });
+		await h.supervisor.register({
+			worker: killed.worker,
+			accountId: "acct-1",
+			mode: "subscription",
+			rooms: ["#reviews"],
+		});
+
+		// The operator kills it, then the definition changes on disk. The
+		// freshness check used to run first and respawn a brand-new *running*
+		// worker, which the stopped-state guard below it then found running —
+		// so the kill was quietly undone and the peer took the turn.
+		await killed.worker.stop();
+		await disk.write(reviewerFrontmatter({ description: "Changed." }));
+
+		await h.rooms.post({ room: "#reviews", author: "@you", body: "Hello?" });
+		expect(await h.supervisor.deliver("reviewer")).toBe(false);
+
+		expect(respawns).toEqual([]);
+		expect(killed.prompts).toEqual([]);
+		expect(h.errors).toEqual([]);
+	});
+
 	test("formatting-only edits do not rebuild, because the fingerprint is semantic", async () => {
 		const disk = await peerStoreOnDisk();
 		await disk.write(reviewerFrontmatter());

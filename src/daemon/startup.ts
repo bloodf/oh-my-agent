@@ -23,6 +23,7 @@ Verbs:
   schedule
   schedule <id> on|off
   logs <name|daemon> [n]
+  models
   inject <name> <text...>
   bump <account> <usd>
   console
@@ -40,7 +41,11 @@ export interface DaemonStartOptions {
 export function parseDaemonStartArgs(
 	argv: readonly string[],
 ): DaemonStartOptions | undefined {
-	if (argv.length === 0) return { json: false, workerBackend: "rpc" };
+	// A bare `omp-agent` is a usage question, not a request to start a daemon:
+	// USAGE names a verb as required, and booting one from an empty argv left
+	// an operator who typed the binary to see what it does with a detached
+	// process they never asked for.
+	if (argv.length === 0) throw new UsageError();
 	const json = argv[0] === "--json";
 	const args = json ? argv.slice(1) : argv;
 	if (args[0] !== "daemon" || args[1] === "stop" || args[1] === "restart")

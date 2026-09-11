@@ -39,6 +39,114 @@ describe("RoomStore lifecycle", () => {
 	});
 });
 
+describe("RoomStore point reads", () => {
+	test("latestMessageId is the room head, or 0 for an empty room", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "#a", kind: "channel" });
+				await store.createRoom({ id: "#b", kind: "channel" });
+				expect(await store.latestMessageId("#a")).toBe(0);
+				await store.post({ room: "#a", author: "@you", body: "one" });
+				const two = await store.post({
+					room: "#a",
+					author: "@you",
+					body: "two",
+				});
+				// Another room's newer message must not move this one's head.
+				await store.post({ room: "#b", author: "@you", body: "elsewhere" });
+				expect(await store.latestMessageId("#a")).toBe(two.id);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("getMessage returns the same shape listMessages does", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "#a", kind: "channel" });
+				const root = await store.post({
+					room: "#a",
+					author: "@you",
+					body: "root",
+				});
+				await store.post({
+					room: "#a",
+					author: "reviewer",
+					body: "reply",
+					parentId: root.id,
+				});
+				await store.react(root.id, "reviewer", "👀");
+
+				const listed = (await store.listMessages("#a", {})).find(
+					(message) => message.id === root.id,
+				);
+				expect(await store.getMessage(root.id)).toEqual(listed);
+				expect(await store.getMessage(999_999)).toBeUndefined();
+				expect(await store.getMessage(0)).toBeUndefined();
+			} finally {
+				await store.close();
+			}
+		});
+	});
+});
+
+describe("RoomStore migrations", () => {
+	test("a database written before threading gains parent_id", async () => {
+		await withTempDb(async (path) => {
+			// Exactly the shape an installation from before threading has on
+			// disk. `CREATE TABLE IF NOT EXISTS` skips the newer definition, so
+			// the column never appeared and `post`, `listMessages`, and
+			// `pendingForAgent` all threw "no such column: parent_id" — every
+			// room operation, on every call, for anyone upgrading.
+			const legacy = new Database(path);
+			legacy.exec(`
+				CREATE TABLE rooms (
+					id   TEXT PRIMARY KEY,
+					kind TEXT NOT NULL CHECK (kind IN ('channel', 'dm'))
+				);
+				CREATE TABLE messages (
+					id         INTEGER PRIMARY KEY AUTOINCREMENT,
+					room       TEXT NOT NULL,
+					author     TEXT NOT NULL,
+					body       TEXT NOT NULL,
+					created_at INTEGER NOT NULL,
+					FOREIGN KEY (room) REFERENCES rooms(id)
+				);
+				INSERT INTO rooms (id, kind) VALUES ('#general', 'channel');
+				INSERT INTO messages (room, author, body, created_at)
+					VALUES ('#general', '@you', 'from the old schema', 1);
+			`);
+			legacy.close();
+
+			const store = await RoomStore.open(path);
+			try {
+				const existing = await store.listMessages("#general", {});
+				expect(existing.map((message) => message.body)).toEqual([
+					"from the old schema",
+				]);
+
+				const root = await store.post({
+					room: "#general",
+					author: "@you",
+					body: "root",
+				});
+				const reply = await store.post({
+					room: "#general",
+					author: "reviewer",
+					body: "reply",
+					parentId: root.id,
+				});
+				expect(reply.parentId).toBe(root.id);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+});
+
 // ── RoomStore.createRoom ───────────────────────────────────────────────────────
 
 describe("RoomStore.createRoom", () => {

@@ -86,7 +86,7 @@ const { createDaemonClient } = await import(process.env.DAEMON_WIDGET_MODULE);
 Object.defineProperty(process, "execPath", { value: "/nonexistent/compiled-omp", configurable: true });
 const socket = join(process.env.PI_CODING_AGENT_DIR, "oh-my-agent", "daemon.sock");
 const client = createDaemonClient(socket);
-const ensured = await ensureDaemon(client);
+const ensured = (await ensureDaemon(client)).state;
 const { protocolVersion } = await client.call("status", {});
 writeSync(1, JSON.stringify({ ensured, protocolVersion }) + "\\n");
 process.exit(0);`,
@@ -146,7 +146,7 @@ describe("ensureDaemon", () => {
 			},
 			agentDir: () => "/tmp/oma-agent",
 		});
-		expect(result).toBe("up");
+		expect(result.state).toBe("up");
 		expect(spawned).toEqual([]);
 	});
 
@@ -164,7 +164,7 @@ describe("ensureDaemon", () => {
 			},
 			agentDir: () => "/tmp/oma-agent",
 		});
-		expect(result).toBe("up");
+		expect(result.state).toBe("up");
 		expect(spawned).toHaveLength(1);
 	});
 
@@ -184,7 +184,7 @@ describe("ensureDaemon", () => {
 				}) satisfies SpawnLauncherResult,
 			agentDir: () => "/tmp/oma-agent",
 		});
-		expect(result).toBe("up");
+		expect(result.state).toBe("up");
 		expect(attempts).toBe(2);
 	});
 
@@ -200,7 +200,7 @@ describe("ensureDaemon", () => {
 			}),
 			agentDir: () => "/tmp/oma-agent",
 		});
-		expect(result).toBe("failed");
+		expect(result).toEqual({ state: "failed", reason: "boom" });
 	});
 
 	test("returns failed when spawn throws and the socket stays down", async () => {
@@ -213,7 +213,7 @@ describe("ensureDaemon", () => {
 			},
 			agentDir: () => "/tmp/oma-agent",
 		});
-		expect(result).toBe("failed");
+		expect(result).toEqual({ state: "failed", reason: "exec failed" });
 	});
 
 	test("propagates a non-unavailable probe error instead of spawning", async () => {

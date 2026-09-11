@@ -113,6 +113,17 @@ export interface AutonomyConfig {
 export interface SandboxConfig {
 	enabled?: boolean;
 	extraRoots?: string[];
+	/**
+	 * Accept a sandbox that confines the filesystem but not the network.
+	 *
+	 * The Linux adapter cannot enforce the loopback-only rule the macOS
+	 * profile does, so it refuses to compile without this acceptance — which
+	 * left every `sandbox: true` peer on Linux unable to start at all, because
+	 * no definition could express the acceptance. Opt-in and per peer: a
+	 * confined filesystem with an open network is a real downgrade, and it is
+	 * reported as a warning even when accepted.
+	 */
+	allowUnenforcedNetwork?: boolean;
 	[key: string]: unknown;
 }
 
@@ -280,11 +291,24 @@ function validateExtras(fm: Record<string, unknown>): void {
 					"INVALID_SANDBOX",
 				);
 			}
-			validateNestedKeys(val, new Set(["enabled", "extraRoots"]), "sandbox");
-			const { enabled, extraRoots } = val;
+			validateNestedKeys(
+				val,
+				new Set(["enabled", "extraRoots", "allowUnenforcedNetwork"]),
+				"sandbox",
+			);
+			const { enabled, extraRoots, allowUnenforcedNetwork } = val;
 			if (enabled !== undefined && typeof enabled !== "boolean") {
 				throw new PeerParsingError(
 					`sandbox.enabled must be boolean, got: ${typeof enabled}`,
+					"INVALID_SANDBOX",
+				);
+			}
+			if (
+				allowUnenforcedNetwork !== undefined &&
+				typeof allowUnenforcedNetwork !== "boolean"
+			) {
+				throw new PeerParsingError(
+					`sandbox.allowUnenforcedNetwork must be boolean, got: ${typeof allowUnenforcedNetwork}`,
 					"INVALID_SANDBOX",
 				);
 			}

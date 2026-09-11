@@ -83,6 +83,8 @@ import type {
 	LogsTailParams,
 	LogsTailResult,
 	MethodName,
+	ModelsListParams,
+	ModelsListResult,
 	RoomInfo,
 	RoomMessage,
 	RoomPlanCreateParams,
@@ -125,7 +127,45 @@ import type { PeerDefinitionFields, PeerStore } from "./peer-store";
 import type { SupervisedWorker, Supervisor } from "./supervisor";
 
 /** Default ceiling for a parked `chat_wait`, per T-507's payload contract. */
+/**
+ * The methods a worker's scoped bearer may call.
+ *
+ * Exported because the identity suite asserts the complement of this set is
+ * operator-only: a copy of it in the test would drift silently, and the thing
+ * it guards is an authorization boundary.
+ */
+export const WORKER_CALLABLE_METHODS: Partial<Record<MethodName, true>> = {
+	chat_send: true,
+	chat_read: true,
+	chat_wait: true,
+	chat_react: true,
+	chat_unreact: true,
+	agent_status: true,
+	// ADR-011 makes creation two calls — `agent_create` writes a
+	// parse-validated definition, `agent_spawn` starts it — and the
+	// toolbelt tells every worker to do exactly that. Omitting it here
+	// answered `forbidden` on step one of the flow the agent was
+	// instructed to follow. It carries no attribution field: a definition
+	// names the peer being written, not the speaker.
+	agent_create: true,
+	agent_spawn: true,
+	task_handoff: true,
+	logs_tail: true,
+	room_plans_list: true,
+	room_plan_create: true,
+	room_plan_update: true,
+};
+
 const DEFAULT_WAIT_MS = 30_000;
+
+/**
+ * The longest a `chat_wait` may park, whatever it asks for.
+ *
+ * `timeoutMs` arrives from a worker, and nothing bounded it: a caller that
+ * asked for a year held a connection and a poll loop for a year. Five minutes
+ * is far past any legitimate wait and still recovers on its own.
+ */
+const MAX_WAIT_MS = 300_000;
 
 /** How often a parked wait re-reads the room. Woken early on close. */
 const WAIT_POLL_MS = 50;
@@ -257,9 +297,16 @@ async function createConnectionAuditRecorder(
 			return connection;
 		},
 		disconnect: async (connection) => {
-			connections = connections.filter(
+			const remaining = connections.filter(
 				(candidate) => candidate.id !== connection.id,
 			);
+			// Idempotent in the log as well as in the list. A failed console
+			// request is released twice — once in its own `finally`, again in
+			// the outer handler's catch — and the operator reads this log as
+			// the connection record, where a second disconnect for one
+			// connection is a lie.
+			if (remaining.length === connections.length) return;
+			connections = remaining;
 			emit("disconnect", connection);
 			persist();
 		},
@@ -357,6 +404,16 @@ export interface DaemonContext {
 	 */
 	orphans?: Map<string, string>;
 	/**
+	 * Why a registered peer is not running, keyed by name.
+	 *
+	 * A start that throws leaves nothing in `peers`, so the peer simply did not
+	 * appear in `status` and the only record of the failure was a line in the
+	 * daemon's own log. Kept beside `peers` rather than inside it for the same
+	 * reason `orphans` is: a failed start has no worker, and a stub in `peers`
+	 * would be reachable by `kill`, `inject`, and the shutdown sweep.
+	 */
+	startFailures?: Map<string, string>;
+	/**
 	 * Definitions as they sit on disk; the authoring methods read and write
 	 * here.
 	 *
@@ -382,6 +439,18 @@ export interface DaemonContext {
 		options: { overwrite: boolean },
 	): Promise<PeerDefinition>;
 	startedAt: number;
+	/** The daemon's own package version, so `status` can report code drift. */
+	version?: string;
+	/**
+	 * Restore this daemon's credential files if they went missing.
+	 *
+	 * Called once per request, before the bearer is resolved: an operator whose
+	 * `console-token` disappeared under a running daemon had no way back to it
+	 * except killing the process, because every surface authenticates with that
+	 * file and nothing rewrote it outside boot. Optional — a context assembled
+	 * for one narrow surface owns no files.
+	 */
+	ensureCredentials?(): Promise<void>;
 	now(): number;
 	/** Create the room if it does not exist yet, and index it. */
 	ensureRoom(id: string): Promise<void>;
@@ -409,6 +478,12 @@ export interface DaemonContext {
 	armSchedule(id: string, enabled: boolean): ScheduleInfo | undefined;
 	/** Raise a metered account's ceiling and resume it. Returns the peers the bump resumed. */
 	bumpAccount(accountId: string, budgetUsd: number): Promise<string[]>;
+	/**
+	 * The models the daemon can route a peer to, plus the default a peer with
+	 * no `model:` runs on. Optional: a context assembled for one narrow
+	 * surface has no credential gateway to ask.
+	 */
+	listModels?(): Promise<ModelsListResult>;
 	/**
 	 * Begin this daemon's shutdown and answer what the caller may watch.
 	 *
@@ -532,6 +607,7 @@ interface ParamsByMethod {
 	room_plan_create: RoomPlanCreateParams & { author?: string };
 	room_plan_update: RoomPlanUpdateParams & { author?: string };
 	schedules_list: SchedulesListParams;
+	models_list: ModelsListParams;
 	schedules_arm: SchedulesArmParams;
 	/**
 	 * `keep_children` rides along unvalidated by `METHODS`, which checks only
@@ -580,6 +656,7 @@ function toWireMessage(message: StoredMessage): RoomMessage {
 function toAgentStatuses(
 	peers: Map<string, PeerRecord>,
 	orphans: Map<string, string>,
+	startFailures: Map<string, string> = new Map(),
 ): AgentStatus[] {
 	const parentOf = new Map<string, string>();
 	for (const [name, record] of peers) {
@@ -602,7 +679,24 @@ function toAgentStatuses(
 		...(record.worker.pid === undefined ? {} : { pid: record.worker.pid }),
 		...(record.parent === undefined ? {} : { parent: record.parent }),
 		children: childrenOf(name),
+		...(startFailures.has(name)
+			? { lastError: startFailures.get(name) as string }
+			: {}),
 	}));
+
+	// A peer whose start threw has no `peers` entry at all, so it would
+	// otherwise be missing from status entirely — indistinguishable from one
+	// that was never defined.
+	for (const [name, reason] of startFailures) {
+		if (peers.has(name) || orphans.has(name)) continue;
+		statuses.push({
+			name,
+			state: "stopped",
+			account: "unknown",
+			children: childrenOf(name),
+			lastError: reason,
+		});
+	}
 
 	for (const [name, parent] of orphans) {
 		if (peers.has(name)) continue;
@@ -718,17 +812,12 @@ export async function startControlSocket(
 		return collected.sort((left, right) => left.id - right.id);
 	};
 
+	// A point lookup, not a scan of every room's full history: reactions are
+	// addressed by message id alone, and the scan ran on every unreact.
 	const findMessage = async (
 		messageId: number,
-	): Promise<StoredMessage | undefined> => {
-		for (const room of context.knownRooms.keys()) {
-			const message = (await context.rooms.listMessages(room, {})).find(
-				(candidate) => candidate.id === messageId,
-			);
-			if (message) return message;
-		}
-		return undefined;
-	};
+	): Promise<StoredMessage | undefined> =>
+		await context.rooms.getMessage(messageId);
 
 	const bears = (
 		message: StoredMessage | undefined,
@@ -851,8 +940,13 @@ export async function startControlSocket(
 	const handlers: Handlers = {
 		status: async (): Promise<StatusResult> => ({
 			protocolVersion: PROTOCOL_VERSION,
-			agents: toAgentStatuses(context.peers, context.orphans ?? new Map()),
+			agents: toAgentStatuses(
+				context.peers,
+				context.orphans ?? new Map(),
+				context.startFailures ?? new Map(),
+			),
 			uptimeMs: context.now() - context.startedAt,
+			...(context.version === undefined ? {} : { version: context.version }),
 		}),
 
 		chat_send: async (params): Promise<ChatSendResult> => await post(params),
@@ -875,18 +969,28 @@ export async function startControlSocket(
 			// backlog" — otherwise every bare wait returns instantly.
 			const baseline =
 				params.sinceId ?? (await collect(params.room, 0)).at(-1)?.id ?? 0;
-			const deadline = context.now() + (params.timeoutMs ?? DEFAULT_WAIT_MS);
+			// Clamped: `timeoutMs` crosses the boundary from a worker, and an
+			// unbounded one parks a connection and a poll loop for as long as
+			// the number says — years, if it asks for years.
+			const deadline =
+				context.now() +
+				Math.min(params.timeoutMs ?? DEFAULT_WAIT_MS, MAX_WAIT_MS);
 
 			while (!closing) {
 				const messages = await collect(params.room, baseline);
-				if (messages.length > 0) return { messages };
+				if (messages.length > 0) {
+					return { messages, latestId: messages[messages.length - 1]?.id };
+				}
 				if (context.now() >= deadline) break;
 				await nap();
 			}
-			return { messages: [] };
+			// Reported even when nothing arrived: it is how a caller with its
+			// own read cursor learns where "now" was, and without it an idle
+			// wait leaves that cursor exactly where it started forever.
+			return { messages: [], latestId: baseline };
 		},
 
-		chat_react: async (params): Promise<ChatReactResult & { reacted: true }> =>
+		chat_react: async (params): Promise<ChatReactResult> =>
 			await serializeReaction(async () => {
 				const added = !(await hasReaction(params));
 				try {
@@ -904,12 +1008,10 @@ export async function startControlSocket(
 					}
 					throw error;
 				}
-				return { ...params, added, reacted: true };
+				return { ...params, added };
 			}),
 
-		chat_unreact: async (
-			params,
-		): Promise<ChatUnreactResult & { reacted: false }> =>
+		chat_unreact: async (params): Promise<ChatUnreactResult> =>
 			await serializeReaction(async () => {
 				// The store's unreact is idempotent and never throws, so the
 				// handler owns the existence check that react gets for free.
@@ -926,7 +1028,7 @@ export async function startControlSocket(
 					params.actor,
 					params.emoji,
 				);
-				return { ...params, removed, reacted: false };
+				return { ...params, removed };
 			}),
 
 		rooms_list: async (): Promise<RoomsListResult> => ({
@@ -988,6 +1090,7 @@ export async function startControlSocket(
 			const agents = toAgentStatuses(
 				context.peers,
 				context.orphans ?? new Map(),
+				context.startFailures ?? new Map(),
 			);
 			if (params.name === undefined) return { agents };
 			const named = agents.find((agent) => agent.name === params.name);
@@ -1138,6 +1241,16 @@ export async function startControlSocket(
 			return { handoffId: `${room}:${posted.messageId}` };
 		},
 
+		models_list: async (): Promise<ModelsListResult> => {
+			if (!context.listModels) {
+				throw new InvalidParamsError(
+					"params",
+					"Model listing is not available on this daemon",
+				);
+			}
+			return await context.listModels();
+		},
+
 		schedules_list: async (): Promise<SchedulesListResult> => ({
 			schedules: [...context.schedules.values()].map((record) => ({
 				id: record.id,
@@ -1218,20 +1331,7 @@ export async function startControlSocket(
 		},
 	};
 
-	const workerMethods: Partial<Record<MethodName, true>> = {
-		chat_send: true,
-		chat_read: true,
-		chat_wait: true,
-		chat_react: true,
-		chat_unreact: true,
-		agent_status: true,
-		agent_spawn: true,
-		task_handoff: true,
-		logs_tail: true,
-		room_plans_list: true,
-		room_plan_create: true,
-		room_plan_update: true,
-	};
+	const workerMethods = WORKER_CALLABLE_METHODS;
 
 	/**
 	 * The attribution field each method carries, and the reason ADR-014 has
@@ -1459,6 +1559,11 @@ export async function startControlSocket(
 			if (request.method !== "POST") {
 				return new Response("Method Not Allowed", { status: 405 });
 			}
+			// Before the bearer is read, so a caller that found no token on disk
+			// finds one on its next attempt. It cannot rescue this request — the
+			// credential is what the caller already failed to send — but it ends
+			// the state where every future request fails the same way.
+			await context.ensureCredentials?.();
 			const authorization = request.headers.get("Authorization");
 			const token = authorization?.startsWith("Bearer ")
 				? authorization.slice("Bearer ".length)

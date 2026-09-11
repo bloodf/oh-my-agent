@@ -100,6 +100,52 @@ interface ResolvedModel {
 	maxTokens: number | null | undefined;
 }
 
+/**
+ * Every model the given credential scope can route to, as the peer-facing
+ * `provider/id` pairs, sorted. Built exactly the way the scoped gateway
+ * builds its own view — a broker-backed store and OMP's model registry — so
+ * what the picker offers is what a worker could actually be pointed at.
+ */
+export async function listRoutableModels(options: {
+	brokerUrl: string;
+	brokerToken: string;
+	modelsPath: string;
+	fetch?: typeof fetch;
+}): Promise<{ provider: string; id: string; name: string }[]> {
+	const client = new AuthBrokerClient({
+		url: options.brokerUrl,
+		token: options.brokerToken,
+	});
+	const snapshot = await client.fetchSnapshot();
+	if (snapshot.status !== 200) {
+		throw new Error("credential gateway returned no snapshot");
+	}
+	const store = new RemoteAuthCredentialStore({
+		client,
+		initialSnapshot: snapshot.snapshot,
+	});
+	const storage = new AuthStorage(store);
+	try {
+		await storage.reload();
+		const registry = new ModelRegistry(storage, options.modelsPath, {
+			fetch: options.fetch,
+		});
+		await registry.refresh("online-if-uncached");
+		return registry
+			.getAvailable()
+			.map((model) => ({
+				provider: model.provider,
+				id: model.id,
+				name: model.name,
+			}))
+			.sort((a, b) =>
+				`${a.provider}/${a.id}`.localeCompare(`${b.provider}/${b.id}`),
+			);
+	} finally {
+		await store.close?.();
+	}
+}
+
 export async function startScopedInferenceGateway(
 	options: ScopedInferenceGatewayOptions,
 ): Promise<ScopedInferenceGateway> {

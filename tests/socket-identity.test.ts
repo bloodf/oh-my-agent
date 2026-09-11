@@ -11,6 +11,7 @@ import {
 	type DaemonContext,
 	type PeerRecord,
 	startControlSocket,
+	WORKER_CALLABLE_METHODS,
 } from "../src/daemon/socket";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
 import { Supervisor } from "../src/daemon/supervisor";
@@ -55,20 +56,9 @@ function failure(frame: JsonRpcSuccess | JsonRpcFailure): JsonRpcFailure {
 	return frame;
 }
 
-const WORKER_METHODS: Partial<Record<MethodName, true>> = {
-	chat_send: true,
-	chat_read: true,
-	chat_wait: true,
-	chat_react: true,
-	chat_unreact: true,
-	agent_status: true,
-	agent_spawn: true,
-	task_handoff: true,
-	logs_tail: true,
-	room_plans_list: true,
-	room_plan_create: true,
-	room_plan_update: true,
-};
+// Imported, never mirrored: a copy here would drift from the boundary it
+// is meant to pin.
+const WORKER_METHODS = WORKER_CALLABLE_METHODS;
 
 const OPERATOR_ONLY_METHODS = METHOD_NAMES.filter(
 	(method) => WORKER_METHODS[method] !== true,
@@ -117,6 +107,7 @@ const VALID_PARAMS: Record<MethodName, unknown> = {
 		expectedRevision: 1,
 	},
 	schedules_list: {},
+	models_list: {},
 	schedules_arm: { scheduleId: "reviewer:schedule:0", enabled: false },
 	kill: { name: "other" },
 	bump: { account: "test", budgetUsd: 20 },

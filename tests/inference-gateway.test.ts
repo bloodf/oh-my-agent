@@ -22,7 +22,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SnapshotResponse } from "@oh-my-pi/pi-ai/auth-broker";
-import { startScopedInferenceGateway } from "../src/daemon/inference-gateway";
+import {
+	listRoutableModels,
+	startScopedInferenceGateway,
+} from "../src/daemon/inference-gateway";
 
 interface ProviderHit {
 	method: string;
@@ -144,6 +147,32 @@ afterAll(async () => {
 });
 
 describe("scoped inference gateway", () => {
+	test("listRoutableModels names the models the credential scope can reach", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "oma-catalog-"));
+		try {
+			const modelsPath = join(agentDir, "models.yml");
+			await writeFile(
+				modelsPath,
+				`providers:\n  ${PROVIDER}:\n    baseUrl: ${providerUrl}/v1\n    apiKey: ${PROVIDER_TOKEN}\n    api: openai-completions\n    discovery:\n      type: openai-models-list\n`,
+			);
+			// The same construction the scoped gateway uses, so what the picker
+			// offers is exactly what a worker could be pointed at.
+			const models = await listRoutableModels({
+				brokerUrl,
+				brokerToken: STORAGE_TOKEN,
+				modelsPath,
+				fetch,
+			});
+			expect(models).toContainEqual(
+				expect.objectContaining({ provider: PROVIDER, id: MODEL_ID }),
+			);
+			const selectors = models.map((m) => `${m.provider}/${m.id}`);
+			expect(selectors).toEqual([...selectors].sort());
+		} finally {
+			await rm(agentDir, { recursive: true, force: true });
+		}
+	});
+
 	test("routes a live turn and rejects out-of-scope model/options/auth", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "oma-inference-"));
 		try {

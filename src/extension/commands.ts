@@ -36,6 +36,7 @@ import type {
 	KillResult,
 	LogsTailResult,
 	MethodName,
+	ModelsListResult,
 	RoomsPostResult,
 	SchedulesArmResult,
 	SchedulesListResult,
@@ -67,6 +68,24 @@ export class DaemonUnavailableError extends Error {
 	constructor() {
 		super(DAEMON_UNAVAILABLE);
 		this.name = "DaemonUnavailableError";
+	}
+}
+
+/**
+ * Raised when the socket answered but refused the operator credential.
+ *
+ * Distinct from `DaemonUnavailableError` on purpose: a daemon that refuses a
+ * bearer is running, and treating the refusal as absence made the TUI spawn a
+ * second daemon on every session start — which then died on the pidfile the
+ * live one still held, leaving the operator with a "not running" widget and a
+ * log full of uncaught exceptions from a daemon that was answering fine.
+ */
+export class DaemonAuthError extends Error {
+	constructor(tokenPath: string) {
+		super(
+			`oh-my-agent daemon refused the operator token (${tokenPath}) — restart it with \`/cli daemon restart\`.`,
+		);
+		this.name = "DaemonAuthError";
 	}
 }
 
@@ -188,8 +207,30 @@ async function editModel(
 	const configured = Array.isArray(fetched.definition.model)
 		? fetched.definition.model
 		: [];
+	// The daemon's catalog, when it has one: every model its credentials can
+	// route to, with the default marked. An older daemon answers method-not-
+	// found and the picker falls back to the configured value and free text.
+	let catalog: string[] = [];
+	try {
+		const listed = await client.call<ModelsListResult>("models_list", {});
+		catalog = listed.models.map((model) => {
+			const selector = `${model.provider}/${model.id}`;
+			return selector === listed.default ? `${selector} (default)` : selector;
+		});
+		// A default the daemon cannot route to is still the default a peer
+		// with no model runs on; it is offered, marked, so choosing it is
+		// deliberate rather than the picker hiding where the failure comes from.
+		if (listed.default !== undefined && listed.defaultRoutable === false) {
+			catalog.unshift(
+				`${listed.default} (default, not routable by the daemon)`,
+			);
+		}
+	} catch {
+		catalog = [];
+	}
 	const selected = await io.select(`Model for ${fetched.name}`, [
 		...configured,
+		...catalog.filter((entry) => !configured.includes(entry)),
 		FREE_MODEL,
 	]);
 	if (selected === undefined) return undefined;
@@ -204,7 +245,9 @@ async function editModel(
 		"definition_update",
 		{
 			name: fetched.name,
-			changes: { model: [model.trim()] },
+			changes: {
+				model: [model.replace(/ \(default[^)]*\)$/, "").trim()],
+			},
 		},
 	);
 	return updateMessage(result);

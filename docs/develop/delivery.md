@@ -31,7 +31,7 @@ Task numbers follow the epic: `EP-00` owns `T-0xx`, `EP-12` owns `T-12xx`.
 3. Read the task's Read first links, then the files, then implement against Acceptance.
 4. A task listing more than about six files is too large. Split it in the generator rather than stretching the PR.
 
-Today the tree is **95 of 100 Done**. Nothing is Ready. Five tasks are Blocked on things outside the repo:
+Today the tree is **98 of 102 Done**. Nothing is Ready. Four tasks are Blocked on things outside the repo:
 
 | Task | Why it is Blocked |
 |---|---|
@@ -39,7 +39,6 @@ Today the tree is **95 of 100 Done**. Nothing is Ready. Five tasks are Blocked o
 | [T-1205](../delivery/tasks/T-1205-exposure-runbook.md) | Depends on T-1202 |
 | [T-1403](../delivery/tasks/T-1403-first-live-session.md) | Operator must run and record a live-account session |
 | [T-1503](../delivery/tasks/T-1503-drop-resolve-walk.md) | Wait for a released Bun or pi-coding-agent fix |
-| [T-1504](../delivery/tasks/T-1504-drop-rpc-pid-patch.md) | Wait for a released `RpcClient.pid` accessor |
 
 If you have the missing infrastructure (second tailnet device, live accounts, or the upstream release), that is the highest-leverage contribution. Otherwise: file a bug with a reproduction, or add a new task for new behavior.
 

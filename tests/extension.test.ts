@@ -33,6 +33,8 @@ import { Supervisor } from "../src/daemon/supervisor";
 import { cliCommand, consoleCommand } from "../src/extension/cli";
 import type { ExtensionIO } from "../src/extension/commands";
 import {
+	DaemonAuthError,
+	DaemonUnavailableError,
 	editCommand,
 	injectCommand,
 	killCommand,
@@ -43,6 +45,7 @@ import {
 	scheduleListCommand,
 	spawnCommand,
 } from "../src/extension/commands";
+import { ensureDaemon } from "../src/extension/ensure-daemon";
 import ohMyAgentExtension, { managerHostFrom } from "../src/extension/index";
 import type { ManagerComponent } from "../src/extension/manager";
 import {
@@ -56,6 +59,7 @@ import {
 import {
 	createDaemonClient,
 	DAEMON_UNAVAILABLE,
+	markRoomsRead,
 	refreshWidget,
 	WIDGET_KEY,
 } from "../src/extension/widget";
@@ -159,6 +163,7 @@ function stubWorker(name: string): SupervisedWorker & {
 }
 
 interface TestDaemon {
+	context: DaemonContext;
 	socket: ControlSocket;
 	client: ReturnType<typeof createDaemonClient>;
 	supervisor: Supervisor;
@@ -360,6 +365,15 @@ async function startDaemon(
 	const stateDir = join(dir, "oh-my-agent");
 	await mkdir(stateDir, { recursive: true });
 	const socketPath = join(stateDir, "daemon.sock");
+	// The catalog the picker asks for; one entry marked as the daemon default.
+	context.listModels = async () => ({
+		models: [
+			{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
+			{ provider: "openai", id: "gpt-5", name: "GPT-5" },
+		],
+		default: "openai/gpt-4.1",
+		defaultRoutable: true,
+	});
 	const socket = await startControlSocket({
 		socketPath,
 		context,
@@ -371,6 +385,7 @@ async function startDaemon(
 	await writeFile(join(stateDir, "console-token"), TEST_OPERATOR_TOKEN, "utf8");
 	return {
 		socket,
+		context,
 		client: createDaemonClient(socketPath),
 		supervisor,
 		workers,
@@ -646,6 +661,18 @@ describe("status widget", () => {
 			{ name: "reviewer" },
 		]);
 		daemon.workers.get("reviewer")?.setState("parked");
+		// Posted before the first refresh, which is what fixes the cursor's
+		// baseline: history the operator never had a chance to miss is not
+		// unread, and counting it made the number the whole transcript.
+		await daemon.client.call("rooms_post", {
+			room: "#general",
+			body: "history nobody missed",
+		});
+
+		const io = fakeIo();
+		await refreshWidget(daemon.client, io);
+		expect(io.widgets[WIDGET_KEY]?.join(" ") ?? "").toContain("0 unread");
+
 		await daemon.client.call("rooms_post", {
 			room: "#general",
 			body: "unread one",
@@ -654,8 +681,6 @@ describe("status widget", () => {
 			room: "#general",
 			body: "unread two",
 		});
-
-		const io = fakeIo();
 		await refreshWidget(daemon.client, io);
 
 		const lines = io.widgets[WIDGET_KEY];
@@ -665,6 +690,28 @@ describe("status widget", () => {
 		expect(text).toContain("1 parked");
 		expect(text).toContain("2 unread");
 		expect(text).not.toContain("token=");
+	});
+
+	test("accumulates across refreshes until the operator reads a room", async () => {
+		const daemon = await startDaemon([
+			{ name: "researcher", rooms: ["#general"] },
+		]);
+		const io = fakeIo();
+		await refreshWidget(daemon.client, io);
+
+		await daemon.client.call("rooms_post", { room: "#general", body: "one" });
+		await refreshWidget(daemon.client, io);
+		expect(io.widgets[WIDGET_KEY]?.join(" ") ?? "").toContain("1 unread");
+
+		// A second arrival adds to the count rather than replacing it: the
+		// operator has still not seen the first one.
+		await daemon.client.call("rooms_post", { room: "#general", body: "two" });
+		await refreshWidget(daemon.client, io);
+		expect(io.widgets[WIDGET_KEY]?.join(" ") ?? "").toContain("2 unread");
+
+		markRoomsRead(daemon.client);
+		await refreshWidget(daemon.client, io);
+		expect(io.widgets[WIDGET_KEY]?.join(" ") ?? "").toContain("0 unread");
 	});
 });
 
@@ -1260,6 +1307,39 @@ describe("editing flows", () => {
 		expect(io.editors[1]?.prefill).toBe(removedModel);
 	});
 
+	test("picking the marked default stores the bare selector", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }], {
+			definitions: [definition()],
+		});
+		const io = fakeIo();
+		io.selectAnswers = ["Model", "openai/gpt-4.1 (default)"];
+		await editCommand(daemon.client, io, "alpha");
+		const fetched = await daemon.client.call<{
+			definition: { model?: string[] };
+		}>("definition_get", { name: "alpha" });
+		expect(fetched.definition.model).toEqual(["openai/gpt-4.1"]);
+	});
+
+	test("an unroutable default is offered, but labelled as such", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }], {
+			definitions: [definition()],
+		});
+		daemon.context.listModels = async () => ({
+			models: [{ provider: "openai", id: "gpt-5", name: "GPT-5" }],
+			default: "durindoor/cx/gpt-5.6-sol",
+			defaultRoutable: false,
+		});
+		const io = fakeIo();
+		io.selectAnswers = ["Model", "openai/gpt-5"];
+		await editCommand(daemon.client, io, "alpha");
+		expect(io.selects[1]?.options).toContain(
+			"durindoor/cx/gpt-5.6-sol (default, not routable by the daemon)",
+		);
+		expect(io.selects[1]?.options).not.toContain(
+			"durindoor/cx/gpt-5.6-sol (default)",
+		);
+	});
+
 	test("model editing selects a configured role or free input", async () => {
 		const daemon = await startDaemon([{ name: "alpha" }], {
 			definitions: [definition()],
@@ -1267,9 +1347,14 @@ describe("editing flows", () => {
 		const configured = fakeIo();
 		configured.selectAnswers = ["Model", "anthropic/claude-sonnet-4-5"];
 		await editCommand(daemon.client, configured, "alpha");
+		// The configured values first, then the daemon's catalog with the
+		// default marked, then free text. A picker that only offered what was
+		// already configured could not change anything.
 		expect(configured.selects[1]?.options).toEqual([
 			"@review",
 			"anthropic/claude-sonnet-4-5",
+			"openai/gpt-4.1 (default)",
+			"openai/gpt-5",
 			"Enter another model…",
 		]);
 
@@ -1466,6 +1551,60 @@ describe("/manage degradations", () => {
 		expect(options?.overlay).toBe(true);
 		expect(options?.overlayOptions).toEqual({ fullscreen: true });
 		expect(io.notices).toEqual([]);
+	});
+});
+
+describe("operator token faults", () => {
+	test("a missing token against a live socket is an auth fault, not an absent daemon", async () => {
+		const daemon = await startDaemon([{ name: "researcher" }]);
+		// The exact state an operator hit: the daemon is up and answering, but
+		// the token file it minted is gone. Reporting that as "not running" is
+		// what made every session start spawn a second daemon, which then died
+		// on the pidfile the live one still held.
+		await rm(join(daemon.agentDir, "oh-my-agent", "console-token"), {
+			force: true,
+		});
+		const client = createDaemonClient(
+			join(daemon.agentDir, "oh-my-agent", "daemon.sock"),
+		);
+
+		const failure = await client.call("status", {}).then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		expect(failure).toBeInstanceOf(DaemonAuthError);
+		expect(failure).not.toBeInstanceOf(DaemonUnavailableError);
+		expect((failure as Error).message).toContain("console-token");
+
+		// And `ensureDaemon` must not answer that by starting anything.
+		const spawned: unknown[] = [];
+		await expect(
+			ensureDaemon(client, {
+				spawn: async (request) => {
+					spawned.push(request);
+					return { exitCode: 0, stdout: "", stderr: "" };
+				},
+				agentDir: () => daemon.agentDir,
+			}),
+		).rejects.toBeInstanceOf(DaemonAuthError);
+		expect(spawned).toEqual([]);
+	});
+
+	test("the widget names the token fault instead of the daemon-down sentence", async () => {
+		const daemon = await startDaemon([{ name: "researcher" }]);
+		await rm(join(daemon.agentDir, "oh-my-agent", "console-token"), {
+			force: true,
+		});
+		const client = createDaemonClient(
+			join(daemon.agentDir, "oh-my-agent", "daemon.sock"),
+		);
+
+		const io = fakeIo();
+		await refreshWidget(client, io);
+
+		const text = io.widgets[WIDGET_KEY]?.join(" ") ?? "";
+		expect(text).toContain("console-token");
+		expect(text).not.toContain(DAEMON_UNAVAILABLE);
 	});
 });
 

@@ -74,6 +74,9 @@ async function discoverBrokerConfig(
 	}
 }
 
+/** How long each broker probe may take before the boot gives up on it. */
+const PROBE_TIMEOUT_MS = 5_000;
+
 /**
  * Prove the discovered broker is both reachable and willing to accept the
  * token before the daemon commits to it. A daemon that discovers a broker it
@@ -81,12 +84,19 @@ async function discoverBrokerConfig(
  * broker would strand every credential the user expected to share.
  */
 async function probeBroker(url: string, token: string): Promise<void> {
-	const health = await fetch(`${url}/v1/healthz`);
+	// Bounded: this runs before the pidfile is claimed and before any listener
+	// opens, with the launcher — and through it the TUI's session start —
+	// holding a pipe open for the readiness line. A broker that accepts the
+	// connection and then never answers would hang all three.
+	const health = await fetch(`${url}/v1/healthz`, {
+		signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+	});
 	if (!health.ok)
 		throw new Error(`Auth broker at ${url} is unhealthy: ${health.status}`);
 
 	const snapshot = await fetch(`${url}/v1/snapshot`, {
 		headers: { Authorization: `Bearer ${token}` },
+		signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
 	});
 	if (snapshot.status === 401 || snapshot.status === 403) {
 		throw new Error(

@@ -111,6 +111,7 @@ const VALID_PARAMS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 		expectedRevision: 1,
 	},
 	schedules_list: {},
+	models_list: {},
 	schedules_arm: { scheduleId: "sched-1", enabled: true },
 	kill: { name: "researcher" },
 	bump: { account: "acct-1", budgetUsd: 5 },
@@ -214,6 +215,10 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 			updatedAt: 1750000001000,
 		},
 	},
+	models_list: {
+		models: [{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" }],
+		default: "openai/gpt-4.1",
+	},
 	schedules_list: {
 		schedules: [
 			{
@@ -244,7 +249,7 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 // ---------------------------------------------------------------------------
 
 describe("declared method set", () => {
-	test("is exactly the twenty-four contracted methods", () => {
+	test("is exactly the twenty-five contracted methods", () => {
 		expect(([...METHOD_NAMES] as string[]).sort()).toEqual(
 			[
 				"agent_create",
@@ -263,6 +268,7 @@ describe("declared method set", () => {
 				"inject",
 				"rooms_list",
 				"logs_tail",
+				"models_list",
 				"rooms_post",
 				"room_plan_create",
 				"room_plan_update",

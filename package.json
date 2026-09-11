@@ -30,21 +30,20 @@
 		"package.json",
 		"src",
 		"skills",
-		"patches",
 		"LICENSE",
 		"CHANGELOG.md",
 		"README.md"
 	],
 	"peerDependencies": {
-		"@oh-my-pi/pi-ai": "^18.0.7",
-		"@oh-my-pi/pi-coding-agent": "^18.0.7",
-		"@oh-my-pi/pi-utils": "^18.0.7"
+		"@oh-my-pi/pi-ai": "^18.1.0",
+		"@oh-my-pi/pi-coding-agent": "^18.1.0",
+		"@oh-my-pi/pi-utils": "^18.1.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.11",
-		"@oh-my-pi/pi-ai": "^18.0.7",
-		"@oh-my-pi/pi-coding-agent": "^18.0.7",
-		"@oh-my-pi/pi-utils": "^18.0.7",
+		"@oh-my-pi/pi-ai": "^18.1.17",
+		"@oh-my-pi/pi-coding-agent": "^18.1.17",
+		"@oh-my-pi/pi-utils": "^18.1.17",
 		"@types/bun": "latest",
 		"puppeteer-core": "^25.9.0",
 		"typescript": "latest"
@@ -71,8 +70,5 @@
 		"extensions": [
 			"src/extension/index.ts"
 		]
-	},
-	"patchedDependencies": {
-		"@oh-my-pi/pi-coding-agent@18.0.7": "patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch"
 	}
 }

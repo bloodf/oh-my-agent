@@ -24,6 +24,8 @@
  *
  * @Environment bun
  */
+
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
@@ -53,6 +55,7 @@ import type {
 	KillResult,
 	LogsTailResult,
 	MethodName,
+	ModelsListResult,
 	RoomsListResult,
 	SchedulesArmResult,
 	SchedulesListResult,
@@ -61,6 +64,7 @@ import type {
 } from "../src/shared/protocol";
 import { ERROR_CODE, PROTOCOL_VERSION } from "../src/shared/protocol";
 import { METHODS } from "../src/shared/protocol-schemas";
+import { PACKAGE_VERSION } from "../src/shared/version";
 import {
 	controlCall,
 	operatorIdentities,
@@ -602,9 +606,204 @@ describe("bootDaemon — composition and the control socket", () => {
 		});
 		cleanups.push(() => handle.close());
 
-		// The operator needs a live socket to find out what failed and why.
+		// The operator needs a live socket to find out what failed and why —
+		// and "why" is on the wire, not only in the daemon's own log: a peer
+		// that threw on start is reported stopped with the reason attached,
+		// rather than being silently missing from status altogether.
 		const status = await call<StatusResult>(handle.socketPath, "status");
-		expect(status.agents.map((agent) => agent.name)).toEqual(["reviewer"]);
+		expect(status.agents.map((agent) => agent.name).sort()).toEqual([
+			"broken",
+			"reviewer",
+		]);
+		const broken = status.agents.find((agent) => agent.name === "broken");
+		expect(broken?.state).toBe("stopped");
+		expect(broken?.lastError).toContain("cannot materialize");
+		expect(
+			status.agents.find((agent) => agent.name === "reviewer")?.lastError,
+		).toBeUndefined();
+	});
+
+	test("seeded staff peers boot on the daemon's default model; a declared model is left alone", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer", { model: "openai/gpt-4.1" });
+		const received = new Map<string, string | undefined>();
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: await tempAgentDir(),
+			seedDefaultPeers: true,
+			defaultModel: "acme/default-1",
+			workerFactory: async (options) => {
+				received.set(options.peer.name, options.model);
+				return {
+					name: options.peer.name,
+					state: "running",
+					prompt: async () => {},
+					park: async () => {},
+					resume: async () => {},
+					stop: async () => {},
+				};
+			},
+		});
+		cleanups.push(() => handle.close());
+
+		const status = await call<StatusResult>(handle.socketPath, "status");
+		const byName = new Map(status.agents.map((a) => [a.name, a]));
+		for (const name of [
+			"staff-backend",
+			"staff-frontend",
+			"staff-pm",
+			"staff-qa",
+		]) {
+			// Ready by default: running, on the operator's OMP default, with the
+			// override handed to the factory only because the definition has none.
+			expect(byName.get(name)?.state).toBe("running");
+			expect(byName.get(name)?.model).toBe("acme/default-1");
+			expect(received.get(name)).toBe("acme/default-1");
+		}
+		// The operator's own choice always wins and is never overridden.
+		expect(byName.get("reviewer")?.model).toBe("openai/gpt-4.1");
+		expect(received.get("reviewer")).toBeUndefined();
+	});
+
+	test("models_list answers a catalog and the daemon default over the real socket", async () => {
+		const agentDir = await tempAgentDir();
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: await tempAgentDir(),
+			workerFactory: stubWorkerFactory().factory,
+			defaultModel: "acme/default-1",
+		});
+		cleanups.push(() => handle.close());
+
+		const listed = await call<ModelsListResult>(
+			handle.socketPath,
+			"models_list",
+		);
+		expect(Array.isArray(listed.models)).toBe(true);
+		expect(listed.default).toBe("acme/default-1");
+		// Nothing routes to acme here, and the answer says so rather than
+		// marking a default the operator's peers would fail on.
+		expect(listed.defaultRoutable).toBe(false);
+	});
+
+	test("the default model reaches the scoped inference gateway on the real RPC path", async () => {
+		// No worker factory: the daemon's own RPC path, where a per-worker
+		// inference gateway is scoped to the peer's model before the worker is
+		// built. That gateway used to read the definition and refuse a peer
+		// with no `model:` outright, so the default never reached it — and a
+		// stub-factory test never exercised it.
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		// Written by hand: `writePeer` always renders a model, and a peer with
+		// none is exactly the case under test.
+		await writeFile(
+			join(agentDir, "oh-my-agent", "agents", "modelless.md"),
+			'---\nname: "modelless"\ndescription: "No model."\nspawns: ["scout"]\n---\nYou are modelless.\n',
+			"utf8",
+		);
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: await tempAgentDir(),
+			defaultModel: "acme/default-1",
+		});
+		cleanups.push(() => handle.close());
+
+		const status = await call<StatusResult>(handle.socketPath, "status");
+		const peer = status.agents.find((agent) => agent.name === "modelless");
+		// It may not start here — no credential routes to acme — but the reason
+		// must be about that model, never "declares no model".
+		expect(peer?.lastError ?? "").not.toContain("declares no model");
+		expect(peer?.lastError ?? peer?.model ?? "").toContain("acme/default-1");
+		// And the reason names where the choice lives, since this peer never
+		// chose the model itself.
+		expect(peer?.lastError ?? "").toContain("OMP's default model");
+		expect(peer?.lastError ?? "").toContain("/edit modelless");
+	});
+
+	test("a harness boot seeds nothing", async () => {
+		const { handle } = await boot();
+		const status = await call<StatusResult>(handle.socketPath, "status");
+		expect(status.agents.map((a) => a.name)).not.toContain("staff-pm");
+	});
+
+	test("a deleted operator token is restored on the next request", async () => {
+		const { handle, agentDir } = await boot();
+		const stateDir = join(agentDir, "oh-my-agent");
+		const tokenPath = join(stateDir, "console-token");
+		const minted = await operatorToken(stateDir);
+
+		// The state an operator was left in: a live daemon whose credential file
+		// is gone, so every surface authenticates against nothing and reads as a
+		// dead daemon. The bytes are the ones minted at boot, so a client that
+		// already holds the token is not silently locked out by the repair.
+		await rm(tokenPath, { force: true });
+		expect(existsSync(tokenPath)).toBe(false);
+
+		// Sent with the token this caller already holds, because that is the
+		// only kind of caller left once the file is gone — the helpers read it
+		// from disk on every call.
+		const response = await fetch("http://localhost/rpc", {
+			unix: handle.socketPath,
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${minted}`,
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "status",
+				params: {},
+			}),
+		});
+		expect(response.status).toBe(200);
+
+		expect(existsSync(tokenPath)).toBe(true);
+		expect(await operatorToken(stateDir)).toBe(minted);
+	});
+
+	test("status reports the daemon's own version", async () => {
+		const { handle } = await boot();
+		// A daemon outlives the session that started it, so the code answering
+		// can be older than the plugin asking; the version is how a client finds
+		// that out instead of guessing at strange behavior.
+		const status = await call<StatusResult>(handle.socketPath, "status");
+		expect(status.version).toBe(PACKAGE_VERSION);
+	});
+
+	test("a failing shutdown step does not abandon the ones after it", async () => {
+		const agentDir = await tempAgentDir();
+		const logs: string[] = [];
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: await tempAgentDir(),
+			workerFactory: stubWorkerFactory().factory,
+			logger: (message) => logs.push(message),
+		});
+
+		// A real failure partway through teardown, of the same family as the one
+		// seen in the field (a SQLite `disk I/O error` closing open runs): a
+		// second connection holds the database exclusively, so the daemon's own
+		// last writes and its `close()` throw. Everything after that used to be
+		// abandoned — including the pidfile, which the next boot then met as a
+		// claim it could not take.
+		const blocker = new Database(join(agentDir, "oh-my-agent", "daemon.db"));
+		blocker.exec("BEGIN EXCLUSIVE");
+		try {
+			await handle.close();
+		} finally {
+			blocker.exec("ROLLBACK");
+			blocker.close();
+		}
+
+		expect(logs.some((line) => line.includes("shutdown step"))).toBe(true);
+		// The file-level steps run after the database ones, and still ran.
+		expect(existsSync(handle.pidPath)).toBe(false);
+		expect(existsSync(handle.socketPath)).toBe(false);
 	});
 
 	test("registers every peer the store lists, with its rooms", async () => {
@@ -670,21 +869,13 @@ describe("bootDaemon — composition and the control socket", () => {
 		};
 
 		const reacted = await Promise.all([
-			call<ChatReactResult & { reacted: true }>(
-				handle.socketPath,
-				"chat_react",
-				params,
-				1,
-			),
-			call<ChatReactResult & { reacted: true }>(
-				handle.socketPath,
-				"chat_react",
-				params,
-				2,
-			),
+			call<ChatReactResult>(handle.socketPath, "chat_react", params, 1),
+			call<ChatReactResult>(handle.socketPath, "chat_react", params, 2),
 		]);
+		// `added` is the only field that carries information here: `reacted` was
+		// a compile-time constant on this method, so it said the same thing for
+		// a fresh reaction and a duplicate.
 		expect(reacted.map(({ added }) => added).sort()).toEqual([false, true]);
-		expect(reacted.every(({ reacted }) => reacted)).toBe(true);
 
 		for (const method of ["chat_read", "chat_wait"] as const) {
 			const result = await call<ChatReadResult | ChatWaitResult>(
@@ -1043,6 +1234,23 @@ describe("bootDaemon — composition and the control socket", () => {
 		expect(lastTwo.lines).toEqual(["line 59", "line 60"]);
 	});
 
+	test("logs_tail reaches a real supervised worker's stderr", async () => {
+		const agentDir = await tempAgentDir();
+		await writePeer(agentDir, "reviewer");
+		const { handle, workers } = await boot({ agentDir });
+		workers.get("reviewer")?.setStderr("worker said something");
+
+		// Through the daemon's own composition, not a hand-built peer record:
+		// the run-recording wrapper the daemon puts around every worker forwards
+		// a fixed set of accessors, and `stderr` was not among them — so this
+		// answered an empty tail for every peer, however much it had written,
+		// while a test that built its own record passed.
+		const tail = await call<LogsTailResult>(handle.socketPath, "logs_tail", {
+			name: "reviewer",
+		});
+		expect(tail.lines).toEqual(["worker said something"]);
+	});
+
 	test("inject delivers to running workers and queues through the supervisor", async () => {
 		const dir = await tempAgentDir();
 		const rooms = await RoomStore.open(join(dir, "inject.db"));
@@ -1273,6 +1481,7 @@ describe("bootDaemon — protocol errors", () => {
 				expectedRevision: 1,
 			},
 			schedules_list: {},
+			models_list: {},
 			logs_tail: { name: "reviewer" },
 			inject: { name: "reviewer", message: "focus" },
 			schedules_arm: { scheduleId: "missing", enabled: false },

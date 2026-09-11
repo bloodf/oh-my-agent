@@ -4,7 +4,7 @@
 
 ![First run](../diagrams/first-run.svg)
 
-From install to a spawned example agent and a room post. Assumes [Bun](https://bun.sh) >= 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` >= 18.0.7) are already installed, and that OMP can already call the model you put in the definition.
+From install to a spawned example agent and a room post. Assumes [Bun](https://bun.sh) >= 1.3.14 and [OMP](https://omp.sh) (`@oh-my-pi/pi-coding-agent` >= 18.1.0) are already installed, and that OMP can already call the model you put in the definition.
 
 If a term is new, skim [Concepts](concepts.md) after this page.
 
@@ -54,6 +54,20 @@ oh-my-agent daemon not running — start it with `omp-agent daemon`.
 ```
 
 The TUI already tried to start it. That sentence means the auto-start failed; run `omp-agent daemon` from PATH as the fallback.
+
+## The default team
+
+The daemon seeds four peers into `~/.omp/agent/oh-my-agent/agents/` on its first boot and starts them: `staff-pm` (`#product`), `staff-backend` (`#backend`), `staff-frontend` (`#frontend`), and `staff-qa` (`#qa`), all also in `#team`. They declare no model, so they run on OMP's default model role, the one `/model` sets. `omp-agent agents` shows the model each one is actually on.
+
+```
+/rooms post #team @staff-pm scope a login page with email and password
+```
+
+To put one on a different model, `/edit staff-backend` → Model. The picker lists every model the daemon's credentials can reach, with the default marked; `omp-agent models` prints the same list. The seed is offered once: a definition you edit is never overwritten, and one you delete is not recreated.
+
+If a staff peer shows `stopped` with an error naming OMP's default model, the daemon cannot route to that model: it only routes providers in `~/.omp/agent/models.yml` and broker credentials, not ones a TUI extension adds. Add the provider to `models.yml`, or pick a listed model with `/edit <name>` → Model.
+
+The rest of this guide writes a peer of your own.
 
 ## 3. Install the native scout
 

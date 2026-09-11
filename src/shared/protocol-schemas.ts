@@ -55,6 +55,8 @@ import type {
 	LogsTailParams,
 	LogsTailResult,
 	MethodName,
+	ModelsListParams,
+	ModelsListResult,
 	RoomMessage,
 	RoomPlanCreateParams,
 	RoomPlanCreateResult,
@@ -139,6 +141,8 @@ function explainAgentStatus(value: unknown): string | null {
 		);
 		if (invalid !== -1) return `children[${invalid}]`;
 	}
+	if (value.lastError !== undefined && typeof value.lastError !== "string")
+		return "lastError";
 	return null;
 }
 
@@ -187,6 +191,11 @@ function explainRoomInfo(value: unknown): string | null {
 	if (!isNonEmptyString(value.id)) return "id";
 	if (value.kind !== "channel" && value.kind !== "dm") return "kind";
 	if (!isNonEmptyString(value.name)) return "name";
+	// Declared on `RoomInfo` and unchecked until now, though it selects the
+	// working directory a peer runs in: a non-string crossing the boundary
+	// reached that decision unexamined.
+	if (value.workspace !== undefined && typeof value.workspace !== "string")
+		return "workspace";
 	return null;
 }
 
@@ -709,6 +718,7 @@ export const METHODS: Record<MethodName, MethodContract> = {
 			const base = checkFields(v, [
 				(r) => requireNumber(r, "protocolVersion"),
 				(r) => requireNumber(r, "uptimeMs"),
+				(r) => optionalString(r, "version"),
 			]);
 			if (base) return fail(base.field, base.message);
 			const agents = checkList(v.agents, "agents", explainAgentStatus);
@@ -743,8 +753,15 @@ export const METHODS: Record<MethodName, MethodContract> = {
 					(r) => optionalNumber(r, "timeoutMs"),
 				]),
 			),
-		validateResult: (v): Validation<ChatWaitResult> =>
-			validateMessagesResult(v),
+		validateResult: (v): Validation<ChatWaitResult> => {
+			const messages = validateMessagesResult(v);
+			if (!messages.ok) return messages;
+			const latest = checkFields(messages.value, [
+				(r) => optionalNumber(r, "latestId"),
+			]);
+			if (latest) return fail(latest.field, latest.message);
+			return ok(messages.value as ChatWaitResult);
+		},
 	},
 	chat_react: {
 		validateParams: validateReactionParams,
@@ -960,6 +977,28 @@ export const METHODS: Record<MethodName, MethodContract> = {
 			),
 		validateResult: (v): Validation<RoomPlanUpdateResult> =>
 			validatePlanResult(v) as Validation<RoomPlanUpdateResult>,
+	},
+	models_list: {
+		validateParams: (v): Validation<ModelsListParams> => validateNoParams(v),
+		validateResult: (v): Validation<ModelsListResult> => {
+			if (!isRecord(v)) return fail("result", "expected an object");
+			const base = checkFields(v, [(r) => optionalString(r, "default")]);
+			if (base) return fail(base.field, base.message);
+			if (
+				v.defaultRoutable !== undefined &&
+				typeof v.defaultRoutable !== "boolean"
+			)
+				return fail("defaultRoutable", "expected a boolean");
+			const models = checkList(v.models, "models", (value) => {
+				if (!isRecord(value)) return "";
+				if (!isNonEmptyString(value.provider)) return "provider";
+				if (!isNonEmptyString(value.id)) return "id";
+				if (typeof value.name !== "string") return "name";
+				return null;
+			});
+			if (!models.ok) return fail(models.field, models.message);
+			return ok(v as unknown as ModelsListResult);
+		},
 	},
 	schedules_list: {
 		validateParams: (v): Validation<SchedulesListParams> => validateNoParams(v),

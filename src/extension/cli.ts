@@ -47,6 +47,14 @@ export async function cliCommand(
 			stdout: (text) => chunks.push(text),
 			stderr: (text) => chunks.push(text),
 		},
+		// The shell binary reads a `-` argument from stdin; inside the TUI that
+		// stdin belongs to OMP's own input loop, so the default would park the
+		// session forever waiting on a stream nobody is going to close.
+		readStdin: async () => {
+			throw new Error(
+				"stdin is unavailable inside the TUI; pass a file path instead of -.",
+			);
+		},
 	});
 	const text = chunks.join("").trimEnd();
 	if (text.length > 0) io.notify(text);

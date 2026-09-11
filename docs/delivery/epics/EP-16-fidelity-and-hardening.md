@@ -42,6 +42,7 @@ The two-model review (sol + m3) found the console advertises thread replies and 
 
 | Task | Title | Status |
 |---|---|---|
+| [T-1620](../tasks/T-1620-default-staff-team.md) | A default staff team, ready on first boot, on the operator's model | Done |
 | [T-1601](../tasks/T-1601-console-thread-parentage.md) | Console thread replies preserve parentage | Done |
 | [T-1602](../tasks/T-1602-reaction-removal-frames.md) | Reaction removal frames | Done |
 | [T-1603](../tasks/T-1603-attribution-enforcement.md) | Enforce attribution from connection identity | Done |
@@ -60,3 +61,4 @@ The two-model review (sol + m3) found the console advertises thread replies and 
 | [T-1616](../tasks/T-1616-control-cap-json-rpc.md) | A saturated audit stays readable on the control socket | Done |
 | [T-1617](../tasks/T-1617-stopped-worker-backlog.md) | A stopped worker holds its backlog instead of failing the post | Done |
 | [T-1618](../tasks/T-1618-positive-budget-bump.md) | A budget bump must be a positive number | Done |
+| [T-1619](../tasks/T-1619-runtime-liveness-review.md) | A live daemon, its peers, and its console behave as they report | Done |

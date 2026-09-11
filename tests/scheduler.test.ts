@@ -56,6 +56,24 @@ describe("nextCronTime", () => {
 		expect(() => nextCronTime("* * *", Date.now())).toThrow();
 	});
 
+	test("refuses an unsatisfiable date quickly instead of scanning ten years", () => {
+		// February never has a 30th. The minute-by-minute scan below it is
+		// synchronous and ten years long, so this used to freeze the daemon for
+		// seconds inside `armCron` at boot and then throw anyway.
+		const started = Date.now();
+		expect(() => nextCronTime("0 0 30 2 *", Date.now())).toThrow(
+			/never occurs/,
+		);
+		expect(Date.now() - started).toBeLessThan(250);
+	});
+
+	test("keeps an impossible day-of-month when a weekday can still match", () => {
+		// Vixie semantics: with both day fields restricted they are an OR, so
+		// every Monday still matches even though February has no 30th.
+		const next = nextCronTime("0 0 30 2 1", Date.UTC(2026, 0, 1));
+		expect(new Date(next).getUTCDay()).toBe(1);
+	});
+
 	test("rejects expression with too many fields", () => {
 		expect(() => nextCronTime("* * * * * *", Date.now())).toThrow();
 	});
@@ -382,6 +400,52 @@ describe("Scheduler", () => {
 // QuotaBlock (exported from broker snapshots)
 // ---------------------------------------------------------------------------
 
+describe("Scheduler: long delays", () => {
+	test("a cron further out than a timer can hold is chained, not clamped", () => {
+		const clock = makeFakeClock(Date.UTC(2026, 0, 2));
+		const { scheduler, captured } = makeScheduler(clock);
+		// Every 1 January: about a year out, well past the 2^31-1 ms a timer
+		// can hold. Passing that delay straight to `setTimeout` clamps it to
+		// 1ms, so the job fired at once, re-armed, and fired again — a hot loop
+		// that burned CPU for as long as the daemon lived.
+		scheduler.add("yearly", { cron: "0 0 1 1 *", handler: () => {} });
+		scheduler.start();
+
+		const armed = captured.at(-1);
+		expect(armed).toBeDefined();
+		expect(armed?.delayMs).toBe(2_147_483_647);
+
+		// Firing that hop re-arms for the remainder rather than running the job.
+		let fired = 0;
+		scheduler.stop();
+		const { scheduler: second, captured: secondCaptured } =
+			makeScheduler(clock);
+		second.add("yearly", {
+			cron: "0 0 1 1 *",
+			handler: () => {
+				fired += 1;
+			},
+		});
+		second.start();
+		clock.advance(2_147_483_647);
+		secondCaptured.at(-1)?.callback();
+		expect(fired).toBe(0);
+		expect(secondCaptured.at(-1)?.delayMs).toBeLessThanOrEqual(2_147_483_647);
+		second.stop();
+	});
+
+	test("a one-shot past the timer bound is chained too", () => {
+		const clock = makeFakeClock(1_000);
+		const { scheduler, captured } = makeScheduler(clock);
+		// Quota resume deadlines come from a provider and can be far out.
+		scheduler.start();
+		scheduler.addOnce("quota-resume:acct", 1_000 + 5_000_000_000, () => {});
+
+		expect(captured.at(-1)?.delayMs).toBe(2_147_483_647);
+		scheduler.stop();
+	});
+});
+
 describe("QuotaBlock", () => {
 	test("QuotaBlock is exported with required fields", () => {
 		const block: QuotaBlock = {
@@ -672,6 +736,57 @@ describe("AccountStateMachine", () => {
 // ---------------------------------------------------------------------------
 // Vixie cron DOM/DOW OR semantics
 // ---------------------------------------------------------------------------
+
+describe("AccountStateMachine: park state with no runs", () => {
+	test("a metered account with no runs still reports itself parked", () => {
+		const parks: string[][] = [];
+		const machine = new AccountStateMachine({
+			accountId: "acct",
+			mode: "metered",
+			now: () => 1_000,
+			onWarning: () => {},
+			onPark: (ids) => parks.push(ids),
+			onResume: () => {},
+		});
+
+		// No runs, so the park callback never fires. The registry used to keep
+		// its own copy of the flag and only set it from that callback, so it
+		// went on believing the account was live and kept waking work against a
+		// machine that had parked.
+		machine.updateMeter(1);
+		machine.tick();
+
+		expect(parks).toEqual([]);
+		expect(machine.isParked()).toBe(true);
+	});
+
+	test("clearing the last block unparks a subscription account immediately", () => {
+		const now = 1_000;
+		const machine = new AccountStateMachine({
+			accountId: "acct",
+			mode: "subscription",
+			now: () => now,
+			onWarning: () => {},
+			onPark: () => {},
+			onResume: () => {},
+		});
+		machine.addRun("reviewer");
+		machine.applyBlock({
+			credentialId: 1,
+			providerKey: "anthropic",
+			scope: "org",
+			blockedUntilMs: now + 60_000,
+		});
+		expect(machine.isParked()).toBe(true);
+
+		// The armed resume timer carries a generation this clear supersedes, so
+		// it fires into a no-op: without re-evaluating here the account stays
+		// parked until something else happens to tick it.
+		machine.clearBlock(1, "anthropic", "org");
+
+		expect(machine.isParked()).toBe(false);
+	});
+});
 
 describe("Vixie cron: DOM and DOW both restricted", () => {
 	// Standard Vixie cron rule:

@@ -12,7 +12,7 @@ Both upstream issues are filed — the resolver corruption with T-1501's repro, 
 
 - [The repro task whose README is the issue body](../../../docs/delivery/tasks/T-1501-repro-import-meta-resolve.md)
 - [Workaround site one](../../../src/worker/lifecycle.ts)
-- [Workaround site two](../../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch)
+- [Workaround site two, the pid patch, removed by T-1504](../../../docs/delivery/tasks/T-1504-drop-rpc-pid-patch.md)
 
 ## Files this task may change
 
@@ -42,7 +42,7 @@ Evidence:
 | Claim | Anchor |
 |---|---|
 | [Resolver corruption filed as oven-sh/bun#41201](https://github.com/oven-sh/bun/issues/41201) | [`repro/bun-plugin-memo/README.md`](../../../repro/bun-plugin-memo/README.md) |
-| [RpcClient.pid accessor requested as can1357/oh-my-pi#10597](https://github.com/can1357/oh-my-pi/issues/10597) | [`patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch`](../../../patches/@oh-my-pi%2Fpi-coding-agent@18.0.7.patch) |
+| [RpcClient.pid accessor requested as can1357/oh-my-pi#10597](https://github.com/can1357/oh-my-pi/issues/10597) | `d374d76` |
 
 ## Out of scope
 

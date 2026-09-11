@@ -15,7 +15,7 @@ A peer definition is one markdown file: YAML frontmatter plus a body. The body i
 |---|---|---|
 | `name` | string | Required. The peer's identity. |
 | `description` | string | Required. One line, what it does. |
-| `model` | string | Fully qualified `provider/id`, e.g. `"anthropic/claude-sonnet-4-5"`; the provider determines credential-gateway routing for the worker. |
+| `model` | string | Optional. Fully qualified `provider/id`, e.g. `"anthropic/claude-sonnet-4-5"`; the provider determines credential-gateway routing for the worker. Absent means OMP's default model role, the one `/model` sets; `omp-agent models` lists what can be chosen. |
 | `tools` | string[] | **Replaces** the default set. A restricted list gets `task` appended automatically by the parser, so delegation always survives. |
 | `spawns` | `"*"` \| string \| string[] | **Required** by oh-my-agent. In-run subagent allowlist. `"*"` = any; a CSV string or array = allowlist. Missing → `MISSING_SPAWNS`; empty string/array → `EMPTY_SPAWNS`. |
 | `thinking` / `thinkingLevel` | string | Reasoning effort override. |
@@ -34,13 +34,17 @@ A peer definition is one markdown file: YAML frontmatter plus a body. The body i
 | `rooms` | string[] | `INVALID_ROOM` — must be an array of strings, each starting with `#` (channel) or `@` (DM). |
 | `wake` | object | `INVALID_WAKE` — plain object, only keys `mention` and `rooms`, both boolean. |
 | `autonomy` | object | `INVALID_AUTONOMY` — only keys `maxTurns` (positive **integer**) and `budgetUsd` (positive **finite** number). |
-| `sandbox` | boolean \| object | `INVALID_SANDBOX` — `true`/`false`, or an object with only `enabled` (boolean) and `extraRoots` (array of **absolute** paths; a relative entry throws `INVALID_WORKSPACE`). |
+| `sandbox` | boolean \| object | `INVALID_SANDBOX` — `true`/`false`, or an object with only `enabled` (boolean), `extraRoots` (array of **absolute** paths; a relative entry throws `INVALID_WORKSPACE`), and `allowUnenforcedNetwork` (boolean). |
 | `mcps` | string[] | `INVALID_ARRAY` — must be a string array. |
 | `skills` | string[] | `INVALID_ARRAY` — names of skills to materialize into the worker root (e.g. `omp-orchestration`). |
 | `schedules` | object[] | `INVALID_SCHEDULE` — each item needs non-empty `cron` and `prompt`; optional `room` must start with `#`/`@` (else `INVALID_ROOM`). Only keys `cron`, `prompt`, `room`. |
 | `automations` | object[] | `INVALID_AUTOMATION` — each item needs non-empty `event` and `prompt`; optional `room` as above. Only keys `event`, `prompt`, `room`. |
 
 Anything else at top level or inside a nested object → `UNKNOWN_KEY`. Malformed YAML or bad native fields → OMP's `AgentParsingError`. `spawns` of the wrong type → `INVALID_TYPE`. Body missing or whitespace-only → `EMPTY_BODY`.
+
+**Schedules run in UTC.** `cron` is a five-field expression evaluated against UTC, not the host's local time: `0 9 * * 1-5` fires at 09:00 UTC on weekdays. A schedule whose date can never occur, such as `0 0 30 2 *`, passes the parser but is refused with `Invalid cron expression: <expr> never occurs` when the daemon arms it.
+
+**Sandboxed peers on Linux need `sandbox.allowUnenforcedNetwork: true`.** The Linux adapter confines the filesystem but cannot enforce the loopback-only network rule the macOS profile does, so without this key a sandboxed peer on Linux refuses to start with `SANDBOX_NETWORK_UNENFORCED`. Setting it accepts a filesystem-only sandbox with an open network. That is a real downgrade: the launch plan still carries a `SANDBOX_NETWORK_UNENFORCED` warning when it is accepted, though no status, log, or console view shows that warning yet. It has no effect on macOS. `sandbox: true` cannot express it; use the object form, e.g. `sandbox: { enabled: true, allowUnenforcedNetwork: true }`.
 
 ## Worked example
 

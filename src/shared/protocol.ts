@@ -50,6 +50,7 @@ export const METHOD_NAMES = [
 	"room_plan_update",
 	"schedules_list",
 	"schedules_arm",
+	"models_list",
 	"kill",
 	"bump",
 	"daemon_stop",
@@ -71,6 +72,15 @@ export interface AgentStatus {
 	pid?: number;
 	parent?: string;
 	children?: string[];
+	/**
+	 * Why this peer is not running, when a start attempt failed.
+	 *
+	 * A boot-time start failure used to exist only as a line in the daemon's
+	 * own log: the operator saw a peer that was simply absent from `status`
+	 * with no way to ask why from any surface. Cleared by the next successful
+	 * start.
+	 */
+	lastError?: string;
 }
 
 export interface RoomMessage {
@@ -124,6 +134,15 @@ export interface StatusResult {
 	protocolVersion: number;
 	agents: AgentStatus[];
 	uptimeMs: number;
+	/**
+	 * The daemon's own package version.
+	 *
+	 * A long-lived daemon outlives plugin upgrades — the operator's install
+	 * ran 1.2.0 for four days against a 1.2.1 plugin tree — and nothing on the
+	 * wire said so. Optional because a daemon older than this field is exactly
+	 * the case a client needs to survive.
+	 */
+	version?: string;
 }
 
 export interface ChatSendParams {
@@ -152,6 +171,17 @@ export interface ChatWaitParams {
 }
 export interface ChatWaitResult {
 	messages: RoomMessage[];
+	/**
+	 * The highest message id this wait considered, whether or not anything
+	 * arrived.
+	 *
+	 * A caller keeping its own read cursor cannot derive this from `messages`:
+	 * a wait that returns nothing tells it neither where "now" was nor where to
+	 * resume, so its next call asks for "after now" again and it never advances
+	 * past an idle moment. Optional because a daemon older than this field
+	 * simply does not send it.
+	 */
+	latestId?: number;
 }
 
 export interface ChatReactionParams {
@@ -288,6 +318,27 @@ export interface RoomPlanUpdateResult {
 }
 
 export type SchedulesListParams = Record<string, never>;
+
+/** One model a peer can be pointed at, as `provider/id`. */
+export interface ModelChoice {
+	provider: string;
+	id: string;
+	name: string;
+}
+export type ModelsListParams = Record<string, never>;
+export interface ModelsListResult {
+	/** Every model the daemon's credentials can route to, sorted by selector. */
+	models: ModelChoice[];
+	/** The `provider/id` a peer with no `model:` runs on, when OMP has one. */
+	default?: string;
+	/**
+	 * Whether `default` appears in `models`. OMP's default may come from a
+	 * TUI extension the daemon's gateway cannot route to; a peer left on it
+	 * fails to start, and a picker that marked it as the default without
+	 * saying so would be sending the operator to that failure.
+	 */
+	defaultRoutable?: boolean;
+}
 export interface SchedulesListResult {
 	schedules: ScheduleInfo[];
 }

@@ -6,6 +6,28 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Added
+
+- A default team ships with the package: `staff-pm`, `staff-backend`, `staff-frontend`, and `staff-qa`, seeded into the user store once on the daemon's first boot, each with its own room and a shared `#team`. Edits and deletions are kept on later boots.
+- A peer with no `model` runs on OMP's default model role, so the default team starts without any configuration. `status` and `agents` name the model a peer actually runs on.
+- `models_list` on the control socket, `omp-agent models`, `/edit <name>` → Model, and the console's agent form all offer every model the daemon's credentials can reach, with the default marked.
+
+### Fixed
+
+- The TUI no longer reports a running daemon as absent. A missing or refused operator token used to read as "not running", so every session start spawned a second daemon that died on the pidfile and logged an uncaught exception. Token faults are now reported as such and never trigger a spawn; a second launch against a live daemon points at it and exits cleanly; and the daemon rewrites `console-token` and `console-url` if they go missing under it.
+- Shutdown runs every teardown step even when one fails, so a SQLite error no longer leaves the pidfile and socket behind.
+- `status` reports the daemon's version and why a peer failed to start, and the TUI warns when the running daemon is older than the plugin. `agents` prints the start failure.
+- The status widget counts messages the operator has not seen, instead of re-reading every message in every room after each turn.
+- A killed peer is no longer brought back to life by a definition change, and no longer counts against its account's quota. Accounts that park or resume with no runs no longer get stuck.
+- Yearly and other long-interval schedules no longer fire in a loop; delays beyond 24.8 days are chained. Dates that can never occur are refused at arm time.
+- `logs_tail` returns worker output; it returned an empty string for every worker. Workers may call `agent_create`, which the toolbelt already instructed them to do.
+- Room databases created before threading are migrated instead of failing every room operation.
+- Sandboxed peers can start on Linux via `sandbox.allowUnenforcedNetwork`, and macOS sandbox profiles can read the OMP CLI and `bun` they run. Worker pids are reported on installs without this repository's OMP patch.
+- The console no longer reads whole room histories on each post, reaction, and connect; its loopback page is no longer cached or leaked by Referer; the address bar drops the token after reading it; and loopback WebSocket upgrades from foreign origins are refused. Pasted chat images reach the model.
+- Web chats work on installs without this repository's OMP patch. They judged liveness from `RpcClient.pid`, which only the patch provides, so on a consumer install every chat was treated as dead: dropped a second after starting and refused every operation as closed.
+- The `RpcClient.pid` patch is removed. Pids come from the launch shim's record, so a checkout and an npm install report them the same way. The OMP peer floor is now 18.1.0, and development runs on 18.1.17.
+- A bare `omp-agent` prints usage instead of starting a daemon. Broker probes and the launcher's readiness wait are bounded, and `daemon restart` no longer deadlocks on a full pipe.
+
 ## [1.2.1] - 2026-09-08
 
 ### Fixed

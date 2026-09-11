@@ -33,6 +33,7 @@ import type {
 	KillResult,
 	LogsTailResult,
 	MethodName,
+	ModelsListResult,
 	RoomsListResult,
 	RoomsPostResult,
 	SchedulesArmResult,
@@ -189,7 +190,16 @@ function formatAgent(agent: AgentStatus): string {
 	]
 		.filter(Boolean)
 		.join(" ");
-	return [agent.name, agent.state, agent.account, tree]
+	// The failure reason last, and only when there is one: a peer that could
+	// not start is the row an operator is looking for, and until it reached the
+	// wire the only record was a line in the daemon's own log.
+	return [
+		agent.name,
+		agent.state,
+		agent.account,
+		tree,
+		agent.lastError === undefined ? "" : `error=${agent.lastError}`,
+	]
 		.filter(Boolean)
 		.join("\t");
 }
@@ -267,6 +277,35 @@ async function audit(
 					`${connection.identity}\t${connection.class}\t${connection.source}\t${connection.connectedAt}`,
 			),
 		].join("\n"),
+	);
+}
+
+/** `models` — what a peer can be pointed at; the default is marked. */
+async function models(
+	client: DaemonClient,
+	io: CliIo,
+	json: boolean,
+): Promise<void> {
+	const result = await client.call<ModelsListResult>("models_list", {});
+	output(
+		io,
+		result,
+		json,
+		result.models
+			.map((model) => {
+				const selector = `${model.provider}/${model.id}`;
+				return selector === result.default
+					? `${selector}\t${model.name}\t(default)`
+					: `${selector}\t${model.name}`;
+			})
+			.concat(
+				result.default !== undefined && result.defaultRoutable === false
+					? [
+							`${result.default}\t(OMP default; not routable by the daemon — add it to models.yml or the broker, or pick one above)`,
+						]
+					: [],
+			)
+			.join("\n"),
 	);
 }
 
@@ -692,18 +731,21 @@ async function consoleUrl(
 	stateDir: string,
 	io: CliIo,
 ): Promise<void> {
+	// Liveness first, unconditionally. `console-url` is removed by a graceful
+	// close but survives a `SIGKILL` or a crash, so a file that exists proves
+	// only that some daemon once served a console — and printing that URL sent
+	// the operator, and the TUI's "Open web UI" action, at a dead port.
+	await client.call("status", {});
 	let url: string;
 	try {
 		url = (await readFile(join(stateDir, CONSOLE_URL_FILE), "utf8")).trim();
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-		await client.call("status", {});
 		throw new DaemonRpcError(
 			"oh-my-agent console is disabled for this daemon.",
 		);
 	}
 	if (url.length === 0) {
-		await client.call("status", {});
 		throw new DaemonRpcError(
 			"oh-my-agent console is disabled for this daemon.",
 		);
@@ -790,17 +832,25 @@ async function daemon(
 		env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
 		stdio: ["ignore", "pipe", "pipe"],
 	});
-	const exitCode = await launcher.exited;
+	// Drained alongside the exit, never after it: both pipes are captured, and
+	// a launcher that writes more than a pipe buffer holds — a stack trace plus
+	// a list of peers that failed to start clears 64 KiB easily — blocks on the
+	// write while this side blocks on the exit, and neither ever moves.
+	const [exitCode, stdout, stderr] = await Promise.all([
+		launcher.exited,
+		new Response(launcher.stdout).text(),
+		new Response(launcher.stderr).text(),
+	]);
 	if (exitCode !== 0) {
-		const stderr = (await new Response(launcher.stderr).text()).trim();
+		const detail = stderr.trim();
 		throw new DaemonRpcError(
-			`oh-my-agent daemon failed to restart (exit ${exitCode})${stderr.length > 0 ? `: ${stderr}` : ""}`,
+			`oh-my-agent daemon failed to restart (exit ${exitCode})${detail.length > 0 ? `: ${detail}` : ""}`,
 		);
 	}
 	// The launcher exits only after the child announces, and the child announces
 	// only once its socket is served — so this line is proof the replacement is
 	// up, not merely spawned.
-	const started = (await new Response(launcher.stdout).text()).trim();
+	const started = stdout.trim();
 	output(
 		io,
 		{ stopped: stopped.pid, socket: started.split("\n", 1)[0] ?? "" },
@@ -871,6 +921,10 @@ export async function runCli(
 			case "agents":
 				if (args.length !== 1) throw new UsageError();
 				await agents(client, io, json);
+				return 0;
+			case "models":
+				if (args.length !== 1) throw new UsageError();
+				await models(client, io, json);
 				return 0;
 			case "agent":
 				await agent(client, args, io, json, readStdin);
