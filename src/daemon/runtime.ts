@@ -55,6 +55,7 @@ import type {
 	AgentSpawnResult,
 	DaemonStopResult,
 	ModelsListResult,
+	PresetsListResult,
 	RoomInfo,
 	ScheduleInfo,
 } from "../shared/protocol";
@@ -78,6 +79,7 @@ import { materializeWorker } from "./materializer";
 import { createOperations } from "./operations";
 import type { PeerDefinitionFields } from "./peer-store";
 import { createPeerStore, resolvePeerStoreRoots } from "./peer-store";
+import { listPresets as listShippedPresets } from "./presets";
 import { nextCronTime, Scheduler } from "./scheduler";
 import type {
 	ControlIdentity,
@@ -1936,6 +1938,9 @@ export async function bootDaemon(
 		 * to the union of credentials, minted per call and revoked after, so
 		 * the listing never leaves a long-lived bearer behind.
 		 */
+		const listPresets = async (): Promise<PresetsListResult> => ({
+			presets: await listShippedPresets(),
+		});
 		const listModels = async (): Promise<ModelsListResult> => {
 			const credentialIds = [
 				...new Set([...providerCredentials.values()].flat()),
@@ -1993,6 +1998,7 @@ export async function bootDaemon(
 			armSchedule,
 			bumpAccount,
 			listModels,
+			listPresets,
 			requestDaemonStop,
 			daemonLog,
 			operations,
@@ -2057,6 +2063,7 @@ export async function bootDaemon(
 				ensureRoom,
 				spawnPeer,
 				listModels,
+				listPresets,
 				// The same object the control socket got, not a second copy.
 				operations,
 				token,

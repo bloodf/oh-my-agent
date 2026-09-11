@@ -39,6 +39,7 @@ import {
 	injectCommand,
 	killCommand,
 	logsCommand,
+	presetCommand,
 	roomsPostCommand,
 	roomsReadCommand,
 	scheduleArmCommand,
@@ -152,6 +153,14 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 		handler: async (args, ctx) => {
 			await spawnCommand(client, ioFrom(ctx.ui), args);
 			await refreshWidget(client, ioFrom(ctx.ui));
+		},
+	});
+
+	pi.registerCommand("preset", {
+		description:
+			"Create a peer from a shipped role preset (lists them when run bare).",
+		handler: async (args, ctx) => {
+			await presetCommand(client, ioFrom(ctx.ui), args);
 		},
 	});
 

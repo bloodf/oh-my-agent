@@ -63,11 +63,13 @@ Shell CLI is optional. Full path, no export:
 
 This install path is the one CI runs against a packed tarball in [`tests/consumer-install.test.ts`](https://github.com/bloodf/oh-my-agent/blob/main/tests/consumer-install.test.ts).
 
-A default team ships with the package and starts on the daemon's first boot: `staff-pm`, `staff-backend`, `staff-frontend`, and `staff-qa`, each in its own room plus a shared `#team`. They run on whatever model you have picked as OMP's default (`/model`), so nothing needs configuring first. Post a brief:
+A default crew ships with the package and starts on the daemon's first boot: `mate`, the first mate you talk to, plus `staff-pm`, `staff-backend`, `staff-frontend`, and `staff-qa`, each in its own room and a shared `#team`. They run on whatever model you have picked as OMP's default (`/model`), so nothing needs configuring first. Talk to the mate:
 
 ```
-/rooms post #team @staff-pm scope a login page with email and password
+/rooms post #bridge @mate add dark mode and fix the flaky login test
 ```
+
+It picks the shape (ship a change, or scout and report), briefs the owner, waits on the rooms, checks the evidence, and reports in `#bridge`. Ten more roles ship as presets that are never seeded: `researcher`, `reviewer`, `security-reviewer`, `tech-writer`, `sre`, `debugger`, `test-engineer`, `designer`, `release-manager`, `data-analyst`. `/preset` copies one under your own name; so do `omp-agent agent create <name> --preset <preset>` and the console's create dialog. The mate hires from the same library when a request needs a role the staff do not cover.
 
 Pick a different model per peer with `/edit <name>` → Model, which lists every model your credentials can reach, or with the console's agent form. `omp-agent models` prints the same list. Delete a default peer's file from `~/.omp/agent/oh-my-agent/agents/` and it stays gone; edit it and your edit is kept.
 

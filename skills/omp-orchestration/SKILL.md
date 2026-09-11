@@ -24,6 +24,10 @@ Four verbs, four meanings. Pick by **lifetime** first, then by **who initiates**
 
 Bounded to your run. Default when the subtask ends with this run. Format and policy: see `omp-subagent-authoring`.
 
+## 1b. Hiring a role — `presets_list` first
+
+`presets_list` returns the shipped role library: each entry is a complete `agent_create` payload (`name`, `description`, `body`, `spawns`, and usually `rooms` and `wake`). Copy it, replace `name` with what the peer is for, send it to `agent_create`, then `agent_spawn` with yourself as `parent`. Write a body by hand only when no preset fits.
+
 ## 2. Persistent child — `agent_create` + `agent_spawn` with `parent`
 
 Two calls minimum, validation checkpoint in the middle. `agent_create` takes

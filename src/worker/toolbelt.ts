@@ -31,6 +31,7 @@ const TOOL_NAMES = [
 	"chat_read",
 	"chat_wait",
 	"agent_create",
+	"presets_list",
 	"agent_spawn",
 	"agent_status",
 	"task_handoff",
@@ -50,7 +51,7 @@ type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
 type ReactionMethod = "chat_react" | "chat_unreact";
 
 const SELECTION_GUIDANCE =
-	"native task for temporary in-run subagents; agent_create then agent_spawn with parent for persistent children; agent_spawn without parent for top-level peers; post to a room to talk to an existing peer";
+	"native task for temporary in-run subagents; agent_create then agent_spawn with parent for persistent children (presets_list offers ready-made roles to copy); agent_spawn without parent for top-level peers; post to a room to talk to an existing peer";
 
 interface ReactionParams {
 	messageId: number;
@@ -390,6 +391,18 @@ export default function toolbeltExtension(
 		approval: "write",
 		execute: async (_id, params, signal) =>
 			await call("room_plan_update", params, signal),
+	});
+
+	pi.registerTool({
+		name: "presets_list",
+		label: "List peer presets",
+		description:
+			"The shipped role presets (researcher, reviewer, security-reviewer, tech-writer, sre, debugger, test-engineer, designer, release-manager, data-analyst). Each is a complete agent_create payload: copy its fields under a new name and pass them to agent_create, then agent_spawn.",
+		loadMode: "essential",
+		parameters: z.object({}),
+		approval: "read",
+		execute: async (_id, _params, signal) =>
+			await call("presets_list", {}, signal),
 	});
 
 	pi.registerTool({

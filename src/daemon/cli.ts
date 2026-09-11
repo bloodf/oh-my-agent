@@ -34,6 +34,7 @@ import type {
 	LogsTailResult,
 	MethodName,
 	ModelsListResult,
+	PresetsListResult,
 	RoomsListResult,
 	RoomsPostResult,
 	SchedulesArmResult,
@@ -628,6 +629,53 @@ async function agentCreate(
 	);
 }
 
+/** `presets` — the shipped roles `agent create --preset` can start from. */
+async function presets(
+	client: DaemonClient,
+	io: CliIo,
+	json: boolean,
+): Promise<void> {
+	const result = await client.call<PresetsListResult>("presets_list", {});
+	output(
+		io,
+		result,
+		json,
+		result.presets.map((p) => `${p.name}\t${p.description}`).join("\n"),
+	);
+}
+
+/**
+ * `agent create <name> --preset <preset>` — copy a shipped role under a new
+ * name. The preset's fields are what `agent_create` accepts, so they travel
+ * unchanged apart from the name; a preset the daemon does not ship is
+ * refused with the list it does.
+ */
+async function agentCreateFromPreset(
+	client: DaemonClient,
+	name: string,
+	preset: string,
+	io: CliIo,
+	json: boolean,
+): Promise<void> {
+	const listed = await client.call<PresetsListResult>("presets_list", {});
+	const found = listed.presets.find((p) => p.name === preset);
+	if (found === undefined) {
+		throw new DaemonRpcError(
+			`unknown preset ${JSON.stringify(preset)}; available: ${listed.presets.map((p) => p.name).join(", ")}`,
+		);
+	}
+	const result = await client.call<AgentCreateResult>("agent_create", {
+		...found,
+		name,
+	});
+	output(
+		io,
+		result,
+		json,
+		`${result.name}\t${result.created ? "created" : "unchanged"}\tfrom ${preset}`,
+	);
+}
+
 /** `agent show <name>` — the definition the daemon holds, and its path. */
 async function agentShow(
 	client: DaemonClient,
@@ -713,6 +761,16 @@ async function agent(
 ): Promise<void> {
 	switch (args[1]) {
 		case "create":
+			if (args.length === 5 && args[3] === "--preset") {
+				await agentCreateFromPreset(
+					client,
+					requireArg(args, 2),
+					requireArg(args, 4),
+					io,
+					json,
+				);
+				return;
+			}
 			await agentCreate(client, args, io, json, readStdin);
 			return;
 		case "show":
@@ -925,6 +983,10 @@ export async function runCli(
 			case "models":
 				if (args.length !== 1) throw new UsageError();
 				await models(client, io, json);
+				return 0;
+			case "presets":
+				if (args.length !== 1) throw new UsageError();
+				await presets(client, io, json);
 				return 0;
 			case "agent":
 				await agent(client, args, io, json, readStdin);

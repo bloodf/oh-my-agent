@@ -56,6 +56,7 @@ import type {
 	LogsTailResult,
 	MethodName,
 	ModelsListResult,
+	PresetsListResult,
 	RoomsListResult,
 	SchedulesArmResult,
 	SchedulesListResult,
@@ -686,6 +687,32 @@ describe("bootDaemon — composition and the control socket", () => {
 		// Nothing routes to acme here, and the answer says so rather than
 		// marking a default the operator's peers would fail on.
 		expect(listed.defaultRoutable).toBe(false);
+	});
+
+	test("presets_list answers the shipped library over the real socket", async () => {
+		const agentDir = await tempAgentDir();
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: await tempAgentDir(),
+			workerFactory: stubWorkerFactory().factory,
+		});
+		cleanups.push(() => handle.close());
+
+		const listed = await call<PresetsListResult>(
+			handle.socketPath,
+			"presets_list",
+		);
+		expect(listed.presets.map((p) => p.name)).toContain("researcher");
+		expect(listed.presets.map((p) => p.name)).toContain("release-manager");
+		// A preset is created under any name the caller picks, unchanged.
+		const researcher = listed.presets.find((p) => p.name === "researcher");
+		const created = await call<{ name: string; created: boolean }>(
+			handle.socketPath,
+			"agent_create",
+			{ ...researcher, name: "scout" },
+		);
+		expect(created).toEqual({ name: "scout", created: true });
 	});
 
 	test("the default model reaches the scoped inference gateway on the real RPC path", async () => {
@@ -1482,6 +1509,7 @@ describe("bootDaemon — protocol errors", () => {
 			},
 			schedules_list: {},
 			models_list: {},
+			presets_list: {},
 			logs_tail: { name: "reviewer" },
 			inject: { name: "reviewer", message: "focus" },
 			schedules_arm: { scheduleId: "missing", enabled: false },
