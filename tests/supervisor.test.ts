@@ -88,7 +88,7 @@ function stubWorker(name = "reviewer", fingerprint?: string) {
 }
 
 async function harness(
-	overrides: Partial<Pick<SupervisorDeps, "peers" | "respawn">> = {},
+	overrides: Partial<Pick<SupervisorDeps, "peers" | "respawn" | "invite">> = {},
 ) {
 	const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-sup-"));
 	cleanups.push(() => rm(dir, { recursive: true, force: true }));
@@ -981,6 +981,70 @@ describe("wake filters", () => {
 
 		expect(woken).toContain("outsider");
 		expect(outsider.prompts[0]).toContain("Paging @outsider");
+	});
+
+	test("a mention from outside the peer's rooms invites it: persisted, live, with the room's history", async () => {
+		const disk = await peerStoreOnDisk();
+		await disk.write(reviewerFrontmatter({ rooms: ["#reviews"] }));
+		const invites: [string, string][] = [];
+		const h = await harness({
+			peers: disk.store,
+			// The daemon's seam: persist the room into the definition on disk.
+			invite: async (peerName, room) => {
+				invites.push([peerName, room]);
+				const current = await disk.definition();
+				await disk.write(
+					reviewerFrontmatter({ rooms: [...(current.rooms ?? []), room] }),
+				);
+			},
+		});
+		await h.rooms.createRoom({ id: "#reviews", kind: "channel" });
+		await h.rooms.createRoom({ id: "#login", kind: "channel" });
+		const reviewer = stubWorker("reviewer");
+		await h.supervisor.register({
+			worker: reviewer.worker,
+			accountId: "acct-inv",
+			mode: "subscription",
+			rooms: ["#reviews"],
+			wake: { mention: true },
+		});
+
+		// Two messages before the reviewer was ever mentioned there.
+		await h.supervisor.post({
+			room: "#login",
+			author: "@you",
+			body: "brief: login page",
+		});
+		await h.supervisor.post({
+			room: "#login",
+			author: "staff-pm",
+			body: "scope agreed",
+		});
+		expect(reviewer.prompts).toHaveLength(0);
+
+		const woken = await h.supervisor.post({
+			room: "#login",
+			author: "@you",
+			body: "@reviewer please review the plan",
+		});
+		expect(woken).toContain("reviewer");
+		expect(invites).toEqual([["reviewer", "#login"]]);
+		// The first turn in the room carries its whole history, not the one
+		// message that named the peer.
+		expect(reviewer.prompts).toHaveLength(1);
+		expect(reviewer.prompts[0]).toContain("brief: login page");
+		expect(reviewer.prompts[0]).toContain("scope agreed");
+		expect(reviewer.prompts[0]).toContain("@reviewer please review the plan");
+		expect((await disk.definition()).rooms).toEqual(["#reviews", "#login"]);
+
+		// Now a member: ordinary traffic there wakes it without a mention.
+		await h.supervisor.post({
+			room: "#login",
+			author: "staff-pm",
+			body: "done",
+		});
+		expect(reviewer.prompts).toHaveLength(2);
+		expect(reviewer.prompts[1]).toContain("done");
 	});
 
 	test("wake.mention true on unsubscribed peer: mention while parked is deferred and delivered on timer resume", async () => {

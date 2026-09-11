@@ -59,6 +59,12 @@ import type {
 	ModelsListResult,
 	PresetsListParams,
 	PresetsListResult,
+	RoomCreateParams,
+	RoomCreateResult,
+	RoomJoinParams,
+	RoomJoinResult,
+	RoomLeaveParams,
+	RoomLeaveResult,
 	RoomMessage,
 	RoomPlanCreateParams,
 	RoomPlanCreateResult,
@@ -525,6 +531,29 @@ function requirePositiveNumber(
 		: { field, message: `${field} must be a positive number` };
 }
 
+/** A room id: a non-empty string starting with `#` (channel) or `@` (DM). */
+function requireRoomId(
+	record: Record<string, unknown>,
+	field: string,
+): FieldCheck {
+	const value = record[field];
+	return isNonEmptyString(value) &&
+		(value.startsWith("#") || value.startsWith("@"))
+		? null
+		: { field, message: `${field} must be a room id starting with "#" or "@"` };
+}
+
+/** A list of strings, every entry non-empty. */
+function requireStringList(
+	record: Record<string, unknown>,
+	field: string,
+): FieldCheck {
+	const value = record[field];
+	return Array.isArray(value) && value.every(isNonEmptyString)
+		? null
+		: { field, message: `${field} must be a list of non-empty strings` };
+}
+
 function requireBoolean(
 	record: Record<string, unknown>,
 	field: string,
@@ -903,6 +932,60 @@ export const METHODS: Record<MethodName, MethodContract> = {
 			),
 		validateResult: (v): Validation<TaskHandoffResult> =>
 			fromFields(v, checkFields(v, [(r) => requireString(r, "handoffId")])),
+	},
+	room_create: {
+		validateParams: (v): Validation<RoomCreateParams> =>
+			fromFields(v, checkFields(v, [(r) => requireRoomId(r, "room")])),
+		validateResult: (v): Validation<RoomCreateResult> => {
+			if (!isRecord(v)) return fail("result", "expected an object");
+			const created = checkFields(v, [(r) => requireBoolean(r, "created")]);
+			if (created) return fail(created.field, created.message);
+			const room = explainRoomInfo(v.room);
+			if (room !== null)
+				return fail(`room${room ? `.${room}` : ""}`, "malformed");
+			return ok(v as unknown as RoomCreateResult);
+		},
+	},
+	room_join: {
+		validateParams: (v): Validation<RoomJoinParams> =>
+			fromFields(
+				v,
+				checkFields(v, [
+					(r) => requireRoomId(r, "room"),
+					(r) => requireString(r, "agent"),
+				]),
+			),
+		validateResult: (v): Validation<RoomJoinResult> =>
+			fromFields(
+				v,
+				checkFields(v, [
+					(r) => requireString(r, "agent"),
+					(r) => requireString(r, "room"),
+					(r) => requireStringList(r, "rooms"),
+					(r) => requireBoolean(r, "live"),
+					(r) => requireBoolean(r, "delivered"),
+				]),
+			),
+	},
+	room_leave: {
+		validateParams: (v): Validation<RoomLeaveParams> =>
+			fromFields(
+				v,
+				checkFields(v, [
+					(r) => requireRoomId(r, "room"),
+					(r) => requireString(r, "agent"),
+				]),
+			),
+		validateResult: (v): Validation<RoomLeaveResult> =>
+			fromFields(
+				v,
+				checkFields(v, [
+					(r) => requireString(r, "agent"),
+					(r) => requireString(r, "room"),
+					(r) => requireStringList(r, "rooms"),
+					(r) => requireBoolean(r, "live"),
+				]),
+			),
 	},
 	rooms_list: {
 		validateParams: (v): Validation<RoomsListParams> => validateNoParams(v),

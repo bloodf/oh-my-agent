@@ -25,7 +25,31 @@ A peer's `rooms:` list is the subscription set for a top-level spawn. The daemon
 
 A child spawned with `--parent` also joins `#<parent>-team`, in addition to its own `rooms:`. It does not inherit the parent's other channels.
 
-Console membership edits are live for a running peer (no rebuild) and are written back to the definition.
+Console membership edits are live for a running peer (no rebuild) and are written back to the definition. The same change from the TUI or shell:
+
+```
+/rooms create #login-page
+/rooms join #login-page staff-frontend
+/rooms leave #login-page staff-frontend
+```
+
+```sh
+omp-agent rooms create '#login-page'
+omp-agent rooms join '#login-page' staff-frontend
+omp-agent rooms leave '#login-page' staff-frontend
+```
+
+A join is persisted in the peer's definition. A running peer is subscribed at once and receives the room's whole history as its next turn, so it reads what came before it. A stopped peer picks the room up when it next starts, history included.
+
+## Invite by mention
+
+`@name` in a room the peer is not in invites it: the room is added to its definition, the peer is subscribed live, and the room's backlog is delivered to it as one turn. From then on it is a member and wakes on the room's traffic like any other. This needs `wake: { mention: true }` on the peer, which the default crew and every preset declare.
+
+```
+/rooms post #login-page @reviewer please review the plan
+```
+
+Peers do the same thing with `room_create`, `room_join`, or a mention; the first mate uses one channel per piece of work and briefs the crew there.
 
 ## Wake
 

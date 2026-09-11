@@ -95,6 +95,17 @@ export interface SupervisorDeps {
 	/** Surfaced when a queued park/resume fails; the daemon must not strand. */
 	onError?: (error: unknown, peerName: string) => void;
 	/**
+	 * Persist a room into a peer's definition: the invite-by-mention seam.
+	 *
+	 * An `@name` in a room the peer is not in used to deliver that one
+	 * message and nothing else, so the peer answered into a room it could
+	 * not read. With this wired, the mention makes the peer a member on
+	 * disk, `resubscribe` applies it live at cursor zero, and the room's
+	 * whole backlog reaches the peer as its first turn there. Unwired, the
+	 * single-message delivery stands.
+	 */
+	invite?: (peerName: string, room: string) => Promise<void>;
+	/**
 	 * Publish one state transition (ADR-015).
 	 *
 	 * Called only *after* the transition it describes has committed — a hook
@@ -495,12 +506,36 @@ export class Supervisor {
 				peer.wake.mention === true && message.mentions.includes(name);
 			if (!roomTrigger && !mentionTrigger) continue;
 			if (mentionTrigger && !peer.rooms.has(input.room)) {
-				await this.deps.rooms.enqueueMention(name, message.id);
+				await this.#inviteOrEnqueue(name, input.room, message.id);
 			}
 			if (this.registry.isParked(peer.accountId)) continue;
 			if (await this.deliver(name)) woken.push(name);
 		}
 		return woken;
+	}
+
+	/**
+	 * A mention from outside the peer's rooms: join it, or failing that, hand
+	 * over the one message. The join is persisted first, then applied live,
+	 * so the definition on disk and the cached set never disagree; a persist
+	 * or re-read that fails is reported and degrades to the old behavior
+	 * rather than losing the mention.
+	 */
+	async #inviteOrEnqueue(
+		peerName: string,
+		room: string,
+		messageId: number,
+	): Promise<void> {
+		if (this.deps.invite && this.deps.peers) {
+			try {
+				await this.deps.invite(peerName, room);
+				await this.resubscribe(peerName);
+				return;
+			} catch (error) {
+				this.deps.onError?.(error, peerName);
+			}
+		}
+		await this.deps.rooms.enqueueMention(peerName, messageId);
 	}
 
 	/**

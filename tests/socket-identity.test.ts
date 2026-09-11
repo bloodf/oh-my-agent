@@ -93,6 +93,9 @@ const VALID_PARAMS: Record<MethodName, unknown> = {
 		summary: "finish the audit",
 	},
 	rooms_list: {},
+	room_create: { room: "#ops" },
+	room_join: { room: "#ops", agent: "reviewer" },
+	room_leave: { room: "#ops", agent: "reviewer" },
 	rooms_post: { room: "#general", body: "operator post" },
 	room_plans_list: { room: "#general" },
 	room_plan_create: {

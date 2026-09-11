@@ -35,6 +35,9 @@ import type {
 	MethodName,
 	ModelsListResult,
 	PresetsListResult,
+	RoomCreateResult,
+	RoomJoinResult,
+	RoomLeaveResult,
 	RoomsListResult,
 	RoomsPostResult,
 	SchedulesArmResult,
@@ -369,6 +372,41 @@ async function rooms(
 			result.rooms
 				.map((room) => `${room.id}\t${room.kind}\t${room.name}`)
 				.join("\n"),
+		);
+		return;
+	}
+
+	if (args[1] === "create" && args.length === 3) {
+		const result = await client.call<RoomCreateResult>("room_create", {
+			room: requireArg(args, 2),
+		});
+		output(
+			io,
+			result,
+			json,
+			`${result.room.id}\t${result.created ? "created" : "exists"}`,
+		);
+		return;
+	}
+
+	if ((args[1] === "join" || args[1] === "leave") && args.length === 4) {
+		const params = { room: requireArg(args, 2), agent: requireArg(args, 3) };
+		if (args[1] === "join") {
+			const result = await client.call<RoomJoinResult>("room_join", params);
+			output(
+				io,
+				result,
+				json,
+				`${result.agent}\t${result.room}\t${result.live ? (result.delivered ? "joined, history delivered" : "joined") : "joins on next start"}`,
+			);
+			return;
+		}
+		const result = await client.call<RoomLeaveResult>("room_leave", params);
+		output(
+			io,
+			result,
+			json,
+			`${result.agent}\t${result.room}\t${result.live ? "left" : "left (saved)"}`,
 		);
 		return;
 	}

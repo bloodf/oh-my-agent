@@ -346,6 +346,30 @@ describe("omp-agent CLI — every verb round-trips against a real daemon", () =>
 		expect(read.io.stdout).toContain("hello via cli");
 		expect(read.io.stderr).toBe("");
 
+		// `rooms create` + `rooms join` + `rooms leave`
+		const created = await runCapture(["rooms", "create", "#ops"], { agentDir });
+		expect(created.code).toBe(0);
+		expect(created.io.stdout).toContain("#ops\tcreated");
+		await runCapture(["rooms", "post", "#ops", "before reviewer joined"], {
+			agentDir,
+		});
+		const joined = await runCapture(["rooms", "join", "#ops", "reviewer"], {
+			agentDir,
+		});
+		expect(joined.code).toBe(0);
+		expect(joined.io.stderr).toBe("");
+		expect(joined.io.stdout).toContain(
+			"reviewer\t#ops\tjoined, history delivered",
+		);
+		expect(workers.get("reviewer")?.prompts.join("\n")).toContain(
+			"before reviewer joined",
+		);
+		const left = await runCapture(["rooms", "leave", "#ops", "reviewer"], {
+			agentDir,
+		});
+		expect(left.code).toBe(0);
+		expect(left.io.stdout).toContain("reviewer\t#ops\tleft");
+
 		// `schedule` (list) + `schedule <id> off`
 		const list = await runCapture(["schedule"], { agentDir });
 		expect(list.code).toBe(0);
@@ -423,6 +447,8 @@ describe("omp-agent CLI — every verb round-trips against a real daemon", () =>
 			["schedule", "id", "maybe"],
 			["rooms", "read"],
 			["rooms", "post"],
+			["rooms", "join", "#ops"],
+			["rooms", "create"],
 		] as const) {
 			const result = await runCapture([...argv], { agentDir });
 			expect(result.code).toBe(2);

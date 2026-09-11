@@ -832,11 +832,49 @@ export async function bootDaemon(
 			remoteFullControl,
 		};
 
+		/**
+		 * Add or remove one room in a peer's definition on disk. The single
+		 * writer for membership edits that do not come through the console:
+		 * `room_join`/`room_leave` and the supervisor's invite-by-mention.
+		 */
+		const setMembership = async (
+			agent: string,
+			room: string,
+			action: "join" | "leave",
+		): Promise<string[]> => {
+			const current = await store.get(agent);
+			if (!current) throw new Error(`Unknown peer: ${agent}`);
+			const had = current.rooms ?? [];
+			const next =
+				action === "join"
+					? [...new Set([...had, room])].sort()
+					: had.filter((entry) => entry !== room);
+			if (next.length === had.length && next.every((r) => had.includes(r))) {
+				return had;
+			}
+			const { sha256: _sha, filePath: _path, ...fields } = current;
+			// An empty list is dropped rather than written: the parser refuses
+			// `rooms: []`, and a peer in no rooms is a peer with no `rooms:`.
+			await writeDefinition(
+				{
+					...fields,
+					...(next.length === 0 ? { rooms: undefined } : { rooms: next }),
+				},
+				{ overwrite: true },
+			);
+			return next;
+		};
+
 		const supervisor = new Supervisor({
 			rooms,
 			scheduler,
 			now,
 			onError: (error, peerName) => log(`peer ${peerName}: ${String(error)}`),
+			invite: async (peerName, room) => {
+				await ensureRoom(room);
+				await setMembership(peerName, room, "join");
+				log(`invited ${peerName} into ${room} by mention`);
+			},
 			// The supervisor's own transitions — park, resume, membership, and
 			// the budget moves behind them — reach every connected console
 			// through here (ADR-015). Spawn, kill, and schedule are the
@@ -847,7 +885,16 @@ export async function bootDaemon(
 			// while this is being constructed and is resolved on every later
 			// call, so a hook captured now still finds the console built
 			// hundreds of lines below.
-			emit: (event) => consoleApi?.emit(event),
+			emit: (event) => {
+				// Membership the supervisor applied on its own — an invite by
+				// mention — must reach the daemon's peer index too, or status
+				// reads would disagree with the rooms the peer is woken for.
+				if (event.type === "membership") {
+					const record = peers.get(event.agent);
+					if (record) peers.set(event.agent, { ...record, rooms: event.rooms });
+				}
+				consoleApi?.emit(event);
+			},
 			// T-505: definitions re-read per delivery; a fingerprint mismatch
 			// rebuilds through this seam rather than reusing stale policy.
 			peers: store,
@@ -1999,6 +2046,7 @@ export async function bootDaemon(
 			bumpAccount,
 			listModels,
 			listPresets,
+			setMembership,
 			requestDaemonStop,
 			daemonLog,
 			operations,

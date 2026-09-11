@@ -87,7 +87,13 @@ import type {
 	ModelsListResult,
 	PresetsListParams,
 	PresetsListResult,
+	RoomCreateParams,
+	RoomCreateResult,
 	RoomInfo,
+	RoomJoinParams,
+	RoomJoinResult,
+	RoomLeaveParams,
+	RoomLeaveResult,
 	RoomMessage,
 	RoomPlanCreateParams,
 	RoomPlanCreateResult,
@@ -154,6 +160,10 @@ export const WORKER_CALLABLE_METHODS: Partial<Record<MethodName, true>> = {
 	// `agent_create` guidance names it.
 	presets_list: true,
 	agent_spawn: true,
+	// A peer may open a channel and assign teammates to it: the first mate
+	// puts its crew where the work is. Leaving stays with the operator.
+	room_create: true,
+	room_join: true,
 	task_handoff: true,
 	logs_tail: true,
 	room_plans_list: true,
@@ -460,6 +470,17 @@ export interface DaemonContext {
 	/** Create the room if it does not exist yet, and index it. */
 	ensureRoom(id: string): Promise<void>;
 	/**
+	 * Add or remove a room in a peer's definition on disk and answer the
+	 * membership that resulted. Disk only: the caller applies it to a live
+	 * peer through `supervisor.resubscribe`. Optional for the same reason
+	 * `store` is.
+	 */
+	setMembership?(
+		agent: string,
+		room: string,
+		action: "join" | "leave",
+	): Promise<string[]>;
+	/**
 	 * Build and register a peer's worker. Rejects an unknown peer name.
 	 *
 	 * `parent` is spawn-time state: it decides the account and family channel
@@ -609,6 +630,9 @@ interface ParamsByMethod {
 	inject: InjectParams;
 	task_handoff: TaskHandoffParams;
 	rooms_list: RoomsListParams;
+	room_create: RoomCreateParams;
+	room_join: RoomJoinParams;
+	room_leave: RoomLeaveParams;
 	rooms_post: RoomsPostParams;
 	room_plans_list: RoomPlansListParams;
 	room_plan_create: RoomPlanCreateParams & { author?: string };
@@ -871,6 +895,36 @@ export async function startControlSocket(
 		return { messageId: landed.id, createdAt: landed.createdAt };
 	};
 
+	/** Persist a membership change; an unknown peer or missing seam refuses. */
+	const changeMembership = async (
+		params: RoomJoinParams,
+		action: "join" | "leave",
+	): Promise<string[]> => {
+		if (!context.setMembership) {
+			throw new InvalidParamsError(
+				"agent",
+				"Membership changes are not available on this daemon",
+			);
+		}
+		if (action === "join") await context.ensureRoom(params.room);
+		try {
+			return await context.setMembership(params.agent, params.room, action);
+		} catch (error) {
+			throw new InvalidParamsError(
+				"agent",
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+	};
+
+	/** Apply on-disk membership to the live peer and the daemon's own index. */
+	const applyMembership = async (agent: string): Promise<string[]> => {
+		const applied = await context.supervisor.resubscribe(agent);
+		const record = context.peers.get(agent);
+		if (record) context.peers.set(agent, { ...record, rooms: applied });
+		return applied;
+	};
+
 	/**
 	 * The store, or a refusal naming why authoring is unavailable here.
 	 *
@@ -1042,6 +1096,40 @@ export async function startControlSocket(
 		rooms_list: async (): Promise<RoomsListResult> => ({
 			rooms: [...context.knownRooms.values()],
 		}),
+
+		room_create: async (params): Promise<RoomCreateResult> => {
+			const existed = context.knownRooms.has(params.room);
+			await context.ensureRoom(params.room);
+			const room = context.knownRooms.get(params.room);
+			if (!room) throw new Error(`Room ${params.room} was not indexed`);
+			return { room, created: !existed };
+		},
+
+		room_join: async (params): Promise<RoomJoinResult> => {
+			const rooms = await changeMembership(params, "join");
+			if (!context.peers.has(params.agent)) {
+				return { ...params, rooms, live: false, delivered: false };
+			}
+			// Live: the cached set the supervisor filters on moves, and the
+			// room's backlog — the subscription starts at cursor zero — is the
+			// peer's first turn there, so a peer invited into a conversation
+			// reads what came before it.
+			const applied = await applyMembership(params.agent);
+			const delivered = await context.supervisor.deliver(params.agent);
+			return { ...params, rooms: applied, live: true, delivered };
+		},
+
+		room_leave: async (params): Promise<RoomLeaveResult> => {
+			const rooms = await changeMembership(params, "leave");
+			if (!context.peers.has(params.agent)) {
+				return { ...params, rooms, live: false };
+			}
+			return {
+				...params,
+				rooms: await applyMembership(params.agent),
+				live: true,
+			};
+		},
 
 		room_plans_list: async (params): Promise<RoomPlansListResult> => {
 			try {

@@ -153,15 +153,21 @@ Default: stop the peer and cascade down its subtree. `--keep-children` reparents
 
 ```sh
 omp-agent rooms
+omp-agent rooms create <room>
 omp-agent rooms read <room>
 omp-agent rooms post <room> <text...>
+omp-agent rooms join <room> <agent>
+omp-agent rooms leave <room> <agent>
 ```
 
 | Form | Output |
 |---|---|
 | `rooms` | `id	kind	name` per room. `kind` is `channel` or `dm`. |
+| `rooms create <room>` | `<room>	created` or `<room>	exists` |
 | `rooms read <room>` | `id	author	body` per message |
 | `rooms post <room> <text...>` | `message: <id>` |
+| `rooms join <room> <agent>` | `<agent>	<room>	joined, history delivered`, `joined`, or `joins on next start`. Persisted in the definition; a running peer gets the room's backlog as its next turn. |
+| `rooms leave <room> <agent>` | `<agent>	<room>	left` |
 
 Posts as `@you`. `<text...>` is joined with spaces. A literal `--json` in the message is payload if it comes after the verb, or after `--`. More: [Rooms](rooms.md).
 
@@ -249,6 +255,9 @@ Inside `omp`, after the extension loads:
 | `/kill <name>` | `omp-agent kill <name>` |
 | `/rooms read <room>` | `omp-agent rooms read <room>` |
 | `/rooms post <room> <message>` | `omp-agent rooms post <room> <message>` |
+| `/rooms create <room>` | `omp-agent rooms create <room>` |
+| `/rooms join <room> <agent>` | `omp-agent rooms join <room> <agent>` |
+| `/rooms leave <room> <agent>` | `omp-agent rooms leave <room> <agent>` |
 | `/console` | Menu: Open web UI, Copy URL, or Show URL; Show URL deliberately reveals the operator token |
 | `/cli console` | `omp-agent console` |
 | `/schedule` | `omp-agent schedule` |

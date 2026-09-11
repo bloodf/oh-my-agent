@@ -39,6 +39,9 @@ import type {
 	MethodName,
 	ModelsListResult,
 	PresetsListResult,
+	RoomCreateResult,
+	RoomJoinResult,
+	RoomLeaveResult,
 	RoomsPostResult,
 	SchedulesArmResult,
 	SchedulesListResult,
@@ -498,6 +501,61 @@ export async function roomsPostCommand(
 			body,
 		});
 		io.notify(`posted to ${room} as @you (message ${result.messageId})`);
+	});
+}
+
+/** `/rooms create <room>` — open a channel before anyone posts in it. */
+export async function roomsCreateCommand(
+	client: DaemonClient,
+	io: ExtensionIO,
+	room: string,
+): Promise<void> {
+	await guard(io, async () => {
+		const result = await client.call<RoomCreateResult>("room_create", { room });
+		io.notify(
+			result.created
+				? `created ${result.room.id}`
+				: `${result.room.id} already exists`,
+		);
+	});
+}
+
+/**
+ * `/rooms join <room> <agent>` and `/rooms leave <room> <agent>` — assign a
+ * peer to a channel, or take it out. A join of a running peer is live and
+ * hands it the room's backlog; a stopped peer picks the room up when it
+ * next starts.
+ */
+export async function roomsMembershipCommand(
+	client: DaemonClient,
+	io: ExtensionIO,
+	action: "join" | "leave",
+	room: string,
+	agent: string,
+): Promise<void> {
+	const name = agent.trim();
+	if (name.length === 0) {
+		io.notify(`usage: /rooms ${action} <room> <agent>`);
+		return;
+	}
+	await guard(io, async () => {
+		if (action === "join") {
+			const result = await client.call<RoomJoinResult>("room_join", {
+				room,
+				agent: name,
+			});
+			io.notify(
+				result.live
+					? `${result.agent} joined ${result.room}${result.delivered ? " and read its history" : ""}`
+					: `${result.agent} will join ${result.room} when it next starts`,
+			);
+			return;
+		}
+		const result = await client.call<RoomLeaveResult>("room_leave", {
+			room,
+			agent: name,
+		});
+		io.notify(`${result.agent} left ${result.room}`);
 	});
 }
 

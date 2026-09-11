@@ -40,6 +40,8 @@ import {
 	killCommand,
 	logsCommand,
 	presetCommand,
+	roomsCreateCommand,
+	roomsMembershipCommand,
 	roomsPostCommand,
 	roomsReadCommand,
 	scheduleArmCommand,
@@ -173,7 +175,8 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 	});
 
 	pi.registerCommand("rooms", {
-		description: "Read a room transcript or post into it as @you.",
+		description:
+			"Rooms: read, post as @you, create a channel, or join/leave a peer.",
 		handler: async (args, ctx) => {
 			const io = ioFrom(ctx.ui);
 			// Split off the two leading tokens and keep the rest of the line
@@ -190,8 +193,14 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 				markRoomsRead(client);
 			} else if (verb === "post" && room !== undefined) {
 				await roomsPostCommand(client, io, room, body);
+			} else if (verb === "create" && room !== undefined) {
+				await roomsCreateCommand(client, io, room);
+			} else if ((verb === "join" || verb === "leave") && room !== undefined) {
+				await roomsMembershipCommand(client, io, verb, room, body);
 			} else {
-				io.notify("usage: /rooms read <room> | /rooms post <room> <message>");
+				io.notify(
+					"usage: /rooms read <room> | /rooms post <room> <message> | /rooms create <room> | /rooms join <room> <agent> | /rooms leave <room> <agent>",
+				);
 			}
 			await refreshWidget(client, io);
 		},
