@@ -794,6 +794,86 @@ describe("registry wiring", () => {
 
 // ── Wake filters (T-509) ─────────────────────────────────────────────────────
 
+describe("status reactions", () => {
+	test("delivery marks 👀 on everything and ⏳ then ✅ on what is addressed to the peer", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#team", kind: "channel" });
+		const reactionsDuringTurn: string[] = [];
+		const worker: SupervisedWorker = {
+			name: "reviewer",
+			state: "running",
+			prompt: async () => {
+				// What the room shows while the turn is running; only the turn
+				// that carries the addressed message is the one under test.
+				reactionsDuringTurn.length = 0;
+				for (const message of await h.rooms.listMessages("#team", {})) {
+					for (const r of message.reactions) {
+						reactionsDuringTurn.push(`${message.body}:${r.actor}:${r.emoji}`);
+					}
+				}
+			},
+			park: async () => {},
+			resume: async () => {},
+			stop: async () => {},
+		};
+		await h.supervisor.register({
+			worker,
+			accountId: "acct-react",
+			mode: "subscription",
+			rooms: ["#team"],
+			wake: { mention: true },
+		});
+
+		await h.supervisor.post({ room: "#team", author: "@you", body: "fyi" });
+		await h.supervisor.post({
+			room: "#team",
+			author: "@you",
+			body: "@reviewer do this",
+		});
+
+		expect(reactionsDuringTurn.sort()).toEqual([
+			"@reviewer do this:reviewer:⏳",
+			"@reviewer do this:reviewer:👀",
+			"fyi:reviewer:👀",
+		]);
+		const after = await h.rooms.listMessages("#team", {});
+		const chips = (body: string) =>
+			after
+				.find((m) => m.body === body)
+				?.reactions.map((r) => `${r.actor}:${r.emoji}`)
+				.sort();
+		expect(chips("fyi")).toEqual(["reviewer:👀"]);
+		expect(chips("@reviewer do this")).toEqual(["reviewer:✅", "reviewer:👀"]);
+	});
+
+	test("a turn that throws leaves ❌ on the addressed message, and the error still surfaces", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "@reviewer", kind: "dm" });
+		const worker: SupervisedWorker = {
+			name: "reviewer",
+			state: "running",
+			prompt: async () => {
+				throw new Error("model exploded");
+			},
+			park: async () => {},
+			resume: async () => {},
+			stop: async () => {},
+		};
+		await h.supervisor.register({
+			worker,
+			accountId: "acct-fail",
+			mode: "subscription",
+			rooms: ["@reviewer"],
+		});
+
+		await expect(
+			h.supervisor.post({ room: "@reviewer", author: "@you", body: "dm" }),
+		).rejects.toThrow("model exploded");
+		const [message] = await h.rooms.listMessages("@reviewer", {});
+		expect(message?.reactions.map((r) => r.emoji).sort()).toEqual(["❌", "👀"]);
+	});
+});
+
 describe("wake filters", () => {
 	test("wake.mention true wakes a named peer on @mention", async () => {
 		const h = await harness();

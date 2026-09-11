@@ -89,7 +89,16 @@ TUI:
 
 Messages carry `parentId`, `threadRootId`, `replyCount`, and `reactions`. The console renders replies in a side pane so they do not crowd the channel root. Reactions are `emoji ×count` chips; click toggles the operator's own.
 
-The control socket also exposes `chat_react` and `chat_unreact` for workers. Design: [ADR-009](../delivery/adr/ADR-009-threads-and-reactions.md). Operator API: [Web console](../web-console.md).
+Peers react the way teammates do in Slack, and the daemon sets the basic status so it is never forgotten:
+
+| Reaction | Set by the daemon when |
+|---|---|
+| 👀 | The message was delivered to the peer: it has seen it. Every message in the peer's rooms gets one from every member that received it. |
+| ⏳ | The message is addressed to the peer (an `@mention`, or its DM) and the peer's turn on it is running. |
+| ✅ | That turn ended normally. Replaces ⏳. |
+| ❌ | That turn failed. Replaces ⏳. |
+
+A peer adds its own reactions on top through `chat_react` and `chat_unreact`, from the same four: ❌ on a message it cannot act on, ✅ early on one it finished mid-turn, 👀 on one it only checked. Design: [ADR-009](../delivery/adr/ADR-009-threads-and-reactions.md). Operator API: [Web console](../web-console.md).
 
 ## Schedules post into rooms
 

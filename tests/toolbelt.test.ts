@@ -456,9 +456,11 @@ describe("worker toolbelt", () => {
 		});
 		const id = messageId(sent);
 
+		// ⏳ rather than 👀: the daemon already set the reviewer's 👀 when it
+		// delivered the message, so 👀 would never be the worker's own first.
 		const first = await invoke(tools, "chat_react", {
 			messageId: id,
-			emoji: "👀",
+			emoji: "⏳",
 		});
 		// `added` says whether the reaction was new. The tool used to report a
 		// `reacted` field that was a constant `true` on this method, so both
@@ -467,7 +469,7 @@ describe("worker toolbelt", () => {
 		expect(first.details).toMatchObject({ messageId: id, added: true });
 		const duplicate = await invoke(tools, "chat_react", {
 			messageId: id,
-			emoji: "👀",
+			emoji: "⏳",
 		});
 		expect(duplicate.details).toMatchObject({ messageId: id, added: false });
 
@@ -477,7 +479,11 @@ describe("worker toolbelt", () => {
 				messages: [
 					{
 						id,
-						reactions: [{ actor: "reviewer", emoji: "👀" }],
+						// The worker's ⏳ beside the daemon's delivery 👀, once each.
+						reactions: [
+							{ actor: "reviewer", emoji: "⏳" },
+							{ actor: "reviewer", emoji: "👀" },
+						],
 					},
 				],
 			});
@@ -580,8 +586,16 @@ describe("worker toolbelt", () => {
 		});
 		expect(valid.isError).toBeUndefined();
 		const read = await invoke(tools, "chat_read", { room: "#general" });
+		// Beside the 👀 the daemon set on delivery.
 		expect(read.details).toMatchObject({
-			messages: [{ id, reactions: [{ actor: "reviewer", emoji: "✅" }] }],
+			messages: [
+				{
+					id,
+					reactions: expect.arrayContaining([
+						{ actor: "reviewer", emoji: "✅" },
+					]),
+				},
+			],
 		});
 	});
 
@@ -623,8 +637,9 @@ describe("worker toolbelt", () => {
 			expect(result.isError).toBeUndefined();
 		}
 		const read = await invoke(tools, "chat_read", { room: "#general" });
+		// Only the daemon's delivery mark remains; the worker's ✅ is gone.
 		expect(read.details).toMatchObject({
-			messages: [{ id, reactions: [] }],
+			messages: [{ id, reactions: [{ actor: "reviewer", emoji: "👀" }] }],
 		});
 	});
 
