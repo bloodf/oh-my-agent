@@ -4391,6 +4391,47 @@ TASKS += [
         depends_on=["T-1619"],
         out_of_scope=["A thinking level for the default: the role's suffix is dropped because the worker gateway routes by provider/id only."],
     ),
+    Task(
+        id="T-1621", slug="themed-tui-no-keys", title="The TUI renders through the OMP theme and binds no keys",
+        epic="EP-16", sprint="SP-17", status="Done",
+        goal="The status widget and the manager overlay draw with the theme and symbol preset the operator chose in OMP, and the plugin registers no keybinding: every surface is a slash command, so nothing collides with a binding the operator or another extension owns.",
+        read_first=[
+            ("The widget line and its refresh", "src/extension/widget.ts"),
+            ("The manager overlay's render modes", "src/extension/manager.ts"),
+            ("The extension entry point and its command registrations", "src/extension/index.ts"),
+        ],
+        files=[
+            "src/extension/theme.ts",
+            "src/extension/widget.ts",
+            "src/extension/manager.ts",
+            "src/extension/commands.ts",
+            "src/extension/index.ts",
+            "tests/extension.test.ts",
+        ],
+        assets=[
+            ("src/extension/theme.ts", "New", "The slice of OMP's Theme the surfaces need, a plain fallback, and the adapter that degrades to it."),
+            ("src/extension/widget.ts", "Edited", "The widget is a themed renderer: colors per state, the preset's separator, and a /manage hint."),
+            ("src/extension/manager.ts", "Edited", "Titles, cursor, status marks, and key hints render through the host's theme; the factory no longer ignores it."),
+            ("src/extension/commands.ts", "Edited", "ExtensionIO.setWidget accepts a themed renderer as well as lines."),
+            ("src/extension/index.ts", "Edited", "The Alt+G registration is removed; a renderer becomes OMP's component factory."),
+            ("tests/extension.test.ts", "Edited", "A tagging theme proves each segment's color and symbol; the adapter's fallback is pinned."),
+        ],
+        steps=[
+            "Define the theme slice structurally, so OMP's Theme satisfies it without an import and a host that passes nothing renders plain text.",
+            "Route every string the widget and the overlay draw through that slice: fg for state and hints, the preset's cursor, status marks, and separator.",
+            "Delete the shortcut registration and name /manage in the widget hint and the docs.",
+        ],
+        acceptance=[
+            "The widget and the overlay render through a tagging theme with every segment attributed to a color and the preset's symbols in place of the hardcoded ones.",
+            "A host that passes no theme renders the same text uncolored.",
+            "No registerShortcut call remains, and no doc names Alt+G as a live binding.",
+        ],
+        evidence=[
+            ("Widget and overlay render through the host's theme; themeFrom falls back to plain text", "tests/extension.test.ts"),
+        ],
+        depends_on=["T-1619"],
+        out_of_scope=["Theming the console: it has its own palette and is not drawn by OMP."],
+    ),
 ]
 
 TASKS += [
