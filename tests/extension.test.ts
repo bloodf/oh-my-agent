@@ -31,7 +31,7 @@ import { startControlSocket } from "../src/daemon/socket";
 import type { SupervisedWorker } from "../src/daemon/supervisor";
 import { Supervisor } from "../src/daemon/supervisor";
 import { cliCommand, consoleCommand } from "../src/extension/cli";
-import type { ExtensionIO } from "../src/extension/commands";
+import type { ExtensionIO, WidgetContent } from "../src/extension/commands";
 import {
 	DaemonAuthError,
 	DaemonUnavailableError,
@@ -56,6 +56,7 @@ import {
 	ManagerState,
 	openManager,
 } from "../src/extension/manager";
+import { PLAIN_THEME, type TuiTheme, themeFrom } from "../src/extension/theme";
 import {
 	createDaemonClient,
 	DAEMON_UNAVAILABLE,
@@ -81,6 +82,8 @@ afterEach(async () => {
 interface CapturedIo extends ExtensionIO {
 	notices: string[];
 	widgets: Record<string, string[]>;
+	/** The last raw content handed to `setWidget`, renderer or lines. */
+	lastWidget: WidgetContent | undefined;
 	confirms: { title: string; message: string }[];
 	confirmAnswer: boolean;
 	selectAnswer: string | undefined;
@@ -90,10 +93,24 @@ interface CapturedIo extends ExtensionIO {
 	editors: { title: string; prefill: string }[];
 }
 
+/**
+ * A theme that tags instead of coloring, so assertions can see which color
+ * each segment went through and which preset symbols were used.
+ */
+const TAG_THEME: TuiTheme = {
+	fg: (color, text) => `[${color}:${text}]`,
+	bold: (text) => text,
+	status: { success: "OK", error: "XX", warning: "!!", pending: ".." },
+	nav: { cursor: ">", back: "<" },
+	sep: { dot: "|" },
+	ascii: true,
+};
+
 function fakeIo(answer = true): CapturedIo {
 	const io: CapturedIo = {
 		notices: [],
 		widgets: {},
+		lastWidget: undefined,
 		confirms: [],
 		confirmAnswer: answer,
 		selectAnswer: undefined,
@@ -104,8 +121,12 @@ function fakeIo(answer = true): CapturedIo {
 		notify(message) {
 			io.notices.push(message);
 		},
-		setWidget(key, lines) {
-			io.widgets[key] = lines;
+		setWidget(key, content) {
+			// A themed renderer is resolved with the plain theme, so assertions
+			// read the same text the operator sees minus color.
+			io.lastWidget = content;
+			io.widgets[key] =
+				typeof content === "function" ? content(PLAIN_THEME) : content;
 		},
 		async confirm(title, message) {
 			io.confirms.push({ title, message });
@@ -689,7 +710,25 @@ describe("status widget", () => {
 		expect(text).toContain("1 running");
 		expect(text).toContain("1 parked");
 		expect(text).toContain("2 unread");
+		expect(text).toContain("/manage");
+		expect(text).not.toContain("alt+g");
 		expect(text).not.toContain("token=");
+	});
+
+	test("the widget paints through the host's theme: its colors and separator", async () => {
+		const daemon = await startDaemon([{ name: "researcher", rooms: [] }]);
+		const io = fakeIo();
+		await refreshWidget(daemon.client, io);
+
+		// Resolve the same renderer with a tagging theme: every segment must
+		// come out through `fg`, joined by the operator's separator.
+		const renderer = io.lastWidget;
+		expect(typeof renderer).toBe("function");
+		const themed = (renderer as (t: TuiTheme) => string[])(TAG_THEME);
+		expect(themed[0]).toContain("[accent:oh-my-agent]");
+		expect(themed[0]).toContain("[dim: | ]");
+		expect(themed[0]).toContain("[dim:/manage]");
+		expect(themed[0]).not.toContain("·");
 	});
 
 	test("accumulates across refreshes until the operator reads a room", async () => {
@@ -865,7 +904,6 @@ describe("extension factory", () => {
 			registerCommand(name: string) {
 				registered.push(name);
 			},
-			registerShortcut() {},
 			on(event: string) {
 				events.push(event);
 			},
@@ -1034,6 +1072,50 @@ describe("manager component", () => {
 		component.handleInput("\u001b");
 		expect(closed).toBe(true);
 	});
+	test("the overlay draws with the host's theme: cursor, marks, and colors", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }]);
+		const state = new ManagerState(daemon.client);
+		await state.load();
+		const component = createManagerComponent(state, {
+			done: () => {},
+			requestRender: () => {},
+			theme: TAG_THEME,
+		});
+
+		const tree = component.render(80).join("\n");
+		// Title through accent, the row's cursor from the preset, the running
+		// mark from `status.success`, and hints dimmed with the preset's
+		// separator and ASCII arrows.
+		expect(tree).toContain("[accent:oh-my-agent]");
+		expect(tree).toContain("[accent:>]");
+		expect(tree).toContain("[success:OK running]");
+		expect(tree).toContain("[dim:Up/Down move | Enter actions | Esc close]");
+		expect(tree).not.toContain("›");
+		expect(tree).not.toContain("↑/↓");
+
+		component.handleInput("\r");
+		const menu = component.render(80).join("\n");
+		expect(menu).toContain(`[accent:>] ${ACTIONS.edit}`);
+	});
+
+	test("themeFrom adapts OMP's Theme and falls back to plain text for anything else", () => {
+		expect(themeFrom({})).toBe(PLAIN_THEME);
+		expect(themeFrom(undefined)).toBe(PLAIN_THEME);
+		const adapted = themeFrom({
+			fg: (c: string, t: string) => `<${c}>${t}`,
+			bold: (t: string) => `*${t}*`,
+			status: { success: "ok" },
+			nav: { cursor: ">>" },
+			getSymbolPreset: () => "ascii",
+		});
+		expect(adapted.fg("accent", "x")).toBe("<accent>x");
+		expect(adapted.bold("x")).toBe("*x*");
+		expect(adapted.status.success).toBe("ok");
+		expect(adapted.status.error).toBe(PLAIN_THEME.status.error);
+		expect(adapted.nav.cursor).toBe(">>");
+		expect(adapted.ascii).toBe(true);
+	});
+
 	test("Enter opens the action menu for the selected agent", async () => {
 		const daemon = await startDaemon([{ name: "alpha" }]);
 		const state = new ManagerState(daemon.client);

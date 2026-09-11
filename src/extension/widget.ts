@@ -12,8 +12,9 @@
  * the import graph stays acyclic).
  *
  * Downstream consumers: `./commands`, `./index`, `tests/extension.test.ts`.
- * The live widget line names `alt+g manager` and never includes the
- * console token.
+ * The live widget line names `/manage` and never includes the console
+ * token. It is painted through the host's theme, so its colors and
+ * separators are the operator's.
  *
  * Failure modes: an absent socket raises `DaemonUnavailableError`, which
  * every command renders as one plain sentence. A token this process cannot
@@ -41,6 +42,7 @@ import { ERROR_CODE } from "../shared/protocol";
 import { METHODS } from "../shared/protocol-schemas";
 import type { DaemonClient, ExtensionIO } from "./commands";
 import { DaemonAuthError, DaemonUnavailableError } from "./commands";
+import type { TuiTheme } from "./theme";
 
 /** Widget slot the extension refreshes. */
 export const WIDGET_KEY = "oh-my-agent";
@@ -198,14 +200,28 @@ export async function refreshWidget(
 		if (latest !== undefined) cursor.lastId = latest;
 		cursor.count += messages.length;
 
-		io.setWidget(WIDGET_KEY, [
-			`agents: ${running} running, ${parked} parked · rooms: ${cursor.count} unread · alt+g manager`,
-		]);
+		const unread = cursor.count;
+		io.setWidget(WIDGET_KEY, (t: TuiTheme) => {
+			const dot = t.fg("dim", ` ${t.sep.dot} `);
+			const count = (n: number, color: "success" | "warning" | "accent") =>
+				n === 0 ? t.fg("muted", String(n)) : t.bold(t.fg(color, String(n)));
+			return [
+				[
+					t.bold(t.fg("accent", "oh-my-agent")),
+					`${count(running, "success")} running`,
+					`${count(parked, "warning")} parked`,
+					`${count(unread, "accent")} unread`,
+					t.fg("dim", "/manage"),
+				].join(dot),
+			];
+		});
 	} catch (error) {
-		io.setWidget(WIDGET_KEY, [
+		const message =
 			error instanceof DaemonUnavailableError
 				? DAEMON_UNAVAILABLE
-				: `daemon error: ${error instanceof Error ? error.message : String(error)}`,
+				: `daemon error: ${error instanceof Error ? error.message : String(error)}`;
+		io.setWidget(WIDGET_KEY, (t: TuiTheme) => [
+			`${t.fg("error", t.status.error)} ${t.fg("warning", message)}`,
 		]);
 	}
 }

@@ -41,6 +41,7 @@ import type {
 	SchedulesArmResult,
 	SchedulesListResult,
 } from "../shared/protocol";
+import type { TuiTheme } from "./theme";
 import { DAEMON_UNAVAILABLE } from "./widget";
 
 /**
@@ -51,10 +52,17 @@ export interface DaemonClient {
 	call<T>(method: MethodName, params?: unknown): Promise<T>;
 }
 
+/** Widget lines, or a renderer that produces them from the host's theme. */
+export type WidgetContent = string[] | ((theme: TuiTheme) => string[]);
+
 /** The OMP-side seam: what a command may show or ask the operator. */
 export interface ExtensionIO {
 	notify(message: string): void;
-	setWidget(key: string, lines: string[]): void;
+	/**
+	 * Paint the widget. A renderer, not lines, when the surface wants the
+	 * operator's theme: the host calls it with its `Theme` at render time.
+	 */
+	setWidget(key: string, content: WidgetContent): void;
 	/** Ask-dialog confirmation; resolves false on decline or dismiss. */
 	confirm(title: string, message: string): Promise<boolean>;
 	/** Single-choice selection; resolves undefined on cancel/Esc. */

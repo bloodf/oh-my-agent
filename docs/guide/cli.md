@@ -239,6 +239,6 @@ Inside `omp`, after the extension loads:
 | `/schedule <id> on\|off` | `omp-agent schedule <id> on\|off` |
 | `/logs <name> [n]` | `omp-agent logs <name> [n]` |
 | `/inject <name> <message>` | `omp-agent inject <name> <message>` |
-| `/manage` (shortcut `Alt+G`) | Full-screen manager; no CLI equivalent |
+| `/manage` | Full-screen manager; no CLI equivalent |
 
 The status widget shows `agents: N running, M parked · rooms: K unread`. If the daemon is down, it shows the same daemon-down sentence as the CLI.

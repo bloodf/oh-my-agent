@@ -6,6 +6,11 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Changed
+
+- The plugin binds no keys. `Alt+G` is gone; `/manage` opens the manager, and every surface is a slash command, so nothing collides with a binding you or another extension own.
+- The status widget and the manager overlay render through your OMP theme: its colors, its symbol preset (unicode, nerd, or ascii) for the cursor, status marks, separators, and arrow hints. The widget reads `oh-my-agent · N running · N parked · N unread · /manage`.
+
 ## [1.3.0] - 2026-09-11
 
 ### Added

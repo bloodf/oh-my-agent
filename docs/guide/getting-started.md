@@ -20,7 +20,7 @@ omp install @bloodf/oh-my-agent
 omp
 ```
 
-Session start starts the detached daemon from the plugin tree. No PATH. No extra `omp-agent daemon`. Widget should show `agents: 0 running, 0 parked`. `Alt+G` opens the manager.
+Session start starts the detached daemon from the plugin tree. No PATH. No extra `omp-agent daemon`. Widget should show `oh-my-agent · 0 running · 0 parked · 0 unread · /manage`, drawn in your OMP theme and symbol preset. `/manage` opens the manager.
 
 Inside the TUI:
 

@@ -17,7 +17,8 @@
  * `ExtensionIO` adapter; nothing throws into the TUI. Session start starts
  * the detached daemon from the plugin tree if the socket is down, then
  * paints the widget. `/cli` and `/console` run the same dispatcher as the
- * shell binary, so PATH is never required. A spawn that fails still paints
+ * shell binary, so PATH is never required. No keybindings are registered:
+ * every surface is a slash command. A spawn that fails still paints
  * the shared daemon-down sentence. Turn-end refreshes only — it does not
  * restart a daemon the operator just stopped.
  */
@@ -47,13 +48,23 @@ import {
 import { ensureDaemon } from "./ensure-daemon";
 import type { ManagerHostContext } from "./manager";
 import { openManager } from "./manager";
+import { themeFrom } from "./theme";
 import { createDaemonClient, markRoomsRead, refreshWidget } from "./widget";
 
 /** Adapt OMP's UI context onto the seam the commands are written against. */
 function ioFrom(ui: ExtensionUIContext): ExtensionIO {
 	return {
 		notify: (message) => ui.notify(message),
-		setWidget: (key, lines) => ui.setWidget(key, lines),
+		// A renderer becomes a component factory, so the widget is drawn with
+		// the theme the host hands over at render time — the operator's
+		// palette and symbol preset, not ours.
+		setWidget: (key, content) =>
+			ui.setWidget(
+				key,
+				typeof content === "function"
+					? (_tui, theme) => ({ render: () => content(themeFrom(theme)) })
+					: content,
+			),
 		confirm: async (title, message) => await ui.confirm(title, message),
 		select: async (title, options) =>
 			await ui.select(
@@ -220,18 +231,9 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 		},
 	});
 
-	// Feature-guarded: `registerShortcut` is present on the real
-	// `ExtensionAPI`, but a host (or an older one) that lacks it must still
-	// load the extension — the shortcut is a convenience, and `/manage` is
-	// the surface that has to work. Ctrl+G belongs to OMP's external-editor
-	// binding, so this uses Alt+G and never shadows a core shortcut.
-	pi.registerShortcut?.("alt+g", {
-		description: "Open the oh-my-agent manager.",
-		handler: async (ctx) => {
-			await openManager(client, ioFrom(ctx.ui), managerHostFrom(ctx));
-			await refreshWidget(client, ioFrom(ctx.ui));
-		},
-	});
+	// No keybindings. Every surface is reached through a slash command, so
+	// nothing here can collide with a binding the operator or another
+	// extension owns, and the widget's hint names the command instead.
 
 	// The widget is a runtime surface: first paint on session start, then a
 	// refresh after every turn so counts track the daemon without polling.

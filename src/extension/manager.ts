@@ -27,6 +27,7 @@ import type {
 	LogsTailResult,
 } from "../shared/protocol";
 import { type DaemonClient, type ExtensionIO, editCommand } from "./commands";
+import { PLAIN_THEME, type TuiTheme, themeFrom } from "./theme";
 
 /** Said when the host has no terminal UI to host the overlay. */
 export const MANAGER_NEEDS_TUI =
@@ -109,16 +110,22 @@ export class ManagerState {
 	}
 
 	/** The tree as display lines, cursor marked. */
-	renderLines(): string[] {
-		if (this.#error !== undefined) return [this.#error];
-		if (this.#rows.length === 0) return ["No agents are running."];
+	renderLines(t: TuiTheme = PLAIN_THEME): string[] {
+		if (this.#error !== undefined) return [t.fg("error", this.#error)];
+		if (this.#rows.length === 0) {
+			return [t.fg("muted", "No agents are running.")];
+		}
 		return this.#rows.map((row, index) => {
-			const marker = index === this.#cursor ? "›" : " ";
-			const model = row.agent.model === undefined ? "" : ` ${row.agent.model}`;
+			const selected = index === this.#cursor;
+			const marker = selected ? t.fg("accent", t.nav.cursor) : " ";
+			const name = selected ? t.bold(row.agent.name) : row.agent.name;
+			const state = stateMark(t, row.agent.state);
+			const model =
+				row.agent.model === undefined ? "" : t.fg("dim", ` ${row.agent.model}`);
 			const orphan = row.orphan
-				? ` (orphan: ${row.agent.parent ?? "missing-parent"})`
+				? t.fg("warning", ` (orphan: ${row.agent.parent ?? "missing-parent"})`)
 				: "";
-			return `${marker} ${"  ".repeat(row.depth)}${row.agent.name} — ${row.agent.state} (${row.agent.account})${model}${orphan}`;
+			return `${marker} ${"  ".repeat(row.depth)}${name} ${state} ${t.fg("muted", `(${row.agent.account})`)}${model}${orphan}`;
 		});
 	}
 
@@ -308,6 +315,8 @@ export interface ManagerComponentHost {
 	done: (result: ManagerResult) => void;
 	/** Ask the host to repaint after asynchronous work. */
 	requestRender: () => void;
+	/** The host's theme; plain text when a host passes none. */
+	theme?: TuiTheme;
 }
 
 /** The pi-tui `Component` shape the overlay satisfies. */
@@ -406,7 +415,13 @@ export function createManagerComponent(
 			// The engine proves rows are unchanged by reference equality, so an
 			// unchanged frame must return the very same array.
 			if (cache !== undefined && cacheWidth === width) return cache;
-			const lines = renderMode(state, mode, status, busy);
+			const lines = renderMode(
+				state,
+				mode,
+				status,
+				busy,
+				host.theme ?? PLAIN_THEME,
+			);
 			cacheWidth = width;
 			cache = lines;
 			return lines;
@@ -550,70 +565,107 @@ function scrollDelta(data: string): number {
 	return 0;
 }
 
-/** Draw whichever mode the manager is in. */
+/** A peer's state as the operator's status mark plus a colored word. */
+function stateMark(t: TuiTheme, state: string): string {
+	if (state === "running")
+		return t.fg("success", `${t.status.success} running`);
+	if (state === "parked") return t.fg("warning", `${t.status.pending} parked`);
+	return t.fg("error", `${t.status.error} ${state}`);
+}
+
+/** `oh-my-agent — <subject>`, the accent on the name and the rest muted. */
+function title(t: TuiTheme, subject: string): string {
+	return `${t.bold(t.fg("accent", "oh-my-agent"))} ${t.fg("muted", `— ${subject}`)}`;
+}
+
+/** Key hints joined by the operator's separator, dimmed out of the way. */
+function hints(t: TuiTheme, ...parts: string[]): string {
+	const arrows = t.ascii ? "Up/Down" : "↑/↓";
+	return t.fg(
+		"dim",
+		parts.map((p) => p.replace("↑/↓", arrows)).join(` ${t.sep.dot} `),
+	);
+}
+
+/** A choice list: the operator's cursor beside the selected row. */
+function choices(
+	t: TuiTheme,
+	labels: readonly string[],
+	index: number,
+): string[] {
+	return labels.map((label, i) =>
+		i === index
+			? `${t.fg("accent", t.nav.cursor)} ${t.bold(label)}`
+			: `  ${label}`,
+	);
+}
+
+/** Draw whichever mode the manager is in, with the host's theme. */
 function renderMode(
 	state: ManagerState,
 	mode: ManagerMode,
 	status: string,
 	busy: boolean,
+	t: TuiTheme,
 ): string[] {
-	const footer = busy ? "working…" : "";
+	const footer = busy ? t.fg("muted", "working…") : "";
 	if (mode.kind === "logs") {
 		return [
-			`oh-my-agent — logs: ${mode.name}`,
+			title(t, `logs: ${mode.name}`),
 			"",
 			...mode.lines.slice(mode.offset, mode.offset + LOG_PANE_ROWS),
 			"",
-			"↑/↓ scroll · Esc back",
+			hints(t, "↑/↓ scroll", "Esc back"),
 		];
 	}
 	if (mode.kind === "menu") {
 		return [
-			`oh-my-agent — ${mode.agent.name}`,
+			title(t, mode.agent.name),
 			"",
-			...ACTION_ORDER.map(
-				(action, index) => `${index === mode.index ? "›" : " "} ${action}`,
-			),
+			...choices(t, ACTION_ORDER, mode.index),
 			"",
-			footer === "" ? "↑/↓ move · Enter choose · Esc back" : footer,
+			footer === "" ? hints(t, "↑/↓ move", "Enter choose", "Esc back") : footer,
 		];
 	}
 	if (mode.kind === "confirm-kill") {
 		return [
-			`oh-my-agent — kill ${mode.agent.name}?`,
+			title(t, `kill ${mode.agent.name}?`),
 			"",
-			`Stop ${mode.agent.name}. You will choose what happens to its children next.`,
+			t.fg(
+				"warning",
+				`Stop ${mode.agent.name}. You will choose what happens to its children next.`,
+			),
 			"",
-			footer === "" ? "y kill · n cancel · Esc back" : footer,
+			footer === "" ? hints(t, "y kill", "n cancel", "Esc back") : footer,
 		];
 	}
 	if (mode.kind === "cascade") {
 		return [
-			`oh-my-agent — kill ${mode.agent.name}`,
+			title(t, `kill ${mode.agent.name}`),
 			"",
-			...CASCADE_ORDER.map(
-				(label, index) => `${index === mode.choice ? "›" : " "} ${label}`,
-			),
+			...choices(t, CASCADE_ORDER, mode.choice),
 			"",
-			footer === "" ? "↑/↓ move · Enter confirm · Esc back" : footer,
+			footer === ""
+				? hints(t, "↑/↓ move", "Enter confirm", "Esc back")
+				: footer,
 		];
 	}
 	if (mode.kind === "inject") {
 		return [
-			`oh-my-agent — inject into ${mode.agent.name}`,
+			title(t, `inject into ${mode.agent.name}`),
 			"",
-			`> ${mode.draft}`,
+			`${t.fg("accent", ">")} ${mode.draft}`,
 			"",
-			footer === "" ? "Enter send · Esc cancel" : footer,
+			footer === "" ? hints(t, "Enter send", "Esc cancel") : footer,
 		];
 	}
 	return [
-		"oh-my-agent — agents",
+		title(t, "agents"),
 		"",
-		...state.renderLines(),
+		...state.renderLines(t),
 		"",
-		...(status === "" ? [] : [status, ""]),
-		footer === "" ? "↑/↓ move · Enter actions · Esc close" : footer,
+		...(status === "" ? [] : [t.fg("success", status), ""]),
+		footer === "" ? hints(t, "↑/↓ move", "Enter actions", "Esc close") : footer,
 	];
 }
 
@@ -629,13 +681,16 @@ export interface ManagerTui {
 export function managerFactory(state: ManagerState) {
 	return (
 		tui: ManagerTui,
-		_theme: unknown,
+		theme: unknown,
 		_keybindings: unknown,
 		done: (result: ManagerResult) => void,
 	): ManagerComponent =>
 		createManagerComponent(state, {
 			done,
 			requestRender: () => tui.requestRender(),
+			// The host's theme, so the overlay uses the operator's palette and
+			// symbol preset; a host that passes none gets plain text.
+			theme: themeFrom(theme),
 		});
 }
 
