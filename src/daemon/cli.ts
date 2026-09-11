@@ -33,6 +33,7 @@ import type {
 	KillResult,
 	LogsTailResult,
 	MethodName,
+	ModelsListResult,
 	RoomsListResult,
 	RoomsPostResult,
 	SchedulesArmResult,
@@ -276,6 +277,28 @@ async function audit(
 					`${connection.identity}\t${connection.class}\t${connection.source}\t${connection.connectedAt}`,
 			),
 		].join("\n"),
+	);
+}
+
+/** `models` — what a peer can be pointed at; the default is marked. */
+async function models(
+	client: DaemonClient,
+	io: CliIo,
+	json: boolean,
+): Promise<void> {
+	const result = await client.call<ModelsListResult>("models_list", {});
+	output(
+		io,
+		result,
+		json,
+		result.models
+			.map((model) => {
+				const selector = `${model.provider}/${model.id}`;
+				return selector === result.default
+					? `${selector}\t${model.name}\t(default)`
+					: `${selector}\t${model.name}`;
+			})
+			.join("\n"),
 	);
 }
 
@@ -891,6 +914,10 @@ export async function runCli(
 			case "agents":
 				if (args.length !== 1) throw new UsageError();
 				await agents(client, io, json);
+				return 0;
+			case "models":
+				if (args.length !== 1) throw new UsageError();
+				await models(client, io, json);
 				return 0;
 			case "agent":
 				await agent(client, args, io, json, readStdin);

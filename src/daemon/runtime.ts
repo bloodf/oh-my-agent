@@ -54,6 +54,7 @@ import { fingerprintPeerDefinition } from "../shared/agent-definition";
 import type {
 	AgentSpawnResult,
 	DaemonStopResult,
+	ModelsListResult,
 	RoomInfo,
 	ScheduleInfo,
 } from "../shared/protocol";
@@ -69,7 +70,10 @@ import { DaemonDb } from "./db";
 import { resolveDefaultModel } from "./default-model";
 import { seedDefaultPeers } from "./default-peers";
 import type { ScopedInferenceGateway } from "./inference-gateway";
-import { startScopedInferenceGateway } from "./inference-gateway";
+import {
+	listRoutableModels,
+	startScopedInferenceGateway,
+} from "./inference-gateway";
 import { materializeWorker } from "./materializer";
 import { createOperations } from "./operations";
 import type { PeerDefinitionFields } from "./peer-store";
@@ -1902,6 +1906,40 @@ export async function bootDaemon(
 			}
 		};
 
+		/**
+		 * The picker's catalog: what every credential the daemon holds can
+		 * route to, plus the default a model-less peer runs on. A token scoped
+		 * to the union of credentials, minted per call and revoked after, so
+		 * the listing never leaves a long-lived bearer behind.
+		 */
+		const listModels = async (): Promise<ModelsListResult> => {
+			const credentialIds = [
+				...new Set([...providerCredentials.values()].flat()),
+			];
+			const issued = gateway.issueWorkerToken({
+				workerId: "models-list",
+				credentialIds,
+			});
+			try {
+				const models = await listRoutableModels({
+					brokerUrl: gateway.url,
+					brokerToken: issued.token,
+					modelsPath: join(agentDir, "models.yml"),
+					// The daemon's injectable upstream transport is typed narrower than
+					// the global `fetch` the registry wants; only a test injects one.
+					...(options.fetchUpstream === undefined
+						? {}
+						: { fetch: options.fetchUpstream as unknown as typeof fetch }),
+				});
+				return {
+					models,
+					...(defaultModel === undefined ? {} : { default: defaultModel }),
+				};
+			} finally {
+				gateway.revokeWorkerToken?.(issued.token);
+			}
+		};
+
 		const context: DaemonContext = {
 			rooms,
 			plans,
@@ -1923,6 +1961,7 @@ export async function bootDaemon(
 			killPeer,
 			armSchedule,
 			bumpAccount,
+			listModels,
 			requestDaemonStop,
 			daemonLog,
 			operations,
@@ -1986,6 +2025,7 @@ export async function bootDaemon(
 				peerStore: store,
 				ensureRoom,
 				spawnPeer,
+				listModels,
 				// The same object the control socket got, not a second copy.
 				operations,
 				token,

@@ -63,14 +63,22 @@ Shell CLI is optional. Full path, no export:
 
 This install path is the one CI runs against a packed tarball in [`tests/consumer-install.test.ts`](https://github.com/bloodf/oh-my-agent/blob/main/tests/consumer-install.test.ts).
 
-The published npm package does not ship `agents/` or `docs/`. Follow the hosted [getting-started guide](https://github.com/bloodf/oh-my-agent/blob/main/docs/guide/getting-started.md), then:
+A default team ships with the package and starts on the daemon's first boot: `staff-pm`, `staff-backend`, `staff-frontend`, and `staff-qa`, each in its own room plus a shared `#team`. They run on whatever model you have picked as OMP's default (`/model`), so nothing needs configuring first. Post a brief:
+
+```
+/rooms post #team @staff-pm scope a login page with email and password
+```
+
+Pick a different model per peer with `/edit <name>` → Model, which lists every model your credentials can reach, or with the console's agent form. `omp-agent models` prints the same list. Delete a default peer's file from `~/.omp/agent/oh-my-agent/agents/` and it stays gone; edit it and your edit is kept.
+
+To write your own, follow the hosted [getting-started guide](https://github.com/bloodf/oh-my-agent/blob/main/docs/guide/getting-started.md), then:
 
 ```
 /cli agent create researcher researcher.md
 /spawn researcher
 ```
 
-Definitions use markdown with YAML frontmatter, the same shape as OMP task agents, with a fully qualified `provider/id` model.
+Definitions use markdown with YAML frontmatter, the same shape as OMP task agents. `model` is optional: a fully qualified `provider/id` when set, the OMP default otherwise.
 
 ## How it works
 

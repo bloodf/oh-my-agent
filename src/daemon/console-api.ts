@@ -60,6 +60,7 @@ import type {
 	AgentCreateParams,
 	AgentSpawnResult,
 	AgentStatus,
+	ModelsListResult,
 	RoomInfo,
 } from "../shared/protocol";
 import { METHODS } from "../shared/protocol-schemas";
@@ -246,6 +247,11 @@ export interface StartConsoleApiOptions {
 	peerStore: PeerStore;
 	/** Create the room if absent and add it to the live room index. */
 	ensureRoom(id: string): Promise<void>;
+	/**
+	 * The models a peer can be pointed at, plus the daemon default. Optional:
+	 * a console composed without a credential gateway offers free text only.
+	 */
+	listModels?(): Promise<ModelsListResult>;
 	/** Explicitly start a durable definition. Creation and DMs never call this. */
 	spawnPeer?(
 		name: string,
@@ -1000,6 +1006,15 @@ export async function startConsoleApi(
 			decodeURIComponent(path);
 		} catch {
 			return fail(400, "invalid_request", `Malformed escape in ${path}`);
+		}
+
+		// The picker's catalog. No gateway means an empty list, never an error:
+		// the model field stays free text and the daemon default applies.
+		if (path === "/api/models" && request.method === "GET") {
+			return json(
+				200,
+				options.listModels ? await options.listModels() : { models: [] },
+			);
 		}
 
 		if (path === "/api/agents") {

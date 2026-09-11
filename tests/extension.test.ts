@@ -364,6 +364,14 @@ async function startDaemon(
 	const stateDir = join(dir, "oh-my-agent");
 	await mkdir(stateDir, { recursive: true });
 	const socketPath = join(stateDir, "daemon.sock");
+	// The catalog the picker asks for; one entry marked as the daemon default.
+	context.listModels = async () => ({
+		models: [
+			{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
+			{ provider: "openai", id: "gpt-5", name: "GPT-5" },
+		],
+		default: "openai/gpt-4.1",
+	});
 	const socket = await startControlSocket({
 		socketPath,
 		context,
@@ -1296,6 +1304,19 @@ describe("editing flows", () => {
 		expect(io.editors[1]?.prefill).toBe(removedModel);
 	});
 
+	test("picking the marked default stores the bare selector", async () => {
+		const daemon = await startDaemon([{ name: "alpha" }], {
+			definitions: [definition()],
+		});
+		const io = fakeIo();
+		io.selectAnswers = ["Model", "openai/gpt-4.1 (default)"];
+		await editCommand(daemon.client, io, "alpha");
+		const fetched = await daemon.client.call<{
+			definition: { model?: string[] };
+		}>("definition_get", { name: "alpha" });
+		expect(fetched.definition.model).toEqual(["openai/gpt-4.1"]);
+	});
+
 	test("model editing selects a configured role or free input", async () => {
 		const daemon = await startDaemon([{ name: "alpha" }], {
 			definitions: [definition()],
@@ -1303,9 +1324,14 @@ describe("editing flows", () => {
 		const configured = fakeIo();
 		configured.selectAnswers = ["Model", "anthropic/claude-sonnet-4-5"];
 		await editCommand(daemon.client, configured, "alpha");
+		// The configured values first, then the daemon's catalog with the
+		// default marked, then free text. A picker that only offered what was
+		// already configured could not change anything.
 		expect(configured.selects[1]?.options).toEqual([
 			"@review",
 			"anthropic/claude-sonnet-4-5",
+			"openai/gpt-4.1 (default)",
+			"openai/gpt-5",
 			"Enter another model…",
 		]);
 

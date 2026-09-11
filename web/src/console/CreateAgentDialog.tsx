@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Bot, Folder, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -24,6 +24,14 @@ export function CreateAgentDialog({ open, onOpenChange, call, onCreated, initial
   const [draft, setDraft] = useState<Draft>(() => ({ ...EMPTY, kind: initialKind }));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [catalog, setCatalog] = useState<{ models: { provider: string; id: string; name: string }[]; default?: string }>({ models: [] });
+  // The daemon's catalog, fetched when the dialog opens: every model it can
+  // route to, and the default a peer with no model runs on. A daemon without
+  // one answers an empty list and the field stays free text.
+  useEffect(() => {
+    if (!open) return;
+    void call("/api/models").then((result) => setCatalog(result as typeof catalog)).catch(() => setCatalog({ models: [] }));
+  }, [open, call]);
   const field = (key: keyof Draft) => ({ value: String(draft[key]), onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft((current) => ({ ...current, [key]: event.target.value })) });
   const chooseKind = (kind: "agent" | "bot") => setDraft((current) => ({ ...current, kind }));
   return (
@@ -56,7 +64,7 @@ export function CreateAgentDialog({ open, onOpenChange, call, onCreated, initial
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5"><Label htmlFor="new-agent-name">Name</Label><Input id="new-agent-name" required autoFocus autoComplete="off" {...field("name")} /></div>
             <div className="grid gap-1.5"><Label htmlFor="new-agent-description">Description</Label><Input id="new-agent-description" required {...field("description")} /></div>
-            <div className="grid gap-1.5"><Label htmlFor="new-agent-model">Model <span className="font-normal text-muted-foreground">(optional)</span></Label><Input id="new-agent-model" placeholder="provider/model" {...field("model")} /></div>
+            <div className="grid gap-1.5"><Label htmlFor="new-agent-model">Model <span className="font-normal text-muted-foreground">(optional)</span></Label><Input id="new-agent-model" list="new-agent-model-catalog" placeholder={catalog.default ? `default: ${catalog.default}` : "provider/model"} {...field("model")} /><datalist id="new-agent-model-catalog">{catalog.models.map((model) => <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>{model.name}</option>)}</datalist><p className="text-xs text-muted-foreground">Leave empty to run on the OMP default model.</p></div>
             <div className="grid gap-1.5"><Label htmlFor="new-agent-rooms">Channels and DMs</Label><Input id="new-agent-rooms" placeholder="#engineering, @operator" {...field("rooms")} /></div>
             <div className="grid gap-1.5 sm:col-span-2"><Label htmlFor="new-agent-workspace">Working directory <span className="font-normal text-muted-foreground">(optional)</span></Label><div className="flex gap-2"><Input id="new-agent-workspace" placeholder="Uses channel workspace when unset" {...field("workspace")} />{onPickWorkspace && <Button type="button" variant="outline" aria-label="Browse agent workspace" onClick={() => void onPickWorkspace(draft.workspace).then((workspace) => setDraft((current) => ({ ...current, workspace })))}><Folder /></Button>}</div><p className="text-xs text-muted-foreground">Explicit peer workspace wins over channel working directory.</p></div>
             <div className="grid gap-1.5 sm:col-span-2"><Label htmlFor="new-agent-spawns">Can spawn <span className="font-normal text-muted-foreground">(blank allows all)</span></Label><Input id="new-agent-spawns" placeholder="reviewer, researcher" {...field("spawns")} /></div>

@@ -42,6 +42,7 @@ The two-model review (sol + m3) found the console advertises thread replies and 
 
 | Task | Title | Status |
 |---|---|---|
+| [T-1620](../tasks/T-1620-default-staff-team.md) | A default staff team, ready on first boot, on the operator's model | Done |
 | [T-1601](../tasks/T-1601-console-thread-parentage.md) | Console thread replies preserve parentage | Done |
 | [T-1602](../tasks/T-1602-reaction-removal-frames.md) | Reaction removal frames | Done |
 | [T-1603](../tasks/T-1603-attribution-enforcement.md) | Enforce attribution from connection identity | Done |

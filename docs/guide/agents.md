@@ -6,6 +6,12 @@ Create, then spawn. `agent create` does not start a worker. `spawn` does not tak
 
 Related: [Getting started](getting-started.md), [Concepts](concepts.md), skill [`omp-agent-authoring`](../../skills/omp-agent-authoring/SKILL.md).
 
+## The default team
+
+Four staff peers ship with the package: `staff-pm`, `staff-backend`, `staff-frontend`, and `staff-qa`. On the daemon's first boot they are copied into the user store, once. The marker `.defaults-seeded.json` beside them records what was offered, so an edited seed is never overwritten and a deleted one stays deleted. A peer of your own with the same name is left alone.
+
+They declare no `model`. A peer without one runs on OMP's default model role (`/model`, or `modelRoles.default` in `config.yml`), with any `:thinking` suffix dropped. `status` and `agents` report the model a peer actually runs on. Change it per peer with `/edit <name>` → Model, whose list comes from `models_list`: every model the daemon's credentials can route to, with the default marked. The console's agent form offers the same list, and `omp-agent models` prints it.
+
 ## Where definitions live
 
 | Root | Role |

@@ -36,6 +36,7 @@ import type {
 	KillResult,
 	LogsTailResult,
 	MethodName,
+	ModelsListResult,
 	RoomsPostResult,
 	SchedulesArmResult,
 	SchedulesListResult,
@@ -206,8 +207,22 @@ async function editModel(
 	const configured = Array.isArray(fetched.definition.model)
 		? fetched.definition.model
 		: [];
+	// The daemon's catalog, when it has one: every model its credentials can
+	// route to, with the default marked. An older daemon answers method-not-
+	// found and the picker falls back to the configured value and free text.
+	let catalog: string[] = [];
+	try {
+		const listed = await client.call<ModelsListResult>("models_list", {});
+		catalog = listed.models.map((model) => {
+			const selector = `${model.provider}/${model.id}`;
+			return selector === listed.default ? `${selector} (default)` : selector;
+		});
+	} catch {
+		catalog = [];
+	}
 	const selected = await io.select(`Model for ${fetched.name}`, [
 		...configured,
+		...catalog.filter((entry) => !configured.includes(entry)),
 		FREE_MODEL,
 	]);
 	if (selected === undefined) return undefined;
@@ -222,7 +237,7 @@ async function editModel(
 		"definition_update",
 		{
 			name: fetched.name,
-			changes: { model: [model.trim()] },
+			changes: { model: [model.replace(/ \(default\)$/, "").trim()] },
 		},
 	);
 	return updateMessage(result);

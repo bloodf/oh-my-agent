@@ -55,6 +55,7 @@ import type {
 	KillResult,
 	LogsTailResult,
 	MethodName,
+	ModelsListResult,
 	RoomsListResult,
 	SchedulesArmResult,
 	SchedulesListResult,
@@ -663,6 +664,25 @@ describe("bootDaemon — composition and the control socket", () => {
 		// The operator's own choice always wins and is never overridden.
 		expect(byName.get("reviewer")?.model).toBe("openai/gpt-4.1");
 		expect(received.get("reviewer")).toBeUndefined();
+	});
+
+	test("models_list answers a catalog and the daemon default over the real socket", async () => {
+		const agentDir = await tempAgentDir();
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: await tempAgentDir(),
+			workerFactory: stubWorkerFactory().factory,
+			defaultModel: "acme/default-1",
+		});
+		cleanups.push(() => handle.close());
+
+		const listed = await call<ModelsListResult>(
+			handle.socketPath,
+			"models_list",
+		);
+		expect(Array.isArray(listed.models)).toBe(true);
+		expect(listed.default).toBe("acme/default-1");
 	});
 
 	test("a harness boot seeds nothing", async () => {
@@ -1423,6 +1443,7 @@ describe("bootDaemon — protocol errors", () => {
 				expectedRevision: 1,
 			},
 			schedules_list: {},
+			models_list: {},
 			logs_tail: { name: "reviewer" },
 			inject: { name: "reviewer", message: "focus" },
 			schedules_arm: { scheduleId: "missing", enabled: false },

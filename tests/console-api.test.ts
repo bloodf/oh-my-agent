@@ -112,7 +112,15 @@ function peerDocument(name: string, rooms: string[]): string {
  * `src/daemon/main.ts` builds (main.ts:265-270). The console API is handed
  * exactly the slice of `DaemonContext` it is allowed to touch.
  */
-async function harness(options: { pollIntervalMs?: number } = {}) {
+async function harness(
+	options: {
+		pollIntervalMs?: number;
+		listModels?: () => Promise<{
+			models: { provider: string; id: string; name: string }[];
+			default?: string;
+		}>;
+	} = {},
+) {
 	const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-console-"));
 	cleanups.push(() => rm(dir, { recursive: true, force: true }));
 
@@ -249,6 +257,9 @@ async function harness(options: { pollIntervalMs?: number } = {}) {
 		...(options.pollIntervalMs === undefined
 			? {}
 			: { pollIntervalMs: options.pollIntervalMs }),
+		...(options.listModels === undefined
+			? {}
+			: { listModels: options.listModels }),
 	});
 	cleanups.push(() => api.close());
 	// Nameable only after construction, which is the whole reason the console
@@ -605,6 +616,30 @@ describe("operator token", () => {
 });
 
 // ── Channels ─────────────────────────────────────────────────────────────────
+
+describe("models", () => {
+	test("GET /api/models answers the daemon's catalog and default", async () => {
+		const h = await harness({
+			listModels: async () => ({
+				models: [{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" }],
+				default: "openai/gpt-4.1",
+			}),
+		});
+		const res = await h.call("/api/models");
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			models: [{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" }],
+			default: "openai/gpt-4.1",
+		});
+	});
+
+	test("a console with no catalog answers an empty list, not an error", async () => {
+		const h = await harness();
+		const res = await h.call("/api/models");
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ models: [] });
+	});
+});
 
 describe("channels", () => {
 	test("creating a channel over HTTP makes it visible in the list", async () => {

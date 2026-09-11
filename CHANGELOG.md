@@ -6,6 +6,12 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Added
+
+- A default team ships with the package: `staff-pm`, `staff-backend`, `staff-frontend`, and `staff-qa`, seeded into the user store once on the daemon's first boot, each with its own room and a shared `#team`. Edits and deletions are kept on later boots.
+- A peer with no `model` runs on OMP's default model role, so the default team starts without any configuration. `status` and `agents` name the model a peer actually runs on.
+- `models_list` on the control socket, `omp-agent models`, `/edit <name>` → Model, and the console's agent form all offer every model the daemon's credentials can reach, with the default marked.
+
 ### Fixed
 
 - The TUI no longer reports a running daemon as absent. A missing or refused operator token used to read as "not running", so every session start spawned a second daemon that died on the pidfile and logged an uncaught exception. Token faults are now reported as such and never trigger a spawn; a second launch against a live daemon points at it and exits cleanly; and the daemon rewrites `console-token` and `console-url` if they go missing under it.

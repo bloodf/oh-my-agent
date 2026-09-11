@@ -23,6 +23,7 @@ Verbs:
   schedule
   schedule <id> on|off
   logs <name|daemon> [n]
+  models
   inject <name> <text...>
   bump <account> <usd>
   console

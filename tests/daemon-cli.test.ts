@@ -749,6 +749,41 @@ describe("omp-agent CLI — --json matches the protocol result", () => {
 
 // ── Usage text ───────────────────────────────────────────────────────────────
 
+describe("omp-agent CLI — models", () => {
+	test("models lists selectors and names the default, in text and JSON", async () => {
+		const agentDir = await tempAgentDir();
+		const factory: WorkerFactory = async ({ peer }) => ({
+			name: peer.name,
+			state: "running",
+			prompt: async () => {},
+			park: async () => {},
+			resume: async () => {},
+			stop: async () => {},
+		});
+		const handle = await bootDaemon({
+			env: {},
+			agentDir,
+			projectDir: agentDir,
+			workerFactory: factory,
+			defaultModel: "acme/default-1",
+		});
+		cleanups.push(() => handle.close());
+
+		const text = await runCapture(["models"], { agentDir });
+		expect(text.code).toBe(0);
+		expect(text.io.stderr).toBe("");
+
+		const json = await runCapture(["--json", "models"], { agentDir });
+		expect(json.code).toBe(0);
+		const parsed = JSON.parse(json.io.stdout) as {
+			models: unknown[];
+			default?: string;
+		};
+		expect(Array.isArray(parsed.models)).toBe(true);
+		expect(parsed.default).toBe("acme/default-1");
+	});
+});
+
 describe("omp-agent CLI — usage text", () => {
 	test("unknown verb exits 2 with usage listing real verbs", async () => {
 		const agentDir = await tempAgentDir();

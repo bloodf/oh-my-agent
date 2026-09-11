@@ -31,7 +31,7 @@ Task numbers follow the epic: `EP-00` owns `T-0xx`, `EP-12` owns `T-12xx`.
 3. Read the task's Read first links, then the files, then implement against Acceptance.
 4. A task listing more than about six files is too large. Split it in the generator rather than stretching the PR.
 
-Today the tree is **97 of 101 Done**. Nothing is Ready. Four tasks are Blocked on things outside the repo:
+Today the tree is **98 of 102 Done**. Nothing is Ready. Four tasks are Blocked on things outside the repo:
 
 | Task | Why it is Blocked |
 |---|---|

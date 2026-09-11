@@ -55,6 +55,18 @@ oh-my-agent daemon not running — start it with `omp-agent daemon`.
 
 The TUI already tried to start it. That sentence means the auto-start failed; run `omp-agent daemon` from PATH as the fallback.
 
+## The default team
+
+The daemon seeds four peers into `~/.omp/agent/oh-my-agent/agents/` on its first boot and starts them: `staff-pm` (`#product`), `staff-backend` (`#backend`), `staff-frontend` (`#frontend`), and `staff-qa` (`#qa`), all also in `#team`. They declare no model, so they run on OMP's default model role, the one `/model` sets. `omp-agent agents` shows the model each one is actually on.
+
+```
+/rooms post #team @staff-pm scope a login page with email and password
+```
+
+To put one on a different model, `/edit staff-backend` → Model. The picker lists every model the daemon's credentials can reach, with the default marked; `omp-agent models` prints the same list. The seed is offered once: a definition you edit is never overwritten, and one you delete is not recreated.
+
+The rest of this guide writes a peer of your own.
+
 ## 3. Install the native scout
 
 The researcher restricts temporary subagents to `scout`. Native task-agent definitions are separate from persistent oh-my-agent peers, and the npm package does not ship one. Create this read-only native definition before spawning researcher:

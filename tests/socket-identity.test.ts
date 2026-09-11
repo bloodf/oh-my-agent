@@ -107,6 +107,7 @@ const VALID_PARAMS: Record<MethodName, unknown> = {
 		expectedRevision: 1,
 	},
 	schedules_list: {},
+	models_list: {},
 	schedules_arm: { scheduleId: "reviewer:schedule:0", enabled: false },
 	kill: { name: "other" },
 	bump: { account: "test", budgetUsd: 20 },

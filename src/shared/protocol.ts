@@ -50,6 +50,7 @@ export const METHOD_NAMES = [
 	"room_plan_update",
 	"schedules_list",
 	"schedules_arm",
+	"models_list",
 	"kill",
 	"bump",
 	"daemon_stop",
@@ -317,6 +318,20 @@ export interface RoomPlanUpdateResult {
 }
 
 export type SchedulesListParams = Record<string, never>;
+
+/** One model a peer can be pointed at, as `provider/id`. */
+export interface ModelChoice {
+	provider: string;
+	id: string;
+	name: string;
+}
+export type ModelsListParams = Record<string, never>;
+export interface ModelsListResult {
+	/** Every model the daemon's credentials can route to, sorted by selector. */
+	models: ModelChoice[];
+	/** The `provider/id` a peer with no `model:` runs on, when OMP has one. */
+	default?: string;
+}
 export interface SchedulesListResult {
 	schedules: ScheduleInfo[];
 }

@@ -83,6 +83,8 @@ import type {
 	LogsTailParams,
 	LogsTailResult,
 	MethodName,
+	ModelsListParams,
+	ModelsListResult,
 	RoomInfo,
 	RoomMessage,
 	RoomPlanCreateParams,
@@ -477,6 +479,12 @@ export interface DaemonContext {
 	/** Raise a metered account's ceiling and resume it. Returns the peers the bump resumed. */
 	bumpAccount(accountId: string, budgetUsd: number): Promise<string[]>;
 	/**
+	 * The models the daemon can route a peer to, plus the default a peer with
+	 * no `model:` runs on. Optional: a context assembled for one narrow
+	 * surface has no credential gateway to ask.
+	 */
+	listModels?(): Promise<ModelsListResult>;
+	/**
 	 * Begin this daemon's shutdown and answer what the caller may watch.
 	 *
 	 * Owned by `./main` because only the composition root knows the pidfile it
@@ -599,6 +607,7 @@ interface ParamsByMethod {
 	room_plan_create: RoomPlanCreateParams & { author?: string };
 	room_plan_update: RoomPlanUpdateParams & { author?: string };
 	schedules_list: SchedulesListParams;
+	models_list: ModelsListParams;
 	schedules_arm: SchedulesArmParams;
 	/**
 	 * `keep_children` rides along unvalidated by `METHODS`, which checks only
@@ -1230,6 +1239,16 @@ export async function startControlSocket(
 				body: lines.join("\n"),
 			});
 			return { handoffId: `${room}:${posted.messageId}` };
+		},
+
+		models_list: async (): Promise<ModelsListResult> => {
+			if (!context.listModels) {
+				throw new InvalidParamsError(
+					"params",
+					"Model listing is not available on this daemon",
+				);
+			}
+			return await context.listModels();
 		},
 
 		schedules_list: async (): Promise<SchedulesListResult> => ({

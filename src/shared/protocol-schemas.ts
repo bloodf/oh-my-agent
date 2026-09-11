@@ -55,6 +55,8 @@ import type {
 	LogsTailParams,
 	LogsTailResult,
 	MethodName,
+	ModelsListParams,
+	ModelsListResult,
 	RoomMessage,
 	RoomPlanCreateParams,
 	RoomPlanCreateResult,
@@ -975,6 +977,23 @@ export const METHODS: Record<MethodName, MethodContract> = {
 			),
 		validateResult: (v): Validation<RoomPlanUpdateResult> =>
 			validatePlanResult(v) as Validation<RoomPlanUpdateResult>,
+	},
+	models_list: {
+		validateParams: (v): Validation<ModelsListParams> => validateNoParams(v),
+		validateResult: (v): Validation<ModelsListResult> => {
+			if (!isRecord(v)) return fail("result", "expected an object");
+			const base = checkFields(v, [(r) => optionalString(r, "default")]);
+			if (base) return fail(base.field, base.message);
+			const models = checkList(v.models, "models", (value) => {
+				if (!isRecord(value)) return "";
+				if (!isNonEmptyString(value.provider)) return "provider";
+				if (!isNonEmptyString(value.id)) return "id";
+				if (typeof value.name !== "string") return "name";
+				return null;
+			});
+			if (!models.ok) return fail(models.field, models.message);
+			return ok(v as unknown as ModelsListResult);
+		},
 	},
 	schedules_list: {
 		validateParams: (v): Validation<SchedulesListParams> => validateNoParams(v),
