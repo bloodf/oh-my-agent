@@ -6,6 +6,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-11
+
 ### Added
 
 - A default team ships with the package: `staff-pm`, `staff-backend`, `staff-frontend`, and `staff-qa`, seeded into the user store once on the daemon's first boot, each with its own room and a shared `#team`. Edits and deletions are kept on later boots.
