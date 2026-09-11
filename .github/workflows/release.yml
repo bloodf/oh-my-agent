@@ -2,7 +2,8 @@ name: release
 
 on:
   # Dispatch authorizes verification and publication of the named tag.
-  # Tag pushes alone never publish; npm-publish environment protection remains.
+  # Tag pushes alone never publish; the dispatch itself is the authorization,
+  # and the npm-publish environment carries the token with no reviewer gate.
   workflow_dispatch:
     inputs:
       tag:
