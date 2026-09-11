@@ -112,6 +112,7 @@ const VALID_PARAMS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 	},
 	schedules_list: {},
 	models_list: {},
+	presets_list: {},
 	schedules_arm: { scheduleId: "sched-1", enabled: true },
 	kill: { name: "researcher" },
 	bump: { account: "acct-1", budgetUsd: 5 },
@@ -219,6 +220,17 @@ const VALID_RESULTS: Record<(typeof METHOD_NAMES)[number], unknown> = {
 		models: [{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" }],
 		default: "openai/gpt-4.1",
 	},
+	presets_list: {
+		presets: [
+			{
+				name: "researcher",
+				description: "Investigates",
+				body: "You research.",
+				spawns: "*",
+				rooms: ["#research"],
+			},
+		],
+	},
 	schedules_list: {
 		schedules: [
 			{
@@ -269,6 +281,7 @@ describe("declared method set", () => {
 				"rooms_list",
 				"logs_tail",
 				"models_list",
+				"presets_list",
 				"rooms_post",
 				"room_plan_create",
 				"room_plan_update",

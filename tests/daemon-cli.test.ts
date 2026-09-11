@@ -449,6 +449,50 @@ function definitionDoc(
 	return `---\n${yaml}\n---\nYou are ${name}.\n`;
 }
 
+describe("omp-agent CLI — presets", () => {
+	test("presets lists the shipped roles; agent create --preset copies one under a new name", async () => {
+		const agentDir = await tempAgentDir();
+		await bootWith(agentDir);
+
+		const listed = await runCapture(["presets"], { agentDir });
+		expect(listed.code).toBe(0);
+		expect(listed.io.stdout).toContain("researcher\t");
+		expect(listed.io.stdout).toContain("security-reviewer\t");
+
+		const created = await runCapture(
+			["agent", "create", "audit", "--preset", "security-reviewer"],
+			{ agentDir },
+		);
+		expect(created.code).toBe(0);
+		expect(created.io.stderr).toBe("");
+		expect(created.io.stdout).toContain(
+			"audit\tcreated\tfrom security-reviewer",
+		);
+
+		const shown = await runCapture(["--json", "agent", "show", "audit"], {
+			agentDir,
+		});
+		const parsed = JSON.parse(shown.io.stdout) as {
+			definition: { name: string; rooms?: string[]; body: string };
+		};
+		expect(parsed.definition.name).toBe("audit");
+		expect(parsed.definition.rooms).toEqual(["#security", "#team"]);
+		expect(parsed.definition.body).toContain("security reviewer");
+
+		// Never started: creation and spawn stay two deliberate calls.
+		const agents = await runCapture(["agents"], { agentDir });
+		expect(agents.io.stdout).not.toContain("audit");
+
+		const unknown = await runCapture(
+			["agent", "create", "x", "--preset", "pirate"],
+			{ agentDir },
+		);
+		expect(unknown.code).not.toBe(0);
+		expect(unknown.io.stderr).toContain('unknown preset "pirate"');
+		expect(unknown.io.stderr).toContain("researcher");
+	});
+});
+
 describe("omp-agent CLI — agent create/show/edit round-trip", () => {
 	test("create writes a definition, show reads it, edit rewrites it", async () => {
 		const agentDir = await tempAgentDir();

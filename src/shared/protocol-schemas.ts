@@ -57,6 +57,8 @@ import type {
 	MethodName,
 	ModelsListParams,
 	ModelsListResult,
+	PresetsListParams,
+	PresetsListResult,
 	RoomMessage,
 	RoomPlanCreateParams,
 	RoomPlanCreateResult,
@@ -998,6 +1000,22 @@ export const METHODS: Record<MethodName, MethodContract> = {
 			});
 			if (!models.ok) return fail(models.field, models.message);
 			return ok(v as unknown as ModelsListResult);
+		},
+	},
+	presets_list: {
+		validateParams: (v): Validation<PresetsListParams> => validateNoParams(v),
+		validateResult: (v): Validation<PresetsListResult> => {
+			if (!isRecord(v)) return fail("result", "expected an object");
+			if (!Array.isArray(v.presets)) return fail("presets", "expected a list");
+			for (const [index, preset] of v.presets.entries()) {
+				// Each preset is a creatable definition; the same shape check
+				// `agent_create` applies, so a client can forward it unchanged.
+				const shape = isRecord(preset)
+					? validateDefinitionShape(preset, `presets[${index}].`, "create")
+					: fail(`presets[${index}]`, "expected an object");
+				if (!shape.ok) return shape as Validation<PresetsListResult>;
+			}
+			return ok(v as unknown as PresetsListResult);
 		},
 	},
 	schedules_list: {

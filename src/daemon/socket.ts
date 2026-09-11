@@ -85,6 +85,8 @@ import type {
 	MethodName,
 	ModelsListParams,
 	ModelsListResult,
+	PresetsListParams,
+	PresetsListResult,
 	RoomInfo,
 	RoomMessage,
 	RoomPlanCreateParams,
@@ -148,6 +150,9 @@ export const WORKER_CALLABLE_METHODS: Partial<Record<MethodName, true>> = {
 	// instructed to follow. It carries no attribution field: a definition
 	// names the peer being written, not the speaker.
 	agent_create: true,
+	// The library a worker hires from: read-only, and the toolbelt's
+	// `agent_create` guidance names it.
+	presets_list: true,
 	agent_spawn: true,
 	task_handoff: true,
 	logs_tail: true,
@@ -484,6 +489,8 @@ export interface DaemonContext {
 	 * surface has no credential gateway to ask.
 	 */
 	listModels?(): Promise<ModelsListResult>;
+	/** The shipped preset library. Optional for the same reason as `listModels`. */
+	listPresets?(): Promise<PresetsListResult>;
 	/**
 	 * Begin this daemon's shutdown and answer what the caller may watch.
 	 *
@@ -608,6 +615,7 @@ interface ParamsByMethod {
 	room_plan_update: RoomPlanUpdateParams & { author?: string };
 	schedules_list: SchedulesListParams;
 	models_list: ModelsListParams;
+	presets_list: PresetsListParams;
 	schedules_arm: SchedulesArmParams;
 	/**
 	 * `keep_children` rides along unvalidated by `METHODS`, which checks only
@@ -1249,6 +1257,16 @@ export async function startControlSocket(
 				);
 			}
 			return await context.listModels();
+		},
+
+		presets_list: async (): Promise<PresetsListResult> => {
+			if (!context.listPresets) {
+				throw new InvalidParamsError(
+					"params",
+					"Preset listing is not available on this daemon",
+				);
+			}
+			return await context.listPresets();
 		},
 
 		schedules_list: async (): Promise<SchedulesListResult> => ({

@@ -21,6 +21,7 @@ import {
 	createPeerStore,
 	type PeerDefinitionFields,
 } from "../src/daemon/peer-store";
+import { listPresets } from "../src/daemon/presets";
 import { Scheduler } from "../src/daemon/scheduler";
 import type {
 	ControlSocket,
@@ -39,6 +40,7 @@ import {
 	injectCommand,
 	killCommand,
 	logsCommand,
+	presetCommand,
 	roomsPostCommand,
 	roomsReadCommand,
 	scheduleArmCommand,
@@ -395,6 +397,8 @@ async function startDaemon(
 		default: "openai/gpt-4.1",
 		defaultRoutable: true,
 	});
+	// The shipped library itself, so /preset is tested against real presets.
+	context.listPresets = async () => ({ presets: await listPresets() });
 	const socket = await startControlSocket({
 		socketPath,
 		context,
@@ -473,6 +477,56 @@ describe("/rooms", () => {
 });
 
 // ── /spawn ───────────────────────────────────────────────────────────────────
+
+describe("/preset", () => {
+	test("bare: picks from the library, asks for a name, and creates without spawning", async () => {
+		const daemon = await startDaemon([]);
+		const calls: { method: string; params: unknown }[] = [];
+		const spy = {
+			call: <T>(method: never, params?: unknown): Promise<T> => {
+				calls.push({ method, params });
+				return daemon.client.call(method, params);
+			},
+		};
+		const io = fakeIo();
+		io.selectAnswer =
+			"reviewer — Reviews diffs and branches for defects, missing tests, and unclear code, and reports findings with severity and a fix.";
+		io.editorAnswers.push("pr-reviewer");
+
+		await presetCommand(spy as never, io, "");
+
+		expect(
+			io.selects[0]?.options.some((o) => o.startsWith("researcher — ")),
+		).toBe(true);
+		expect(io.editors[0]?.prefill).toBe("reviewer");
+		const create = calls.find((c) => c.method === "agent_create");
+		// The preset's fields travel unchanged apart from the name.
+		expect(create?.params).toMatchObject({
+			name: "pr-reviewer",
+			rooms: ["#reviews", "#team"],
+			spawns: "*",
+		});
+		expect((create?.params as { body?: string } | undefined)?.body).toContain(
+			"code reviewer",
+		);
+		expect(calls.some((c) => c.method === "agent_spawn")).toBe(false);
+		expect(io.notices.join("\n")).toContain("/spawn pr-reviewer");
+	});
+
+	test("with both arguments it creates directly; an unknown preset lists the library", async () => {
+		const daemon = await startDaemon([]);
+		const io = fakeIo();
+		await presetCommand(daemon.client, io, "sre ops-bot");
+		expect(io.selects).toHaveLength(0);
+		expect(io.editors).toHaveLength(0);
+		expect(io.notices.join("\n")).toContain("created ops-bot from sre");
+
+		const bad = fakeIo();
+		await presetCommand(daemon.client, bad, "pirate x");
+		expect(bad.notices.join("\n")).toContain("unknown preset pirate");
+		expect(bad.notices.join("\n")).toContain("researcher");
+	});
+});
 
 describe("/spawn", () => {
 	test("spawns a peer and the daemon reports it back", async () => {

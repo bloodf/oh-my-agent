@@ -57,13 +57,25 @@ The TUI already tried to start it. That sentence means the auto-start failed; ru
 
 ## The default team
 
-The daemon seeds four peers into `~/.omp/agent/oh-my-agent/agents/` on its first boot and starts them: `staff-pm` (`#product`), `staff-backend` (`#backend`), `staff-frontend` (`#frontend`), and `staff-qa` (`#qa`), all also in `#team`. They declare no model, so they run on OMP's default model role, the one `/model` sets. `omp-agent agents` shows the model each one is actually on.
+The daemon seeds five peers into `~/.omp/agent/oh-my-agent/agents/` on its first boot and starts them: `mate` (`#bridge`), `staff-pm` (`#product`), `staff-backend` (`#backend`), `staff-frontend` (`#frontend`), and `staff-qa` (`#qa`), all also in `#team`. `mate` is the first mate: your single point of contact. Post a request in `#bridge` and it dispatches to the staff, supervises, escalates only real decisions, and reports back there. They declare no model, so they run on OMP's default model role, the one `/model` sets. `omp-agent agents` shows the model each one is actually on.
 
 ```
 /rooms post #team @staff-pm scope a login page with email and password
 ```
 
 To put one on a different model, `/edit staff-backend` → Model. The picker lists every model the daemon's credentials can reach, with the default marked; `omp-agent models` prints the same list. The seed is offered once: a definition you edit is never overwritten, and one you delete is not recreated.
+
+## The preset library
+
+Ten more roles ship with the package but are never seeded: `researcher`, `reviewer`, `security-reviewer`, `tech-writer`, `sre`, `debugger`, `test-engineer`, `designer`, `release-manager`, and `data-analyst`. Each is a complete definition you copy under your own name:
+
+```
+/preset                       # pick from the list, then name it
+/preset reviewer pr-reviewer  # or name both up front
+/spawn pr-reviewer
+```
+
+`omp-agent presets` lists them and `omp-agent agent create <name> --preset <preset>` does the same from a shell; the console's create dialog has a **Start from a preset** picker that fills the form. `mate` hires from the same library on its own when a request needs a role the staff do not cover.
 
 If a staff peer shows `stopped` with an error naming OMP's default model, the daemon cannot route to that model: it only routes providers in `~/.omp/agent/models.yml` and broker credentials, not ones a TUI extension adds. Add the provider to `models.yml`, or pick a listed model with `/edit <name>` → Model.
 

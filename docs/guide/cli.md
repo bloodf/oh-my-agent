@@ -97,6 +97,22 @@ Rules:
 
 Human: `<name>	created` or `<name>	unchanged`.
 
+```sh
+omp-agent agent create <name> --preset <preset>
+```
+
+Copy a shipped role under a new name. The preset's fields travel unchanged apart from `name`. An unknown preset is refused with the list of known ones. Never spawns.
+
+Human: `<name>	created	from <preset>`.
+
+### presets
+
+```sh
+omp-agent presets
+```
+
+The shipped role library: one line per preset, `name	description`. Presets are never seeded; each is a complete `agent create` payload. `--json` prints `{ presets: [...] }` with every field.
+
 ### agent show
 
 ```sh
@@ -239,6 +255,7 @@ Inside `omp`, after the extension loads:
 | `/schedule <id> on\|off` | `omp-agent schedule <id> on\|off` |
 | `/logs <name> [n]` | `omp-agent logs <name> [n]` |
 | `/inject <name> <message>` | `omp-agent inject <name> <message>` |
+| `/preset [preset] [name]` | `omp-agent agent create <name> --preset <preset>`; bare `/preset` picks from the list and asks for a name |
 | `/manage` | Full-screen manager; no CLI equivalent |
 
-The status widget shows `agents: N running, M parked · rooms: K unread`. If the daemon is down, it shows the same daemon-down sentence as the CLI.
+The status widget shows `oh-my-agent · N running · N parked · N unread · /manage`. If the daemon is down, it shows the same daemon-down sentence as the CLI.

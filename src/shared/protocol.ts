@@ -51,6 +51,7 @@ export const METHOD_NAMES = [
 	"schedules_list",
 	"schedules_arm",
 	"models_list",
+	"presets_list",
 	"kill",
 	"bump",
 	"daemon_stop",
@@ -324,6 +325,21 @@ export interface ModelChoice {
 	provider: string;
 	id: string;
 	name: string;
+}
+/**
+ * A shipped preset: a role definition the package carries but never seeds.
+ * The fields are exactly what `agent_create` accepts, so a client copies
+ * them under a name of its choosing and sends them as they are.
+ */
+export type PresetInfo = Pick<
+	DefinitionData,
+	"name" | "description" | "body" | "spawns"
+> &
+	Partial<Pick<DefinitionData, "rooms" | "wake" | "autonomy" | "model">>;
+export type PresetsListParams = Record<string, never>;
+export interface PresetsListResult {
+	/** Every shipped preset, sorted by name. */
+	presets: PresetInfo[];
 }
 export type ModelsListParams = Record<string, never>;
 export interface ModelsListResult {

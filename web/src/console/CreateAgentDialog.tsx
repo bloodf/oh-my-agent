@@ -25,6 +25,22 @@ export function CreateAgentDialog({ open, onOpenChange, call, onCreated, initial
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [catalog, setCatalog] = useState<{ models: { provider: string; id: string; name: string }[]; default?: string }>({ models: [] });
+  type Preset = { name: string; description: string; body: string; spawns: string[] | "*"; rooms?: string[]; model?: string | string[] };
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [preset, setPreset] = useState("");
+  // The shipped role library: picking one fills the form, and every field
+  // stays editable. The name is left for the operator; a preset is a role,
+  // not an identity.
+  useEffect(() => {
+    if (!open) return;
+    void call("/api/presets").then((result) => setPresets((result as { presets: Preset[] }).presets ?? [])).catch(() => setPresets([]));
+  }, [open, call]);
+  const applyPreset = (name: string) => {
+    setPreset(name);
+    const found = presets.find((p) => p.name === name);
+    if (!found) return;
+    setDraft((current) => ({ ...current, description: found.description, body: found.body, rooms: (found.rooms ?? []).join(", "), spawns: found.spawns === "*" ? "" : found.spawns.join(", "), model: Array.isArray(found.model) ? found.model[0] ?? "" : found.model ?? "" }));
+  };
   // The daemon's catalog, fetched when the dialog opens: every model it can
   // route to, and the default a peer with no model runs on. A daemon without
   // one answers an empty list and the field stays free text.
@@ -61,6 +77,7 @@ export function CreateAgentDialog({ open, onOpenChange, call, onCreated, initial
           setError(""); setBusy(true);
           void call("/api/agents", { method: "POST", body: payload }).then(() => { setDraft({ ...EMPTY, kind: initialKind }); onOpenChange(false); onCreated(); }).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause))).finally(() => setBusy(false));
         }}>
+          {presets.length > 0 && <div className="grid gap-1.5"><Label htmlFor="new-agent-preset">Start from a preset <span className="font-normal text-muted-foreground">(optional)</span></Label><select id="new-agent-preset" className="h-9 rounded-md border border-input bg-transparent px-3 text-sm" value={preset} onChange={(event) => applyPreset(event.target.value)}><option value="">Blank</option>{presets.map((p) => <option key={p.name} value={p.name}>{p.name} — {p.description}</option>)}</select></div>}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5"><Label htmlFor="new-agent-name">Name</Label><Input id="new-agent-name" required autoFocus autoComplete="off" {...field("name")} /></div>
             <div className="grid gap-1.5"><Label htmlFor="new-agent-description">Description</Label><Input id="new-agent-description" required {...field("description")} /></div>

@@ -12,6 +12,7 @@ Verbs:
   audit
   agents
   agent create <name> <file|->
+  agent create <name> --preset <preset>
   agent show <name>
   agent edit <name> <file|->
   spawn <name> [--parent <parent>]
@@ -24,6 +25,7 @@ Verbs:
   schedule <id> on|off
   logs <name|daemon> [n]
   models
+  presets
   inject <name> <text...>
   bump <account> <usd>
   console

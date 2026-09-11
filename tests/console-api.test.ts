@@ -47,7 +47,7 @@ import {
 	fingerprintPeerDefinition,
 	parsePeerDefinition,
 } from "../src/shared/agent-definition";
-import type { RoomInfo } from "../src/shared/protocol";
+import type { PresetsListResult, RoomInfo } from "../src/shared/protocol";
 import { controlCall, operatorToken } from "./fixtures/control-client";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -119,6 +119,7 @@ async function harness(
 			models: { provider: string; id: string; name: string }[];
 			default?: string;
 		}>;
+		listPresets?: () => Promise<PresetsListResult>;
 	} = {},
 ) {
 	const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-console-"));
@@ -260,6 +261,9 @@ async function harness(
 		...(options.listModels === undefined
 			? {}
 			: { listModels: options.listModels }),
+		...(options.listPresets === undefined
+			? {}
+			: { listPresets: options.listPresets }),
 	});
 	cleanups.push(() => api.close());
 	// Nameable only after construction, which is the whole reason the console
@@ -630,6 +634,31 @@ describe("models", () => {
 		expect(await res.json()).toEqual({
 			models: [{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" }],
 			default: "openai/gpt-4.1",
+		});
+	});
+
+	test("GET /api/presets answers the library, and an empty list without one", async () => {
+		const h = await harness({
+			listPresets: async () => ({
+				presets: [
+					{
+						name: "researcher",
+						description: "Investigates",
+						body: "You research.",
+						spawns: "*",
+					},
+				],
+			}),
+		});
+		const res = await h.call("/api/presets");
+		expect(res.status).toBe(200);
+		expect(
+			((await res.json()) as { presets: { name: string }[] }).presets[0]?.name,
+		).toBe("researcher");
+
+		const bare = await harness();
+		expect(await (await bare.call("/api/presets")).json()).toEqual({
+			presets: [],
 		});
 	});
 

@@ -61,6 +61,7 @@ import type {
 	AgentSpawnResult,
 	AgentStatus,
 	ModelsListResult,
+	PresetsListResult,
 	RoomInfo,
 } from "../shared/protocol";
 import { METHODS } from "../shared/protocol-schemas";
@@ -252,6 +253,8 @@ export interface StartConsoleApiOptions {
 	 * a console composed without a credential gateway offers free text only.
 	 */
 	listModels?(): Promise<ModelsListResult>;
+	/** The shipped preset library for the create dialog. Optional likewise. */
+	listPresets?(): Promise<PresetsListResult>;
 	/** Explicitly start a durable definition. Creation and DMs never call this. */
 	spawnPeer?(
 		name: string,
@@ -1014,6 +1017,15 @@ export async function startConsoleApi(
 			return json(
 				200,
 				options.listModels ? await options.listModels() : { models: [] },
+			);
+		}
+
+		// The create dialog's "start from a preset" list. No library means an
+		// empty list, never an error: the form stays blank and hand-written.
+		if (path === "/api/presets" && request.method === "GET") {
+			return json(
+				200,
+				options.listPresets ? await options.listPresets() : { presets: [] },
 			);
 		}
 

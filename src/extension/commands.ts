@@ -24,6 +24,7 @@
 import { renderPeerDefinition } from "../daemon/peer-store";
 import { parsePeerDefinition } from "../shared/agent-definition";
 import type {
+	AgentCreateResult,
 	AgentSpawnResult,
 	AgentStatusResult,
 	ChatReadResult,
@@ -37,6 +38,7 @@ import type {
 	LogsTailResult,
 	MethodName,
 	ModelsListResult,
+	PresetsListResult,
 	RoomsPostResult,
 	SchedulesArmResult,
 	SchedulesListResult,
@@ -330,6 +332,59 @@ export async function spawnCommand(
 		});
 		io.notify(
 			`spawned ${result.name} — ${result.state}${parent ? ` under ${parent}` : ""}`,
+		);
+	});
+}
+
+/**
+ * `/preset [preset] [name]` — create a peer from a shipped role. With no
+ * arguments it lists the presets in a picker and asks for the name; with
+ * both it creates directly. The preset's fields are `agent_create`'s, so
+ * they travel unchanged apart from the name. Creation never spawns:
+ * `/spawn <name>` is the second, deliberate call.
+ */
+export async function presetCommand(
+	client: DaemonClient,
+	io: ExtensionIO,
+	args: string,
+): Promise<void> {
+	await guard(io, async () => {
+		const listed = await client.call<PresetsListResult>("presets_list", {});
+		const [presetArg, nameArg] = args.trim().split(/\s+/).filter(Boolean);
+		let preset: string | undefined = presetArg;
+		if (preset === undefined) {
+			const chosen = await io.select(
+				"Preset to start from",
+				listed.presets.map((p) => `${p.name} — ${p.description}`),
+			);
+			preset = chosen?.split(" — ")[0];
+			if (preset === undefined) return;
+		}
+		const presetName: string = preset;
+		const found = listed.presets.find((p) => p.name === presetName);
+		if (found === undefined) {
+			io.notify(
+				`unknown preset ${presetName}; available: ${listed.presets.map((p) => p.name).join(", ")}`,
+			);
+			return;
+		}
+		let name: string | undefined = nameArg;
+		if (name === undefined) {
+			if (!io.editor) {
+				io.notify(`usage: /preset ${presetName} <new-peer-name>`);
+				return;
+			}
+			name = (
+				await io.editor(`Name for the new ${presetName}`, presetName)
+			)?.trim();
+			if (name === undefined || name.length === 0) return;
+		}
+		const result = await client.call<AgentCreateResult>("agent_create", {
+			...found,
+			name,
+		});
+		io.notify(
+			`created ${result.name} from ${presetName} — start it with /spawn ${result.name}`,
 		);
 	});
 }
