@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EMPTY_PROFILE, type Profile } from "./profile";
 import { toast } from "sonner";
 import { api, AUTHENTICATION_REQUIRED, readToken } from "@/lib/api";
 import type {
@@ -85,6 +86,11 @@ export function useConsole() {
   const refreshAgents = useCallback(async () => {
     const payload = await call("/api/agents");
     if (!authRef.current) setAgents(payload.agents as AgentInfo[]);
+  }, [call]);
+  const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
+  const refreshProfile = useCallback(async () => {
+    const payload = await call("/api/profile");
+    if (!authRef.current && payload.profile) setProfile(payload.profile as Profile);
   }, [call]);
   const refreshChannels = useCallback(async () => {
     const payload = await call("/api/channels");
@@ -191,6 +197,9 @@ export function useConsole() {
         void refreshAgents().catch((error) =>
           showNotice(error instanceof Error ? error.message : String(error)),
         );
+        // Names and avatars come with the first snapshot, so a reload draws
+        // the operator's chosen name rather than the wire author.
+        void refreshProfile().catch(() => {});
         if (room) await refreshMessages(room);
         else {
           setMessages([]);
@@ -265,7 +274,7 @@ export function useConsole() {
       if (!active()) return;
       const room = chooseRoom(list);
       await Promise.allSettled([
-        ...(opened ? [refreshAgents()] : []),
+        ...(opened ? [refreshAgents(), refreshProfile()] : []),
         reconcileUnread(list),
         ...(room ? [refreshMessages(room, opened)] : []),
       ]);
@@ -330,6 +339,7 @@ export function useConsole() {
             )
           )
             void refreshAgents().catch(showError);
+          else if (frame.type === "profile") void refreshProfile().catch(showError);
           else if (frame.type === "chat" || frame.type === "plan")
             setWorkspaceVersion((version) => version + 1);
         };
@@ -436,6 +446,8 @@ export function useConsole() {
     showNotice,
     refreshAgents,
     refreshChannels,
+    profile,
+    setProfile,
     selectRoom,
     send,
     react,

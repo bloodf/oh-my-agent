@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/tooltip";
 import { HUMAN_AUTHOR, type RoomMessage } from "@/lib/types";
 import { Markdown } from "./Markdown";
+import { personaFor, useProfile } from "./profile";
 
 const REACTIONS = [
   ["👀", "Eyes", Eye],
@@ -45,17 +46,6 @@ function roleClass(author: string) {
   return "role-agent";
 }
 
-function initials(author: string) {
-  return (
-    author
-      .replace(/^@/, "")
-      .split(/[-_\s]+/)
-      .map((part) => part[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase() || "?"
-  );
-}
 
 function timeLabel(createdAt: number) {
   return new Intl.DateTimeFormat(undefined, {
@@ -79,6 +69,7 @@ export function Message({
   onReact,
   interactive = true,
 }: MessageProps) {
+  const persona = personaFor(useProfile(), message.author);
   const [pendingEmoji, setPendingEmoji] = useState<string | null>(null);
   const [error, setError] = useState("");
   const groupedReactions = new Map<string, string[]>();
@@ -121,7 +112,7 @@ export function Message({
                   : "rounded-lg bg-primary/10 text-primary"
             }
           >
-            {initials(message.author)}
+            {persona.avatar}
           </AvatarFallback>
         </Avatar>
       )}
@@ -130,8 +121,8 @@ export function Message({
           <div className="meta mb-0.5 flex items-baseline gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className={`author ${roleClass(message.author)} cursor-default text-sm font-semibold`}>
-                  {message.author}
+                <span className={`author ${roleClass(message.author)} cursor-default text-sm font-semibold`} data-author={message.author}>
+                  {persona.name}
                 </span>
               </TooltipTrigger>
               <TooltipContent>

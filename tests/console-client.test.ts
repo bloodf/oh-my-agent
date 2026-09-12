@@ -82,8 +82,9 @@ import {
 import { createOperations } from "../src/daemon/operations";
 import type { PeerStoreRoots } from "../src/daemon/peer-store";
 import { createPeerStore } from "../src/daemon/peer-store";
+import { openProfileStore } from "../src/daemon/profile";
 import { Scheduler } from "../src/daemon/scheduler";
-import type { PeerRecord } from "../src/daemon/socket";
+import type { PeerRecord, ScheduleRecord } from "../src/daemon/socket";
 import { Supervisor } from "../src/daemon/supervisor";
 import type { RoomMessage, RoomStore } from "../src/rooms/store";
 import { RoomStore as Store } from "../src/rooms/store";
@@ -260,7 +261,7 @@ async function focusInPage(page: Page, selector: string): Promise<void> {
 	}, selector);
 }
 
-type AgentTab = "Members" | "Operations" | "Accounts";
+type AgentTab = "Members" | "Operations" | "Accounts" | "Schedules";
 
 /** Open the agent sheet through its visible trigger and select a visible tab. */
 async function openAgentTab(
@@ -285,7 +286,9 @@ async function openAgentTab(
 			? "#agents"
 			: tab === "Operations"
 				? "#ops"
-				: "#ops-accounts",
+				: tab === "Schedules"
+					? "#schedules"
+					: "#ops-accounts",
 		{ visible: true },
 	);
 }
@@ -472,6 +475,7 @@ async function harness(
 		},
 	});
 
+	const schedules = new Map<string, ScheduleRecord>();
 	const api: ConsoleApi = await startConsoleApi({
 		rooms,
 		supervisor,
@@ -481,6 +485,21 @@ async function harness(
 		ensureRoom,
 		operations,
 		token: TOKEN,
+		schedules,
+		armSchedule: (id, enabled) => {
+			const record = schedules.get(id);
+			if (!record) return undefined;
+			record.enabled = enabled;
+			record.nextFireAt = enabled ? Date.now() + 60_000 : null;
+			return {
+				id,
+				cron: record.cron,
+				action: record.action,
+				enabled,
+				nextFireAt: record.nextFireAt,
+			};
+		},
+		profile: openProfileStore(join(dir, "console-profile.json")),
 		pollIntervalMs: options.pollIntervalMs ?? 25,
 		...(options.remoteMode
 			? { remoteMode: true, proxySecret: "console-client-proxy-secret" }
@@ -849,6 +868,7 @@ async function harness(
 	return {
 		rooms,
 		supervisor,
+		schedules,
 		registerPeer,
 		ensureRoom,
 		reload,
@@ -1641,6 +1661,95 @@ describe("definition editor", () => {
 });
 
 // ── Membership controls ──────────────────────────────────────────────────────
+
+describe("profile and schedules", () => {
+	browserTest(
+		"the profile dialog renames the operator and an agent everywhere they are drawn",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.registerPeer("reviewer", ["#reviews"]);
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Agent line.",
+			});
+			await h.rooms.post({
+				room: "#reviews",
+				author: "@you",
+				body: "Operator line.",
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"transcript",
+				() => transcriptText(page),
+				(t) => t.includes("Operator line."),
+			);
+			const authorOf = (author: string) =>
+				page.$eval(`#messages .message .author[data-author="${author}"]`, (n) =>
+					(n.textContent ?? "").trim(),
+				);
+			expect(await authorOf("@you")).toBe("@you");
+
+			await page.click("#open-profile");
+			await page.waitForSelector("#profile-operator-name", { visible: true });
+			await page.type("#profile-operator-name", "Heitor");
+			await page.type("#profile-operator-avatar", "🧭");
+			await page.type('[aria-label="reviewer display name"]', "Rev");
+			await page.click("#profile-save");
+			await waitFor(
+				"operator renamed",
+				() => authorOf("@you"),
+				(t) => t === "Heitor",
+			);
+			expect(await authorOf("reviewer")).toBe("Rev");
+			// Persisted daemon-side: a second load sees the same names.
+			await page.reload({ waitUntil: "domcontentloaded" });
+			await waitFor(
+				"operator renamed after reload",
+				() => authorOf("@you").catch(() => ""),
+				(t) => t === "Heitor",
+			);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"the schedules tab lists a heartbeat and pauses it through the daemon",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.registerPeer("reviewer", ["#reviews"]);
+			h.schedules.set("reviewer:heartbeat", {
+				id: "reviewer:heartbeat",
+				peer: "reviewer",
+				cron: null,
+				action: "Heartbeat.",
+				enabled: true,
+				nextFireAt: Date.now() + 60_000,
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await openAgentTab(page, "Schedules");
+			const row = '#schedules .schedule[data-id="reviewer:heartbeat"]';
+			await page.waitForSelector(row);
+			expect(await page.$eval(row, (n) => n.textContent ?? "")).toContain(
+				"heartbeat",
+			);
+			await page.click(`${row} .schedule-toggle`);
+			await waitFor(
+				"heartbeat paused",
+				() => page.$eval(row, (n) => n.getAttribute("data-enabled") ?? ""),
+				(v) => v === "false",
+			);
+			expect(h.schedules.get("reviewer:heartbeat")?.enabled).toBe(false);
+			expect(errors).toEqual([]);
+		},
+	);
+});
 
 describe("membership controls", () => {
 	browserTest(

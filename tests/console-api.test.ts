@@ -38,16 +38,21 @@ import { startConsoleApi } from "../src/daemon/console-api";
 import { createOperations } from "../src/daemon/operations";
 import type { PeerStoreRoots } from "../src/daemon/peer-store";
 import { createPeerStore } from "../src/daemon/peer-store";
+import { openProfileStore, type ProfileStore } from "../src/daemon/profile";
 import { bootDaemon } from "../src/daemon/runtime";
 import { Scheduler } from "../src/daemon/scheduler";
-import type { PeerRecord } from "../src/daemon/socket";
+import type { PeerRecord, ScheduleRecord } from "../src/daemon/socket";
 import { Supervisor } from "../src/daemon/supervisor";
 import { RoomStore } from "../src/rooms/store";
 import {
 	fingerprintPeerDefinition,
 	parsePeerDefinition,
 } from "../src/shared/agent-definition";
-import type { PresetsListResult, RoomInfo } from "../src/shared/protocol";
+import type {
+	PresetsListResult,
+	RoomInfo,
+	ScheduleInfo,
+} from "../src/shared/protocol";
 import { controlCall, operatorToken } from "./fixtures/control-client";
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -120,6 +125,9 @@ async function harness(
 			default?: string;
 		}>;
 		listPresets?: () => Promise<PresetsListResult>;
+		schedules?: Map<string, ScheduleRecord>;
+		armSchedule?: (id: string, enabled: boolean) => ScheduleInfo | undefined;
+		profile?: ProfileStore;
 	} = {},
 ) {
 	const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-console-"));
@@ -264,6 +272,13 @@ async function harness(
 		...(options.listPresets === undefined
 			? {}
 			: { listPresets: options.listPresets }),
+		...(options.schedules === undefined
+			? {}
+			: { schedules: options.schedules }),
+		...(options.armSchedule === undefined
+			? {}
+			: { armSchedule: options.armSchedule }),
+		...(options.profile === undefined ? {} : { profile: options.profile }),
 	});
 	cleanups.push(() => api.close());
 	// Nameable only after construction, which is the whole reason the console
@@ -620,6 +635,149 @@ describe("operator token", () => {
 });
 
 // ── Channels ─────────────────────────────────────────────────────────────────
+
+describe("schedules", () => {
+	test("GET lists every record and PATCH flips one through armSchedule", async () => {
+		const record: ScheduleRecord = {
+			id: "reviewer:heartbeat",
+			peer: "reviewer",
+			cron: null,
+			action: "pulse",
+			enabled: true,
+			nextFireAt: 1_750_000_000_000,
+		};
+		const flips: [string, boolean][] = [];
+		const h = await harness({
+			schedules: new Map([[record.id, record]]),
+			armSchedule: (id, enabled) => {
+				if (id !== record.id) return undefined;
+				flips.push([id, enabled]);
+				record.enabled = enabled;
+				record.nextFireAt = enabled ? 1_750_000_000_000 : null;
+				return {
+					id,
+					cron: null,
+					action: record.action,
+					enabled,
+					nextFireAt: record.nextFireAt,
+				};
+			},
+		});
+		const listed = await h.call("/api/schedules");
+		expect(listed.status).toBe(200);
+		expect(await listed.json()).toEqual({
+			schedules: [
+				{
+					id: "reviewer:heartbeat",
+					agent: "reviewer",
+					cron: null,
+					action: "pulse",
+					nextFireAt: 1_750_000_000_000,
+					enabled: true,
+				},
+			],
+		});
+
+		const paused = await h.call("/api/schedules/reviewer%3Aheartbeat", {
+			method: "PATCH",
+			body: JSON.stringify({ enabled: false }),
+		});
+		expect(paused.status).toBe(200);
+		expect(await paused.json()).toMatchObject({
+			schedule: { id: "reviewer:heartbeat", enabled: false, nextFireAt: null },
+		});
+		expect(flips).toEqual([["reviewer:heartbeat", false]]);
+
+		expect(
+			(
+				await h.call("/api/schedules/ghost", {
+					method: "PATCH",
+					body: JSON.stringify({ enabled: true }),
+				})
+			).status,
+		).toBe(404);
+		expect(
+			(
+				await h.call("/api/schedules/reviewer%3Aheartbeat", {
+					method: "PATCH",
+					body: JSON.stringify({ enabled: "yes" }),
+				})
+			).status,
+		).toBe(400);
+	});
+
+	test("a console without a schedule map answers an empty list", async () => {
+		const h = await harness();
+		expect(await (await h.call("/api/schedules")).json()).toEqual({
+			schedules: [],
+		});
+	});
+});
+
+describe("profile", () => {
+	test("PUT validates, persists across a reopen, emits a profile frame, and GET reads it back", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-profile-"));
+		cleanups.push(() => rm(dir, { recursive: true, force: true }));
+		const path = join(dir, "console-profile.json");
+		const h = await harness({
+			pollIntervalMs: 10,
+			profile: openProfileStore(path),
+		});
+
+		const socket = new WebSocket(
+			`${h.api.url.replace("http://", "ws://")}/api/events`,
+			{ headers: { Authorization: `Bearer ${TOKEN}` } },
+		);
+		cleanups.push(async () => socket.close());
+		await opened(socket);
+		const frames = collectFrames(socket);
+
+		expect(await (await h.call("/api/profile")).json()).toEqual({
+			profile: { operator: {}, agents: {} },
+		});
+		const saved = await h.call("/api/profile", {
+			method: "PUT",
+			body: JSON.stringify({
+				operator: { displayName: " Heitor ", avatar: "🧭" },
+				agents: {
+					reviewer: { avatar: "🔬", displayName: "" },
+					ghost: { displayName: "", avatar: "" },
+				},
+			}),
+		});
+		expect(saved.status).toBe(200);
+		// Trimmed, empty fields dropped, an all-empty agent removed.
+		expect(await saved.json()).toEqual({
+			profile: {
+				operator: { displayName: "Heitor", avatar: "🧭" },
+				agents: { reviewer: { avatar: "🔬" } },
+			},
+		});
+		await until("a profile frame", () =>
+			frames.some((frame) => frame.type === "profile"),
+		);
+
+		for (const body of [
+			{ operator: { displayName: "x".repeat(41) } },
+			{ operator: { avatar: "12345" } },
+			{ operator: { nickname: "no" } },
+			{ agents: { "../etc": { avatar: "x" } } },
+			{ operator: { displayName: "two\nlines" } },
+		]) {
+			const res = await h.call("/api/profile", {
+				method: "PUT",
+				body: JSON.stringify(body),
+			});
+			expect(res.status).toBe(400);
+		}
+
+		// A fresh store over the same file reads what was written.
+		expect(await openProfileStore(path).read()).toEqual({
+			operator: { displayName: "Heitor", avatar: "🧭" },
+			agents: { reviewer: { avatar: "🔬" } },
+		});
+	});
+});
 
 describe("models", () => {
 	test("GET /api/models answers the daemon's catalog and default", async () => {

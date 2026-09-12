@@ -46,6 +46,8 @@ import { Composer } from "./Composer";
 import { Transcript } from "./Transcript";
 import { ThreadPanel } from "./ThreadPanel";
 import { AgentPanel } from "./AgentPanel";
+import { ProfileContext } from "./profile";
+import { ProfileDialog } from "./ProfileDialog";
 import { CreateChannelDialog } from "./CreateChannelDialog";
 import { CreateAgentDialog } from "./CreateAgentDialog";
 import { AuthScreen } from "./AuthScreen";
@@ -68,6 +70,7 @@ export function ConsoleShell() {
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [newRoom, setNewRoom] = useState(false);
   const [newAgent, setNewAgent] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [newBot, setNewBot] = useState(false);
   const [roomSettings, setRoomSettings] = useState(false);
   const [newChat, setNewChat] = useState(false);
@@ -227,14 +230,15 @@ export function ConsoleShell() {
     />
   );
   return (
-    <>
+    <ProfileContext.Provider value={c.profile}>
     {c.authRequired && <AuthScreen onAuthenticate={c.authenticate} error={c.authError} />}
     <div hidden={c.authRequired} inert={c.authRequired} className="console-shell flex h-svh flex-col overflow-hidden bg-background text-foreground">
       {!c.authRequired && <section id="operator-auth" hidden aria-label="Operator authentication" />}
       <a href="#composer-input" className="skip-link">
         Skip to composer
       </a>
-      <WorkspaceToolbar onSearch={() => setSearch(true)} />
+      <WorkspaceToolbar onSearch={() => setSearch(true)} onProfile={() => setProfileOpen(true)} />
+      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} call={c.call} agents={c.agents} onSaved={c.setProfile} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
       <WorkspaceNavigation
         onConversations={() => document.querySelector<HTMLButtonElement>("#sidebar button")?.focus()}
@@ -687,6 +691,6 @@ export function ConsoleShell() {
         setPicker(null);
       }} />
     </div>
-    </>
+    </ProfileContext.Provider>
   );
 }

@@ -144,6 +144,14 @@ function useFixtureCall(): ConsoleCall {
         };
       return { plans: [PLAN] };
     }
+    if (path === "/api/schedules")
+      return {
+        schedules: [
+          { id: "researcher:heartbeat", agent: "researcher", cron: null, action: "Heartbeat. Read your rooms and plans and continue.", nextFireAt: NOW + 900_000, enabled: true },
+          { id: "digest-bot:schedule:0", agent: "digest-bot", cron: "0 9 * * 1-5", action: "Post the daily digest.", nextFireAt: NOW + 3_600_000, enabled: false },
+        ],
+      };
+    if (path === "/api/profile") return { profile: { operator: { displayName: "Heitor", avatar: "🧭" }, agents: { researcher: { avatar: "🔬" } } } };
     if (path.startsWith("/api/workspace/changes"))
       return {
         cwd: "/workspace/oh-my-agent",
@@ -242,7 +250,7 @@ function StoryFrame({
   );
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
-      <WorkspaceToolbar onSearch={noop} />
+      <WorkspaceToolbar onSearch={noop} onProfile={noop} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <WorkspaceNavigation onConversations={noop} onAgents={() => setAgentsOpen(true)} onNewChat={noop} />
         <div className="hidden border-r md:block">{rail}</div>

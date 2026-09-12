@@ -81,6 +81,7 @@ import { createOperations } from "./operations";
 import type { PeerDefinitionFields } from "./peer-store";
 import { createPeerStore, resolvePeerStoreRoots } from "./peer-store";
 import { listPresets as listShippedPresets } from "./presets";
+import { openProfileStore } from "./profile";
 import { nextCronTime, Scheduler } from "./scheduler";
 import type {
 	ControlIdentity,
@@ -2203,6 +2204,9 @@ export async function bootDaemon(
 				spawnPeer,
 				listModels,
 				listPresets,
+				schedules,
+				armSchedule,
+				profile: openProfileStore(join(stateDir, "console-profile.json")),
 				// The same object the control socket got, not a second copy.
 				operations,
 				token,
