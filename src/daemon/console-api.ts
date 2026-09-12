@@ -63,16 +63,19 @@ import type {
 	ModelsListResult,
 	PresetsListResult,
 	RoomInfo,
+	ScheduleInfo,
 } from "../shared/protocol";
 import { METHODS } from "../shared/protocol-schemas";
 import type { Operations } from "./operations";
 import { HUMAN_AUTHOR, InvalidParamsError } from "./operations";
 import type { PeerDefinitionFields, PeerStore } from "./peer-store";
+import { EMPTY_PROFILE, type Profile, type ProfileStore } from "./profile";
 import {
 	type AuditConnection,
 	type AuditConnectionClass,
 	connectionAuditRecorder,
 	type PeerRecord,
+	type ScheduleRecord,
 } from "./socket";
 import type { Supervisor } from "./supervisor";
 import { handleWebRoute, type WebServices } from "./web-routes";
@@ -234,7 +237,8 @@ export type ConsoleEvent =
 			budgetUsd?: number;
 	  }
 	/** A peer's schedule armed or fired. */
-	| { type: "schedule"; agent: string; phase: "armed" | "fired" };
+	| { type: "schedule"; agent: string; phase: "armed" | "fired" }
+	| { type: "profile" };
 
 export interface StartConsoleApiOptions {
 	web?: WebServices;
@@ -256,6 +260,12 @@ export interface StartConsoleApiOptions {
 	listModels?(): Promise<ModelsListResult>;
 	/** The shipped preset library for the create dialog. Optional likewise. */
 	listPresets?(): Promise<PresetsListResult>;
+	/** Every armed schedule and heartbeat, for the schedules tab. Optional. */
+	schedules?: Map<string, ScheduleRecord>;
+	/** Flip a schedule; answers undefined for an unknown id. Optional. */
+	armSchedule?(id: string, enabled: boolean): ScheduleInfo | undefined;
+	/** Display names and avatars. Optional: without it the console draws wire authors. */
+	profile?: ProfileStore;
 	/** Explicitly start a durable definition. Creation and DMs never call this. */
 	spawnPeer?(
 		name: string,
@@ -1028,6 +1038,86 @@ export async function startConsoleApi(
 				200,
 				options.listPresets ? await options.listPresets() : { presets: [] },
 			);
+		}
+
+		// The schedules tab: every cron schedule, heartbeat, and automation the
+		// daemon holds, with its next fire, and a switch for each.
+		if (path === "/api/schedules" && request.method === "GET") {
+			return json(200, {
+				schedules: [...(options.schedules?.values() ?? [])].map((record) => ({
+					id: record.id,
+					agent: record.peer,
+					cron: record.cron,
+					action: record.action,
+					nextFireAt: record.nextFireAt,
+					enabled: record.enabled,
+				})),
+			});
+		}
+		const scheduleRoute = /^\/api\/schedules\/([^/]+)$/.exec(path);
+		if (scheduleRoute?.[1] !== undefined) {
+			if (request.method !== "PATCH") {
+				return fail(405, "method_not_allowed", `${request.method} not allowed`);
+			}
+			if (!fullControl) {
+				return fail(
+					403,
+					"remote_control_disabled",
+					"Full OMP control is disabled remotely",
+				);
+			}
+			if (!options.armSchedule) {
+				return fail(
+					404,
+					"not_found",
+					"Schedules are not available on this daemon",
+				);
+			}
+			const payload = await readBody(request);
+			if (!payload || typeof payload.enabled !== "boolean") {
+				return fail(400, "invalid_request", "enabled must be a boolean");
+			}
+			const id = decodeURIComponent(scheduleRoute[1]);
+			const schedule = options.armSchedule(id, payload.enabled);
+			if (!schedule) return fail(404, "not_found", `Unknown schedule: ${id}`);
+			return json(200, { schedule });
+		}
+
+		// Display names and avatars: cosmetic, shared by every console, and
+		// never an identity — the wire keeps `@you` and the peer names.
+		if (path === "/api/profile") {
+			if (request.method === "GET") {
+				return json(200, {
+					profile: options.profile
+						? await options.profile.read()
+						: EMPTY_PROFILE,
+				});
+			}
+			if (request.method === "PUT") {
+				if (!options.profile) {
+					return fail(
+						404,
+						"not_found",
+						"Profiles are not available on this daemon",
+					);
+				}
+				const payload = await readBody(request);
+				if (!payload)
+					return fail(400, "invalid_request", "Body is not valid JSON");
+				let profile: Profile;
+				try {
+					profile = await options.profile.update(payload);
+				} catch (error) {
+					return fail(
+						400,
+						"invalid_request",
+						error instanceof Error ? error.message : String(error),
+					);
+				}
+				publish({ type: "profile" });
+				return json(200, { profile });
+			}
+			return fail(405, "method_not_allowed", `${request.method} not allowed`);
 		}
 
 		if (path === "/api/agents") {

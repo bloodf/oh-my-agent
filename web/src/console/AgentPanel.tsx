@@ -8,6 +8,7 @@ import {
   Square,
 } from "lucide-react";
 import { useState } from "react";
+import { SchedulesTab } from "./SchedulesTab";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -131,7 +132,11 @@ export function AgentPanel({
               <TabsTrigger value="members">Members</TabsTrigger>
               <TabsTrigger value="operations">Operations</TabsTrigger>
               <TabsTrigger value="accounts">Accounts</TabsTrigger>
+              <TabsTrigger value="schedules">Schedules</TabsTrigger>
             </TabsList>
+            <TabsContent value="schedules" className="p-4 pt-3">
+              <SchedulesTab call={call} agents={agents} onNotice={onNotice} />
+            </TabsContent>
             <ScrollArea className="min-h-0 flex-1">
               <TabsContent value="members" className="p-4 pt-3">
                 <p className="mb-3 text-xs text-muted-foreground">

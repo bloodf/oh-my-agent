@@ -8,6 +8,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ### Added
 
+- The console's agent sheet has a Schedules tab: every cron schedule, heartbeat, and automation with its next fire, a pause/resume switch, and a form that adds a cron schedule to an agent. `/api/schedules` and `PATCH /api/schedules/:id` back it.
+- Profile and avatars in the console: your display name and avatar, and a display name and avatar per agent, saved daemon-side (`/api/profile`) so every console shows them. Names on the wire do not change.
 - The console renders message and plan bodies as GitHub-flavored Markdown — headings, lists and task lists, tables, links, inline and fenced code with `diff` tinting — and draws ` ```mermaid ` fences as diagrams in the console's palette. A diagram that does not parse shows its source and the error.
 - A `heartbeat: { every, prompt? }` definition key. A running peer gets a standing turn every interval — read your rooms and plans, continue unfinished work, post progress, answer `idle` if nothing is pending — queued behind any turn in flight, so a crew keeps working without an orchestrator waking it. Listed and armed as `<name>:heartbeat` beside the schedules; `schedule <id> off` pauses it across restarts. The default crew and every preset declare `every: "30m"`.
 

@@ -52,7 +52,8 @@ export type ConsoleEvent =
 	| { type: "membership"; agent: string; rooms: string[] }
 	| { type: "channel"; channel: RoomInfo }
 	| { type: "budget"; account: string; state: string; budgetUsd?: number }
-	| { type: "schedule"; agent: string; phase: "armed" | "fired" };
+	| { type: "schedule"; agent: string; phase: "armed" | "fired" }
+	| { type: "profile" };
 
 export type ConsoleStateKind =
 	| "connecting"

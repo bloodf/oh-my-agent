@@ -1,8 +1,8 @@
-import { Bot, MessageSquare, Search, SquarePen } from "lucide-react";
+import { Bot, MessageSquare, Search, SquarePen, UserRoundPen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeSelector } from "./ThemeSelector";
 
-export function WorkspaceToolbar({ onSearch }: { onSearch: () => void }) {
+export function WorkspaceToolbar({ onSearch, onProfile }: { onSearch: () => void; onProfile: () => void }) {
   return (
     <div role="toolbar" aria-label="Global workspace controls" className="grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,32rem)_minmax(0,1fr)] items-center bg-[var(--workspace-bar)] px-2 text-[var(--workspace-foreground)]">
       <span className="hidden truncate px-2 text-xs font-semibold sm:block">oh-my-agent</span>
@@ -18,7 +18,8 @@ export function WorkspaceToolbar({ onSearch }: { onSearch: () => void }) {
         <span className="truncate">Search</span>
         <kbd className="ml-auto hidden text-[10px] opacity-75 sm:inline">⌘K</kbd>
       </Button>
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-1">
+        <Button type="button" variant="ghost" size="icon" id="open-profile" className="text-[var(--workspace-foreground)] hover:bg-[var(--workspace-accent)] hover:text-[var(--workspace-accent-foreground)]" aria-label="Profile and avatars" title="Profile and avatars" onClick={onProfile}><UserRoundPen /></Button>
         <ThemeSelector />
       </div>
     </div>
