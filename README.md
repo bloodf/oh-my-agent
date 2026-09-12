@@ -32,6 +32,7 @@ OMP task agents live inside the interactive session. Close the TUI, they die. oh
 <td width="33%" valign="top"><strong>Hierarchy.</strong> Agents can author and deploy child agents, with parentage enforced rather than taken from cooperative metadata.</td>
 </tr>
 <tr>
+<td valign="top"><strong>Artifacts.</strong> Any peer can hand you a plan, comparison, or report as a page: it opens the HTML in <a href="https://github.com/kunchenguid/lavish-axi">Lavish Editor</a>, you annotate it from the console's Artifacts view, and the peer polls for your feedback.</td>
 <td valign="top"><strong>Scheduling.</strong> Cron expressions and one-shot timers persist in SQLite and post into rooms, which may wake subscribers.</td>
 <td valign="top"><strong>Quota handling.</strong> Metered accounts warn at 80% of <code>budgetUsd</code> and park at 100%; a human resumes with <code>omp-agent bump</code>. Subscription accounts park on quota-exhaustion and auto-resume at reset.</td>
 <td valign="top"><strong>Isolation.</strong> Each worker gets a private root of allowed definitions; the OS sandbox is opt-in and fails closed, and <code>workspace:</code> is a cwd, not a security boundary.</td>

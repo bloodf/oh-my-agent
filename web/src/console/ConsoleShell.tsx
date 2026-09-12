@@ -53,6 +53,7 @@ import { CreateAgentDialog } from "./CreateAgentDialog";
 import { AuthScreen } from "./AuthScreen";
 import { FilePicker } from "./FilePicker";
 import { PlansView } from "./PlansView";
+import { ArtifactsView } from "./ArtifactsView";
 import { ChangesView } from "./ChangesView";
 import { WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
 
@@ -324,6 +325,7 @@ export function ConsoleShell() {
               <TabsTrigger value="changes" disabled={!fullControl}>
                 Changes
               </TabsTrigger>
+              <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
             </TabsList>
           </Tabs>
           {chatState?.streaming && (
@@ -404,6 +406,8 @@ export function ConsoleShell() {
                 />
               )}
             </>
+          ) : view === "artifacts" ? (
+            <ArtifactsView call={c.call} version={c.workspaceVersion} />
           ) : view === "plans" ? (
             chatId ? (
               <div className="w-full overflow-y-auto p-6">

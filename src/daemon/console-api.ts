@@ -66,6 +66,8 @@ import type {
 	ScheduleInfo,
 } from "../shared/protocol";
 import { METHODS } from "../shared/protocol-schemas";
+import { type ArtifactSession, listArtifacts, openArtifact } from "./artifacts";
+import { lavishStateDir } from "./materializer";
 import type { Operations } from "./operations";
 import { HUMAN_AUTHOR, InvalidParamsError } from "./operations";
 import type { PeerDefinitionFields, PeerStore } from "./peer-store";
@@ -266,6 +268,13 @@ export interface StartConsoleApiOptions {
 	armSchedule?(id: string, enabled: boolean): ScheduleInfo | undefined;
 	/** Display names and avatars. Optional: without it the console draws wire authors. */
 	profile?: ProfileStore;
+	/**
+	 * Where Lavish keeps its sessions, for the Artifacts view. Defaults to
+	 * the operator's `~/.lavish-axi`; a test points it at a fixture.
+	 */
+	lavishStateDir?: string;
+	/** Resume a Lavish session; overridable so a test never runs the CLI. */
+	openArtifact?(file: string, stateDir: string): Promise<ArtifactSession>;
 	/** Explicitly start a durable definition. Creation and DMs never call this. */
 	spawnPeer?(
 		name: string,
@@ -1081,6 +1090,50 @@ export async function startConsoleApi(
 			const schedule = options.armSchedule(id, payload.enabled);
 			if (!schedule) return fail(404, "not_found", `Unknown schedule: ${id}`);
 			return json(200, { schedule });
+		}
+
+		// The Artifacts view: HTML artifacts agents opened in Lavish for review.
+		if (path === "/api/artifacts") {
+			const stateDir = options.lavishStateDir ?? lavishStateDir();
+			if (request.method === "GET") {
+				return json(200, { artifacts: await listArtifacts(stateDir) });
+			}
+			if (request.method === "POST") {
+				if (!fullControl) {
+					return fail(
+						403,
+						"remote_control_disabled",
+						"Full OMP control is disabled remotely",
+					);
+				}
+				const payload = await readBody(request);
+				const file = typeof payload?.file === "string" ? payload.file : "";
+				if (!file.startsWith("/") || !/\.html?$/i.test(file)) {
+					return fail(
+						400,
+						"invalid_request",
+						"file must be an absolute .html path",
+					);
+				}
+				// Only a file Lavish already holds a session for: the console
+				// resumes reviews, it does not open arbitrary files.
+				const known = (await listArtifacts(stateDir)).some(
+					(s) => s.file === file,
+				);
+				if (!known)
+					return fail(404, "not_found", `No Lavish session for ${file}`);
+				try {
+					const open = options.openArtifact ?? openArtifact;
+					return json(200, { artifact: await open(file, stateDir) });
+				} catch (error) {
+					return fail(
+						502,
+						"lavish_failed",
+						error instanceof Error ? error.message : String(error),
+					);
+				}
+			}
+			return fail(405, "method_not_allowed", `${request.method} not allowed`);
 		}
 
 		// Display names and avatars: cosmetic, shared by every console, and

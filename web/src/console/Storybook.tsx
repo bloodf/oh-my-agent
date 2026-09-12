@@ -11,6 +11,7 @@ import type {
   RoomMessage,
 } from "@/lib/types";
 import { AgentPanel } from "./AgentPanel";
+import { ArtifactsView } from "./ArtifactsView";
 import { ChangesView } from "./ChangesView";
 import { ChannelRail } from "./ChannelRail";
 import { Composer } from "./Composer";
@@ -151,6 +152,13 @@ function useFixtureCall(): ConsoleCall {
           { id: "digest-bot:schedule:0", agent: "digest-bot", cron: "0 9 * * 1-5", action: "Post the daily digest.", nextFireAt: NOW + 3_600_000, enabled: false },
         ],
       };
+    if (path === "/api/artifacts")
+      return {
+        artifacts: [
+          { file: "/workspace/oh-my-agent/plans/workspace-resolver.html", url: "http://127.0.0.1:4387/s/abc", status: "feedback", pendingPrompts: 2, updatedAt: new Date(NOW - 600_000).toISOString() },
+          { file: "/workspace/oh-my-agent/plans/release-checklist.html", url: "http://127.0.0.1:4387/s/def", status: "open", pendingPrompts: 0, updatedAt: new Date(NOW - 7_200_000).toISOString() },
+        ],
+      };
     if (path === "/api/profile") return { profile: { operator: { displayName: "Heitor", avatar: "🧭" }, agents: { researcher: { avatar: "🔬" } } } };
     if (path.startsWith("/api/workspace/changes"))
       return {
@@ -221,7 +229,7 @@ function StoryFrame({
   messages?: RoomMessage[];
   threadOpen?: boolean;
   connected?: boolean;
-  initialView?: "conversation" | "plans" | "changes";
+  initialView?: "conversation" | "plans" | "changes" | "artifacts";
 }) {
   const [room, setRoom] = useState("#research");
   const [thread, setThread] = useState(threadOpen ? 101 : null);
@@ -269,6 +277,7 @@ function StoryFrame({
                 <TabsTrigger value="conversation">Conversation</TabsTrigger>
                 <TabsTrigger value="plans">Plans</TabsTrigger>
                 <TabsTrigger value="changes">Changes</TabsTrigger>
+                <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -279,7 +288,7 @@ function StoryFrame({
                 <Composer roomKey={room} onSend={noopAsync} onPickFiles={() => Promise.resolve(["/workspace/notes.txt"])} />
               </div>
               <ThreadPanel root={messages.find((message) => message.id === thread) ?? null} messages={messages} onClose={() => setThread(null)} onReact={noopAsync} onSend={noopAsync} />
-            </> : view === "plans" ? <PlansView room={room} call={call} /> : <ChangesView cwd="/workspace/oh-my-agent" call={call} />}
+            </> : view === "plans" ? <PlansView room={room} call={call} /> : view === "artifacts" ? <ArtifactsView call={call} version={0} /> : <ChangesView cwd="/workspace/oh-my-agent" call={call} />}
           </div>
         </main>
       </div>
@@ -405,6 +414,7 @@ export function Storybook() {
     return <StoryFrame threadOpen />;
   if (story === "page-plans") return <StoryFrame initialView="plans" />;
   if (story === "page-changes") return <StoryFrame initialView="changes" />;
+  if (story === "page-artifacts") return <StoryFrame initialView="artifacts" />;
   if (story === "comp-agents") return <AgentStory />;
   if (story === "comp-ops") return <AgentStory initialTab="operations" />;
   if (story === "comp-new-channel") return <DialogStory />;

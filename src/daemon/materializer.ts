@@ -28,6 +28,7 @@
  * definition plus its spawns closure, not by the user's full agent set.
  */
 import { cp, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
 import type { PeerDefinition } from "../shared/agent-definition";
@@ -73,6 +74,11 @@ export interface MaterializeOptions {
 	sourceMCPs?: Record<string, MCPServerSpec>;
 	/** Available skill roots, keyed by the name a peer selects with `skills:`. */
 	sourceSkillRoots?: Record<string, string>;
+}
+
+/** Where Lavish keeps sessions: the operator's, so the console can list them. */
+export function lavishStateDir(env = process.env): string {
+	return env.LAVISH_AXI_STATE_DIR?.trim() || join(homedir(), ".lavish-axi");
 }
 
 export interface WorkerLayout {
@@ -471,6 +477,12 @@ export async function materializeWorker(
 			XDG_CACHE_HOME: join(home, ".cache"),
 			PI_CODING_AGENT_DIR: agentDir,
 			[INFERENCE_TOKEN_ENV]: inferenceGateway.token,
+			// Lavish (the `lavish` skill) runs in the worker but the review
+			// happens on the operator's machine: sessions land in the
+			// operator's own state dir, not under the synthetic HOME, so the
+			// console lists them, and no worker pops a browser window.
+			LAVISH_AXI_NO_OPEN: "1",
+			LAVISH_AXI_STATE_DIR: lavishStateDir(),
 		},
 	};
 }

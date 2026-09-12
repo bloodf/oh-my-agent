@@ -83,6 +83,7 @@ import { createPeerStore, resolvePeerStoreRoots } from "./peer-store";
 import { listPresets as listShippedPresets } from "./presets";
 import { openProfileStore } from "./profile";
 import { nextCronTime, Scheduler } from "./scheduler";
+import { packageSkillRoots } from "./skill-roots";
 import type {
 	ControlIdentity,
 	DaemonContext,
@@ -444,6 +445,10 @@ const defaultWorkerFactory: WorkerFactory = async (options) => {
 		// A peer's `spawns:` closure must be materialized alongside it, or
 		// `materializeWorker` refuses to build the root at all.
 		sourceSpawnAgents: options.sourceSpawnAgents,
+		// The skills this package ships, so `skills: [lavish]` resolves. The
+		// materializer refuses an unknown name, and nothing handed it a map
+		// before, so every definition that selected a skill failed to start.
+		sourceSkillRoots: packageSkillRoots(),
 		...(options.model === undefined ? {} : { model: options.model }),
 	});
 	// Point the toolbelt at the daemon explicitly; the path heuristic in
