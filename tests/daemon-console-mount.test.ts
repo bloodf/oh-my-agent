@@ -20,7 +20,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, statSync } from "node:fs";
-import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -426,6 +426,67 @@ describe("serving the console", () => {
 });
 
 // ── Traversal ────────────────────────────────────────────────────────────────
+
+describe("lazy chunks", () => {
+	test("app.js stays small: mermaid ships as hashed sibling chunks", async () => {
+		const consoleDir = join(import.meta.dir, "..", "src", "console");
+		const files = await readdir(consoleDir);
+		const chunks = files.filter((f) =>
+			/^chunk-.+-[A-Za-z0-9_-]{8,}\.js$/.test(f),
+		);
+		expect(chunks.length).toBeGreaterThan(0);
+		expect(chunks.some((f) => f.includes("mermaid"))).toBe(true);
+		expect(statSync(join(consoleDir, "app.js")).size).toBeLessThan(1_500_000);
+	});
+
+	test("a chunk is served immutable and gzipped, and the shell mints its URL with the token", async () => {
+		const booted = await boot();
+		const url = printedConsoleUrl(booted.logs);
+		const token = url.searchParams.get("token") as string;
+		const consoleDir = join(import.meta.dir, "..", "src", "console");
+		const chunk = (await readdir(consoleDir)).find((f) =>
+			f.startsWith("chunk-mermaid"),
+		);
+		if (chunk === undefined) throw new Error("no mermaid chunk built");
+
+		// The shell tells app.js how to fetch a chunk: same token, as a query.
+		const html = await (await fetch(url)).text();
+		expect(html).toContain(
+			`window.__omaAsset=(n)=>"/"+n+"?token=${encodeURIComponent(token)}"`,
+		);
+
+		// Bun's fetch asks for gzip on its own; ask for identity to see the
+		// uncompressed wire body.
+		const plain = await fetch(new URL(`/${chunk}?token=${token}`, url), {
+			headers: { "Accept-Encoding": "identity" },
+		});
+		expect(plain.status).toBe(200);
+		expect(plain.headers.get("content-type")).toContain("text/javascript");
+		expect(plain.headers.get("cache-control")).toBe(
+			"public, max-age=31536000, immutable",
+		);
+		expect(plain.headers.get("content-encoding")).toBeNull();
+		const raw = await plain.arrayBuffer();
+
+		const gz = await fetch(new URL(`/${chunk}?token=${token}`, url), {
+			headers: { "Accept-Encoding": "gzip" },
+			// Bun's fetch decodes gzip by default; read the raw stream to
+			// prove the wire body is compressed and smaller.
+			decompress: false,
+		} as RequestInit);
+		expect(gz.headers.get("content-encoding")).toBe("gzip");
+		expect(gz.headers.get("vary")).toBe("Accept-Encoding");
+		expect((await gz.arrayBuffer()).byteLength).toBeLessThan(raw.byteLength);
+
+		// The shape alone is not enough: a chunk that was never built is 404,
+		// and a file that is not a chunk is refused as before.
+		expect(
+			(await fetch(new URL(`/chunk-ghost-AAAAAAAA.js?token=${token}`, url)))
+				.status,
+		).toBe(404);
+		expect((await fetch(new URL(`/${chunk}`, url))).status).toBe(401);
+	});
+});
 
 describe("static path containment", () => {
 	test("a literal ../ request target is refused", async () => {

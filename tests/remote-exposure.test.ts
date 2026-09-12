@@ -20,6 +20,7 @@ import {
 	chmod,
 	mkdir,
 	mkdtemp,
+	readdir,
 	readFile,
 	rm,
 	symlink,
@@ -969,6 +970,31 @@ describe("remote console ticket authentication", () => {
 			if (style === undefined || script === undefined) {
 				throw new Error("Authenticated shell carried no asset tickets");
 			}
+			// The chunk pass: minted into the same shell, reusable for every
+			// built chunk and nothing else, so a diagram opened later still
+			// loads its renderer.
+			const pass = /__omaAsset=\(n\)=>"\/"\+n\+"\?ticket=([^"]+)"/.exec(
+				html,
+			)?.[1];
+			if (pass === undefined)
+				throw new Error("Authenticated shell carried no chunk pass");
+			const chunk = (
+				await readdir(join(import.meta.dir, "..", "src", "console"))
+			).find((f) => f.startsWith("chunk-mermaid"));
+			if (chunk === undefined) throw new Error("no mermaid chunk built");
+			for (let attempt = 0; attempt < 2; attempt++) {
+				expect((await use(`/${chunk}`, decodeURIComponent(pass))).status).toBe(
+					200,
+				);
+			}
+			expect((await use("/app.js", decodeURIComponent(pass))).status).toBe(401);
+			expect(
+				(
+					await fetch(anonymous(booted.handle, `/${chunk}`, booted.localUrl), {
+						headers: forwarded,
+					})
+				).status,
+			).toBe(401);
 			expect(
 				(
 					await fetch(new URL(style, booted.localUrl), {

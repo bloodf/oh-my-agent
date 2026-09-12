@@ -142,13 +142,16 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 
 ## Development and build
 
-The editable React/shadcn source is under `web/`. Production output is exactly:
+The editable React/shadcn source is under `web/`. Production output is:
 
 ```
 src/console/index.html
 src/console/app.js
 src/console/style.css
+src/console/chunk-<name>-<hash>.js   # lazily imported modules: mermaid and its diagram packs
 ```
+
+The daemon serves exactly those shapes and nothing else under `src/console/`. Chunks are content-hashed, so they are served `Cache-Control: immutable`; every script and stylesheet is gzipped when the browser accepts it. `app.js` fetches a chunk through `window.__omaAsset`, which the daemon injects into the shell with the loopback token as a query, or in remote mode a chunk pass: one reusable, path-prefix-bound ticket that lives twelve hours, so a diagram opened late in a session still loads its renderer.
 
 Use the root scripts so output lands where the daemon serves it:
 
