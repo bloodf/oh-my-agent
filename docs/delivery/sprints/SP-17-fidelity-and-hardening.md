@@ -23,6 +23,7 @@ Close what the two-model review found: threads, reactions, attribution, typed ev
 | [T-1628](../tasks/T-1628-console-schedules-profile.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Schedules and a display profile in the console | Done |
 | [T-1629](../tasks/T-1629-lavish-artifacts.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Lavish Editor for reviewable HTML artifacts | Done |
 | [T-1630](../tasks/T-1630-console-lazy-chunks.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | A small console bundle: lazy chunks, gzip, immutable caching | Done |
+| [T-1631](../tasks/T-1631-console-next.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | A server-rendered console on Next.js | Done |
 | [T-1601](../tasks/T-1601-console-thread-parentage.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Console thread replies preserve parentage | Done |
 | [T-1602](../tasks/T-1602-reaction-removal-frames.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Reaction removal frames | Done |
 | [T-1603](../tasks/T-1603-attribution-enforcement.md) | [EP-16](../epics/EP-16-fidelity-and-hardening.md) | Enforce attribution from connection identity | Done |

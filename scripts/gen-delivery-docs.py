@@ -825,6 +825,42 @@ ADRS = [
     ),
 ]
 
+ADRS += [
+    ADR(
+        id="ADR-016",
+        slug="server-rendered-console",
+        title="A server-rendered console beside the bundled one, not in place of it",
+        status="Accepted",
+        context=(
+            "The operator asked for the console to run on a Next.js server with server-side rendering to cut what the "
+            "browser downloads. The bundled console is what the daemon serves from an allowlist under src/console/ "
+            "with token and ticket auth, and it is what the npm package ships; its size came from mermaid, not from "
+            "client rendering, and lazy chunks (T-1630) took app.js from six megabytes to under one."
+        ),
+        decision=(
+            "Add web-next/, a Next.js app that renders pages on the server and holds the operator token there, "
+            "proxying the daemon's console API on its own origin and relaying daemon frames as server-sent events. "
+            "It is a development and self-hosting surface beside the bundled console, built and tested in the full "
+            "suite against a real daemon, and not part of the npm package. The daemon keeps serving the bundled "
+            "console; nothing in the plugin's install path depends on Node or Next."
+        ),
+        consequences=[
+            "Two consoles share one API; a feature lands in the daemon once and each console picks it up.",
+            "The Next console carries a parity list in the web console guide until it matches the bundled one.",
+            "The package still ships zero runtime dependencies; Next's tree lives in web-next/node_modules only.",
+            "Remote-mode ticket authentication is the bundled console's; the Next console runs beside the daemon on loopback.",
+        ],
+        alternatives=[
+            ("Replace the bundled console with Next inside the plugin", "Puts a Node server and a hundred-megabyte dependency tree into an OMP plugin that ships none, and re-implements token, ticket, and remote-mode auth in a second process for no size gain: mermaid renders in the browser either way."),
+            ("Only lazy chunks", "Delivers the size cut but not what was asked: a server that renders pages."),
+        ],
+        evidence=[
+            ("The Next console against a real daemon", "tests/console-next.test.ts"),
+            ("The daemon's own console serving", "src/daemon/console-api.ts"),
+        ],
+    ),
+]
+
 ADR_FILE = {a.id: f"{a.id}-{a.slug}.md" for a in ADRS}
 ADR_TITLE = {a.id: a.title for a in ADRS}
 
@@ -1378,7 +1414,7 @@ EPICS = [
             "The CLI gains daemon stop/restart and definition authoring.",
             "Every acceptance bullet named by the review as unproven has a failing-when-removed test.",
         ],
-        adrs=["ADR-014", "ADR-015"],
+        adrs=["ADR-014", "ADR-015", "ADR-016"],
     ),
 ]
 
@@ -4945,6 +4981,96 @@ TASKS += [
         ],
         depends_on=["T-1629"],
         out_of_scope=["Brotli: gzip is what Bun ships without a dependency and is enough on loopback and behind a proxy that can recompress."],
+    ),
+    Task(
+        id="T-1631", slug="console-next", title="A server-rendered console on Next.js",
+        epic="EP-16", sprint="SP-17", status="Done",
+        goal="A Next.js app renders the console on the server: pages fetch the daemon with the operator token held server-side, the browser talks only to the Next origin through a proxy and a server-sent event stream, and Markdown arrives as HTML so a page without diagrams ships no mermaid. It runs beside the bundled console, builds and starts in the full suite against a real daemon, and stays out of the npm package.",
+        read_first=[
+            ("The decision", "docs/delivery/adr/ADR-016-server-rendered-console.md"),
+            ("The daemon's console API the pages fetch", "src/daemon/console-api.ts"),
+            ("The bundled console's Markdown renderer this mirrors", "web/src/console/Markdown.tsx"),
+        ],
+        files=[
+            "web-next/package.json",
+            "web-next/bun.lock",
+            "web-next/next.config.ts",
+            "web-next/tsconfig.json",
+            "web-next/postcss.config.mjs",
+            "web-next/next-env.d.ts",
+            "web-next/README.md",
+            "web-next/src/lib/daemon.ts",
+            "web-next/src/lib/types.ts",
+            "web-next/src/app/globals.css",
+            "web-next/src/app/layout.tsx",
+            "web-next/src/app/page.tsx",
+            "web-next/src/app/error.tsx",
+            "web-next/src/app/rooms/[id]/page.tsx",
+            "web-next/src/app/rooms/[id]/plans/page.tsx",
+            "web-next/src/app/agents/page.tsx",
+            "web-next/src/app/artifacts/page.tsx",
+            "web-next/src/app/api/[...path]/route.ts",
+            "web-next/src/app/api/live/route.ts",
+            "web-next/src/components/Markdown.tsx",
+            "web-next/src/components/Mermaid.tsx",
+            "web-next/src/components/Live.tsx",
+            "web-next/src/components/Composer.tsx",
+            "web-next/src/components/Reactions.tsx",
+            "web-next/src/components/Action.tsx",
+            "package.json",
+            "tsconfig.json",
+            "biome.json",
+            ".gitignore",
+            ".github/workflows/ci.yml",
+            "tests/console-next.test.ts",
+        ],
+        assets=[
+            ("web-next/package.json", "New", "next, react, react-markdown, remark-gfm, mermaid; dev, build, start on 4388, typecheck."),
+            ("web-next/bun.lock", "New", "Locked."),
+            ("web-next/next.config.ts", "New", "Strict mode, no powered-by header, the app as its own workspace root."),
+            ("web-next/tsconfig.json", "New", "Next's defaults."),
+            ("web-next/postcss.config.mjs", "New", "Tailwind v4."),
+            ("web-next/next-env.d.ts", "New", "Next's ambient types."),
+            ("web-next/README.md", "New", "How to run it and where it finds the daemon."),
+            ("web-next/src/lib/daemon.ts", "New", "Resolves the daemon from console-url or OMA_CONSOLE_URL; server-only fetch with the token."),
+            ("web-next/src/lib/types.ts", "New", "Wire shapes and personaFor."),
+            ("web-next/src/app/globals.css", "New", "Tailwind and the dark base."),
+            ("web-next/src/app/layout.tsx", "New", "The rail: rooms from the daemon, agents, artifacts."),
+            ("web-next/src/app/page.tsx", "New", "Redirects to the first room."),
+            ("web-next/src/app/error.tsx", "New", "A daemon refusal in place of the page, with retry."),
+            ("web-next/src/app/rooms/[id]/page.tsx", "New", "The transcript, server-rendered: personas, Markdown, reactions, composer, live refresh."),
+            ("web-next/src/app/rooms/[id]/plans/page.tsx", "New", "Plans, server-rendered."),
+            ("web-next/src/app/agents/page.tsx", "New", "Agents with start and stop; schedules with pause and resume."),
+            ("web-next/src/app/artifacts/page.tsx", "New", "Lavish sessions with Open review."),
+            ("web-next/src/app/api/[...path]/route.ts", "New", "The proxy: every /api/* forwarded with the token added server-side."),
+            ("web-next/src/app/api/live/route.ts", "New", "The daemon's WebSocket relayed as server-sent events."),
+            ("web-next/src/components/Markdown.tsx", "New", "GFM on the server; a mermaid fence becomes the one client island."),
+            ("web-next/src/components/Mermaid.tsx", "New", "The island: mermaid imported on first sight."),
+            ("web-next/src/components/Live.tsx", "New", "EventSource on this origin; a relevant frame refreshes the server tree."),
+            ("web-next/src/components/Composer.tsx", "New", "Post as @you through the proxy."),
+            ("web-next/src/components/Reactions.tsx", "New", "Toggle the operator's reaction through the proxy."),
+            ("web-next/src/components/Action.tsx", "New", "One proxied call and a refresh: start, stop, pause, resume, open review."),
+            ("package.json", "Edited", "console:next:* scripts; typecheck covers web-next; test:fast skips the slow suite."),
+            ("tsconfig.json", "Edited", "web-next excluded from the root program."),
+            ("biome.json", "Edited", "Next's build output ignored."),
+            (".gitignore", "Edited", "web-next/.next."),
+            (".github/workflows/ci.yml", "Edited", "Installs web-next's dependencies."),
+            ("tests/console-next.test.ts", "New", "Builds and starts Next against a real daemon: Markdown as HTML, no token in the page, no mermaid without a diagram, the proxy, the live stream."),
+        ],
+        steps=[
+            "Hold the token on the server: resolve the daemon once, fetch through one helper, proxy the API on the app's origin, relay events as SSE.",
+            "Render bodies as Markdown in server components; isolate mermaid as a client island.",
+            "Prove it against a booted daemon in the full suite, and keep it out of the package and the fast suite.",
+        ],
+        acceptance=[
+            "A room page answers 200 with the message's Markdown already as HTML, the operator token absent from the page, and no mermaid script when no diagram is present.",
+            "The proxy answers the daemon's channels; the live stream opens and relays a message frame.",
+        ],
+        evidence=[
+            ("Next against a real daemon", "tests/console-next.test.ts"),
+        ],
+        depends_on=["T-1630"],
+        out_of_scope=["Parity with the bundled console (threads, native chats, changes, definition editing, membership, profile editing) and remote-mode ticket auth; listed in the web console guide."],
     ),
 ]
 

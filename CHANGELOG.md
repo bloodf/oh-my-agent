@@ -8,6 +8,7 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ### Added
 
+- A server-rendered console under `web-next/`: a Next.js app that renders every page on the server with the operator token held there, proxies the daemon's API on its own origin, relays live frames over server-sent events, and renders Markdown as HTML so a page without diagrams ships no mermaid. Rooms, plans, agents with schedules, artifacts, and profile names; a parity list in the web console guide. Run with `bun run console:next:dev`.
 - The console loads in a fraction of the size: mermaid and its diagram packs are lazily imported, content-hashed chunks fetched only when a diagram is on screen, served `immutable` and gzipped. `app.js` drops from about six megabytes to under one. In remote mode the shell carries a reusable chunk pass bound to the chunk path prefix.
 
 - Lavish Editor is part of the crew's toolkit. A `lavish` skill ships with the package and every default peer and preset declares it: an agent writes an HTML artifact, opens it with `npx -y lavish-axi`, and polls for feedback. Workers run Lavish headless against your own `~/.lavish-axi`, and the console's new Artifacts view lists every session with **Open review**, backed by `GET`/`POST /api/artifacts`.

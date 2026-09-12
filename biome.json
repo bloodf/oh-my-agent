@@ -13,6 +13,8 @@
 			"!**/docs/diagrams",
 			"!**/docs/assets",
 			"!**/web",
+			"!**/web-next/.next",
+			"!**/web-next/next-env.d.ts",
 			"!**/src/console/app.js",
 			"!**/src/console/chunk-*.js",
 			"!**/src/console/style.css"

@@ -1,0 +1,37 @@
+{
+	"name": "oh-my-agent-console-next",
+	"version": "0.1.0",
+	"private": true,
+	"scripts": {
+		"dev": "next dev -p 4388",
+		"build": "next build",
+		"start": "next start -p 4388",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"mermaid": "12.0.0",
+		"next": "16.3.5",
+		"react": "19.2.8",
+		"react-dom": "19.2.8",
+		"react-markdown": "10.1.0",
+		"remark-gfm": "4.0.1"
+	},
+	"devDependencies": {
+		"@tailwindcss/postcss": "^4",
+		"@types/node": "^20",
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"server-only": "^0.0.1",
+		"tailwindcss": "^4",
+		"typescript": "^5"
+	},
+	"packageManager": "bun@1.4.2",
+	"ignoreScripts": [
+		"sharp",
+		"unrs-resolver"
+	],
+	"trustedDependencies": [
+		"sharp",
+		"unrs-resolver"
+	]
+}

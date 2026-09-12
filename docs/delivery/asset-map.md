@@ -6,18 +6,18 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 
 | Path | Exists | Owned by | Read by |
 |---|---|---|---|
-| `.github/workflows/ci.yml` | yes | [T-701](tasks/T-701-ci-workflow.md), [T-705](tasks/T-705-spawn-test-time-budget.md), [T-1302](tasks/T-1302-versioning-policy.md), [T-1305](tasks/T-1305-patch-hygiene-gate.md), [T-1306](tasks/T-1306-consumer-install-smoke.md) | — |
+| `.github/workflows/ci.yml` | yes | [T-701](tasks/T-701-ci-workflow.md), [T-705](tasks/T-705-spawn-test-time-budget.md), [T-1302](tasks/T-1302-versioning-policy.md), [T-1305](tasks/T-1305-patch-hygiene-gate.md), [T-1306](tasks/T-1306-consumer-install-smoke.md), [T-1631](tasks/T-1631-console-next.md) | — |
 | `.github/workflows/draft-changelog.yml` | yes | [T-1303](tasks/T-1303-release-ci.md) | — |
 | `.github/workflows/prepare-release.yml` | yes | [T-1303](tasks/T-1303-release-ci.md) | — |
 | `.github/workflows/release.yml` | yes | [T-1303](tasks/T-1303-release-ci.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
-| `.gitignore` | yes | [T-1402](tasks/T-1402-dogfood-harness.md) | — |
+| `.gitignore` | yes | [T-1402](tasks/T-1402-dogfood-harness.md), [T-1631](tasks/T-1631-console-next.md) | — |
 | `ARCHITECTURE.md` | yes | [T-1205](tasks/T-1205-exposure-runbook.md) | [T-703](tasks/T-703-root-readme-and-metadata.md) |
 | `CHANGELOG.md` | yes | [T-1302](tasks/T-1302-versioning-policy.md) | — |
 | `LICENSE` | yes | [T-703](tasks/T-703-root-readme-and-metadata.md) | — |
 | `README.md` | yes | [T-703](tasks/T-703-root-readme-and-metadata.md), [T-1205](tasks/T-1205-exposure-runbook.md), [T-1302](tasks/T-1302-versioning-policy.md), [T-1304](tasks/T-1304-install-docs.md) | — |
 | `agents/example-researcher.md` | yes | [T-501](tasks/T-501-peer-store.md) | — |
 | `agents/example-reviewer.md` | yes | [T-501](tasks/T-501-peer-store.md) | — |
-| `biome.json` | yes | [T-702](tasks/T-702-biome-lint.md), [T-1303](tasks/T-1303-release-ci.md) | — |
+| `biome.json` | yes | [T-702](tasks/T-702-biome-lint.md), [T-1303](tasks/T-1303-release-ci.md), [T-1631](tasks/T-1631-console-next.md) | — |
 | `bun.lock` | yes | [T-1503](tasks/T-1503-drop-resolve-walk.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
 | `docs/develop/modules.md` | yes | [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
 | `docs/develop/release.md` | yes | [T-1303](tasks/T-1303-release-ci.md) | — |
@@ -27,7 +27,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `docs/remote-exposure.md` | yes | [T-1202](tasks/T-1202-tls-termination.md), [T-1205](tasks/T-1205-exposure-runbook.md) | — |
 | `docs/web-console.md` | yes | [T-1001](tasks/T-1001-console-mounted-at-boot.md), [T-1101](tasks/T-1101-console-visual-system.md) | — |
 | `node_modules/@oh-my-pi/pi-ai/src/auth-broker/remote-store.ts` | yes | — | [T-303](tasks/T-303-client-integration.md) |
-| `package.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-502](tasks/T-502-daemon-entry-point.md), [T-702](tasks/T-702-biome-lint.md), [T-703](tasks/T-703-root-readme-and-metadata.md), [T-705](tasks/T-705-spawn-test-time-budget.md), [T-804](tasks/T-804-authoring-skills.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1301](tasks/T-1301-packable-artifact.md), [T-1303](tasks/T-1303-release-ci.md), [T-1306](tasks/T-1306-consumer-install-smoke.md), [T-1503](tasks/T-1503-drop-resolve-walk.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | [T-701](tasks/T-701-ci-workflow.md), [T-1613](tasks/T-1613-build-hygiene-test.md) |
+| `package.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-502](tasks/T-502-daemon-entry-point.md), [T-702](tasks/T-702-biome-lint.md), [T-703](tasks/T-703-root-readme-and-metadata.md), [T-705](tasks/T-705-spawn-test-time-budget.md), [T-804](tasks/T-804-authoring-skills.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1301](tasks/T-1301-packable-artifact.md), [T-1303](tasks/T-1303-release-ci.md), [T-1306](tasks/T-1306-consumer-install-smoke.md), [T-1503](tasks/T-1503-drop-resolve-walk.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md), [T-1631](tasks/T-1631-console-next.md) | [T-701](tasks/T-701-ci-workflow.md), [T-1613](tasks/T-1613-build-hygiene-test.md) |
 | `repro/bun-plugin-memo/README.md` | yes | [T-1501](tasks/T-1501-repro-import-meta-resolve.md) | — |
 | `repro/bun-plugin-memo/bun.lock` | yes | [T-1501](tasks/T-1501-repro-import-meta-resolve.md) | — |
 | `repro/bun-plugin-memo/package.json` | yes | [T-1501](tasks/T-1501-repro-import-meta-resolve.md) | — |
@@ -118,6 +118,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/build-hygiene.test.ts` | yes | [T-1613](tasks/T-1613-build-hygiene-test.md) | — |
 | `tests/console-api.test.ts` | yes | [T-602](tasks/T-602-console-api.md), [T-1628](tasks/T-1628-console-schedules-profile.md), [T-1629](tasks/T-1629-lavish-artifacts.md), [T-1601](tasks/T-1601-console-thread-parentage.md), [T-1602](tasks/T-1602-reaction-removal-frames.md), [T-1603](tasks/T-1603-attribution-enforcement.md), [T-1604](tasks/T-1604-typed-daemon-events.md), [T-1605](tasks/T-1605-console-ops-panel.md) | — |
 | `tests/console-client.test.ts` | yes | [T-603](tasks/T-603-console-client.md), [T-1101](tasks/T-1101-console-visual-system.md), [T-1102](tasks/T-1102-console-accessibility.md), [T-1104](tasks/T-1104-console-focus-stability.md), [T-1105](tasks/T-1105-unread-reconcile-on-open.md), [T-1203](tasks/T-1203-remote-console-auth.md), [T-1627](tasks/T-1627-console-markdown-mermaid.md), [T-1628](tasks/T-1628-console-schedules-profile.md), [T-1601](tasks/T-1601-console-thread-parentage.md), [T-1602](tasks/T-1602-reaction-removal-frames.md), [T-1604](tasks/T-1604-typed-daemon-events.md), [T-1605](tasks/T-1605-console-ops-panel.md), [T-1607](tasks/T-1607-authoring-parity.md), [T-1608](tasks/T-1608-mentions-fidelity.md), [T-1614](tasks/T-1614-test-timing-hygiene.md), [T-1615](tasks/T-1615-repaint-focus-stability.md) | — |
+| `tests/console-next.test.ts` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
 | `tests/console-storybook.test.ts` | yes | [T-603](tasks/T-603-console-client.md) | — |
 | `tests/consumer-install.test.ts` | yes | [T-1306](tasks/T-1306-consumer-install-smoke.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
 | `tests/contracts/broker.contract.test.ts` | yes | [T-004](tasks/T-004-broker-contract.md) | — |
@@ -165,7 +166,32 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/worker-inprocess.test.ts` | yes | [T-1006](tasks/T-1006-in-process-worker-path.md), [T-1612](tasks/T-1612-shared-supervisor-contract.md) | — |
 | `tests/worker-lifecycle.test.ts` | yes | [T-401](tasks/T-401-worker-lifecycle.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1612](tasks/T-1612-shared-supervisor-contract.md) | — |
 | `tests/workspace-changes.test.ts` | yes | [T-603](tasks/T-603-console-client.md) | — |
-| `tsconfig.json` | yes | [T-001](tasks/T-001-package-scaffold.md) | — |
+| `tsconfig.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/README.md` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/bun.lock` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/next-env.d.ts` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/next.config.ts` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/package.json` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/postcss.config.mjs` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/app/agents/page.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/app/api/[...path]/route.ts` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/app/api/live/route.ts` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/app/artifacts/page.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/app/error.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/app/globals.css` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/app/layout.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/app/page.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/app/rooms/[id]/page.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/app/rooms/[id]/plans/page.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/components/Action.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/components/Composer.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/components/Live.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/components/Markdown.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/components/Mermaid.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/components/Reactions.tsx` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/lib/daemon.ts` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/src/lib/types.ts` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
+| `web-next/tsconfig.json` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
 | `web/bun.lock` | yes | [T-1627](tasks/T-1627-console-markdown-mermaid.md) | — |
 | `web/package.json` | yes | [T-1627](tasks/T-1627-console-markdown-mermaid.md) | — |
 | `web/src/console/AgentPanel.tsx` | yes | [T-1628](tasks/T-1628-console-schedules-profile.md) | — |
