@@ -65,6 +65,11 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --cwd web --frozen-lockfile
 
+      - name: Install server-rendered console dependencies
+        # The root typecheck covers web-next since T-1631; without its tree
+        # the pack lifecycle fails on missing Next types.
+        run: bun install --cwd web-next --frozen-lockfile
+
       - name: Pack lifecycle (typecheck and fast suites)
         run: |
           set -o pipefail
