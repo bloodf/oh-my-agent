@@ -6,6 +6,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-12
+
 ### Added
 
 - A server-rendered console under `web-next/`: a Next.js app that renders every page on the server with the operator token held there, proxies the daemon's API on its own origin, relays live frames over server-sent events, and renders Markdown as HTML so a page without diagrams ships no mermaid. Rooms, plans, agents with schedules, artifacts, and profile names; a parity list in the web console guide. Run with `bun run console:next:dev`.
