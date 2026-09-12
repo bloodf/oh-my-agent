@@ -39,6 +39,8 @@ The left rail separates destinations with different lifecycles:
 - **Rooms** are shared `#` channels. Messages, threads, reactions, agent membership, and plans are stored by the daemon and survive browser and daemon restarts.
 - **Direct messages** are durable `@` channels routed through the same room store and supervisor delivery path. They are not independent native OMP chats. Opening a DM to a stopped or defined-but-not-running agent persists its membership and messages, but does not launch it; delivery waits until the agent starts.
 
+Message and plan bodies render as GitHub-flavored Markdown: headings, lists and task lists, tables, links, inline code, and fenced code with the language labeled and `diff` lines tinted. A ` ```mermaid ` fence is drawn as a diagram in the console's light or dark palette; a diagram that does not parse shows its source with mermaid's error line under it. HTML in a body is text, never markup.
+
 Conversation, Plans, and Changes views retain the selected destination. Plans are durable room artifacts with revision checks; independent chats use native OMP todo state instead of a second plan store. Changes reads real Git status and bounded diffs for the selected workspace.
 
 The workspace is execution location metadata, not an authorization boundary. Local console control has the daemon's OS filesystem authority. An independent chat can therefore reach files available to that OS identity, including files outside the selected workspace when its OMP tools permit it.

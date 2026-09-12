@@ -35,7 +35,10 @@ export default defineConfig({
 		rollupOptions: {
 			output: {
 				entryFileNames: "app.js",
-				chunkFileNames: "app.js",
+				// One file: the daemon serves exactly app.js, style.css, and
+				// index.html, so mermaid's lazily loaded diagram modules must
+				// live inside app.js rather than as sibling chunks.
+				inlineDynamicImports: true,
 				assetFileNames: (asset) =>
 					asset.names?.[0]?.endsWith(".css")
 						? "style.css"
