@@ -32,7 +32,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-
+import type { ArtifactSession } from "../src/daemon/artifacts";
 import type { ConsoleApi, ConsoleEvent } from "../src/daemon/console-api";
 import { startConsoleApi } from "../src/daemon/console-api";
 import { createOperations } from "../src/daemon/operations";
@@ -128,6 +128,8 @@ async function harness(
 		schedules?: Map<string, ScheduleRecord>;
 		armSchedule?: (id: string, enabled: boolean) => ScheduleInfo | undefined;
 		profile?: ProfileStore;
+		lavishStateDir?: string;
+		openArtifact?: (file: string, stateDir: string) => Promise<ArtifactSession>;
 	} = {},
 ) {
 	const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-console-"));
@@ -279,6 +281,12 @@ async function harness(
 			? {}
 			: { armSchedule: options.armSchedule }),
 		...(options.profile === undefined ? {} : { profile: options.profile }),
+		...(options.lavishStateDir === undefined
+			? {}
+			: { lavishStateDir: options.lavishStateDir }),
+		...(options.openArtifact === undefined
+			? {}
+			: { openArtifact: options.openArtifact }),
 	});
 	cleanups.push(() => api.close());
 	// Nameable only after construction, which is the whole reason the console
@@ -710,6 +718,102 @@ describe("schedules", () => {
 		const h = await harness();
 		expect(await (await h.call("/api/schedules")).json()).toEqual({
 			schedules: [],
+		});
+	});
+});
+
+describe("artifacts", () => {
+	test("GET lists Lavish sessions newest first; POST resumes a known one and refuses the rest", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-lavish-"));
+		cleanups.push(() => rm(dir, { recursive: true, force: true }));
+		await writeFile(
+			join(dir, "state.json"),
+			JSON.stringify({
+				sessions: {
+					a: {
+						file: "/work/plan.html",
+						url: "http://127.0.0.1:4387/s/a",
+						status: "feedback",
+						pending_prompts: 2,
+						updated_at: "2026-09-12T10:00:00.000Z",
+					},
+					b: {
+						file: "/work/report.html",
+						url: "http://127.0.0.1:4387/s/b",
+						status: "open",
+						pending_prompts: 0,
+						updated_at: "2026-09-12T11:00:00.000Z",
+					},
+					junk: { nope: true },
+				},
+			}),
+		);
+		const opened: string[] = [];
+		const h = await harness({
+			lavishStateDir: dir,
+			openArtifact: async (file) => {
+				opened.push(file);
+				return {
+					file,
+					url: "http://127.0.0.1:4387/s/a",
+					status: "open",
+					pendingPrompts: 0,
+					updatedAt: "",
+				};
+			},
+		});
+		const listed = await (await h.call("/api/artifacts")).json();
+		expect(listed).toEqual({
+			artifacts: [
+				{
+					file: "/work/report.html",
+					url: "http://127.0.0.1:4387/s/b",
+					status: "open",
+					pendingPrompts: 0,
+					updatedAt: "2026-09-12T11:00:00.000Z",
+				},
+				{
+					file: "/work/plan.html",
+					url: "http://127.0.0.1:4387/s/a",
+					status: "feedback",
+					pendingPrompts: 2,
+					updatedAt: "2026-09-12T10:00:00.000Z",
+				},
+			],
+		});
+
+		const resumed = await h.call("/api/artifacts", {
+			method: "POST",
+			body: JSON.stringify({ file: "/work/plan.html" }),
+		});
+		expect(resumed.status).toBe(200);
+		expect(opened).toEqual(["/work/plan.html"]);
+		// Only a file Lavish already holds: the console resumes, it does not open.
+		expect(
+			(
+				await h.call("/api/artifacts", {
+					method: "POST",
+					body: JSON.stringify({ file: "/etc/passwd.html" }),
+				})
+			).status,
+		).toBe(404);
+		expect(
+			(
+				await h.call("/api/artifacts", {
+					method: "POST",
+					body: JSON.stringify({ file: "relative.html" }),
+				})
+			).status,
+		).toBe(400);
+		expect(opened).toEqual(["/work/plan.html"]);
+	});
+
+	test("no state file is an empty list", async () => {
+		const h = await harness({
+			lavishStateDir: join(tmpdir(), "no-such-lavish-dir"),
+		});
+		expect(await (await h.call("/api/artifacts")).json()).toEqual({
+			artifacts: [],
 		});
 	});
 });

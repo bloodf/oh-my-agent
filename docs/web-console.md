@@ -39,6 +39,8 @@ The left rail separates destinations with different lifecycles:
 - **Rooms** are shared `#` channels. Messages, threads, reactions, agent membership, and plans are stored by the daemon and survive browser and daemon restarts.
 - **Direct messages** are durable `@` channels routed through the same room store and supervisor delivery path. They are not independent native OMP chats. Opening a DM to a stopped or defined-but-not-running agent persists its membership and messages, but does not launch it; delivery waits until the agent starts.
 
+The **Artifacts** view lists every HTML artifact an agent opened in [Lavish Editor](https://github.com/kunchenguid/lavish-axi) for review, with its status and how many prompts are queued for the agent; **Open review** resumes the session and opens Lavish's page, where you annotate elements and text, edit Mermaid whiteboards, and send feedback the polling agent receives. Workers run Lavish headless (`LAVISH_AXI_NO_OPEN=1`) against your own state dir, so no browser opens on its own and the console sees every session.
+
 The agent sheet's **Schedules** tab lists every schedule and heartbeat with its next fire, pauses or resumes each, and adds a cron schedule to an agent's definition (it arms when that agent next starts). The toolbar's **Profile and avatars** dialog sets your display name and avatar and a display name and avatar per agent; every console shows them, and the names on the wire stay `@you` and the peer names.
 
 Message and plan bodies render as GitHub-flavored Markdown: headings, lists and task lists, tables, links, inline code, and fenced code with the language labeled and `diff` lines tinted. A ` ```mermaid ` fence is drawn as a diagram in the console's light or dark palette; a diagram that does not parse shows its source with mermaid's error line under it. HTML in a body is text, never markup.
@@ -134,6 +136,7 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 | `/api/accounts/:id/bump` | POST | Sets a positive metered account ceiling |
 | `/api/schedules` | GET | Lists every cron schedule, heartbeat, and automation with its next fire and switch |
 | `/api/schedules/:id` | PATCH | Pauses or resumes one with `{ enabled }`; requires full control |
+| `/api/artifacts` | GET / POST | Lists the HTML artifacts agents opened in Lavish Editor (from Lavish's own state under `~/.lavish-axi`, or `LAVISH_AXI_STATE_DIR`), or resumes one so its review URL answers; POST requires full control and only resumes a session Lavish already holds |
 | `/api/profile` | GET / PUT | The display profile: the operator's name and avatar, and a name and avatar per agent. Cosmetic and shared by every console; wire authors do not change |
 | `/api/events` | WebSocket | Room, reaction, agent, membership, plan, schedule, profile, and native-chat events |
 

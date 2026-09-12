@@ -32,7 +32,7 @@ import { join } from "node:path";
 
 const realRename = fs.rename;
 
-import { materializeWorker } from "../src/daemon/materializer";
+import { lavishStateDir, materializeWorker } from "../src/daemon/materializer";
 import type { PeerDefinition } from "../src/shared/agent-definition";
 import {
 	fingerprintPeerDefinition,
@@ -164,6 +164,23 @@ describe("synthetic directory creation", () => {
 		});
 	});
 
+	test("Lavish runs headless in the worker and keeps sessions in the operator's state dir", async () => {
+		await withTempRoot(async (root) => {
+			const result = await materialize({
+				rootDir: root,
+				parsedPeer: minimalPeer(),
+				discoveredAgentNames: [],
+				inferenceGateway: GATEWAY,
+			});
+			// Never under the synthetic HOME: the console lists the operator's.
+			expect(result.env.LAVISH_AXI_NO_OPEN).toBe("1");
+			expect(result.env.LAVISH_AXI_STATE_DIR).toBe(lavishStateDir());
+			expect(result.env.LAVISH_AXI_STATE_DIR.startsWith(result.env.HOME)).toBe(
+				false,
+			);
+		});
+	});
+
 	test("agent dir is <home>/.omp/agent and is exported as PI_CODING_AGENT_DIR", async () => {
 		await withTempRoot(async (root) => {
 			const result = await materialize({
@@ -257,6 +274,9 @@ describe("synthetic directory creation", () => {
 					"XDG_CACHE_HOME",
 					"PI_CODING_AGENT_DIR",
 					"OH_MY_AGENT_INFERENCE_TOKEN",
+					// Lavish: headless in the worker, sessions in the operator's dir.
+					"LAVISH_AXI_NO_OPEN",
+					"LAVISH_AXI_STATE_DIR",
 				];
 				const expectedKeys = declared
 					.filter(

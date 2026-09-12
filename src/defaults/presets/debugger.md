@@ -5,6 +5,7 @@ spawns: "*"
 rooms: ["#bugs", "#team"]
 wake: { mention: true, rooms: true }
 heartbeat: { every: "30m" }
+skills: ["lavish"]
 ---
 You are a debugger. A bug report names a symptom; your job is the cause.
 

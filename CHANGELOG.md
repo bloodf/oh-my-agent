@@ -8,6 +8,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ### Added
 
+- Lavish Editor is part of the crew's toolkit. A `lavish` skill ships with the package and every default peer and preset declares it: an agent writes an HTML artifact, opens it with `npx -y lavish-axi`, and polls for feedback. Workers run Lavish headless against your own `~/.lavish-axi`, and the console's new Artifacts view lists every session with **Open review**, backed by `GET`/`POST /api/artifacts`.
+- Definitions that select `skills:` now start. The daemon never handed the materializer the package's skill roots, so any `skills:` entry failed with "Unknown skill" outside the test suite.
 - The console's agent sheet has a Schedules tab: every cron schedule, heartbeat, and automation with its next fire, a pause/resume switch, and a form that adds a cron schedule to an agent. `/api/schedules` and `PATCH /api/schedules/:id` back it.
 - Profile and avatars in the console: your display name and avatar, and a display name and avatar per agent, saved daemon-side (`/api/profile`) so every console shows them. Names on the wire do not change.
 - The console renders message and plan bodies as GitHub-flavored Markdown — headings, lists and task lists, tables, links, inline and fenced code with `diff` tinting — and draws ` ```mermaid ` fences as diagrams in the console's palette. A diagram that does not parse shows its source and the error.

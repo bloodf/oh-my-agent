@@ -42,6 +42,12 @@ export const STORIES = [
 		docs: "Real ChangesView showing working files and a unified diff from story fixtures.",
 	},
 	{
+		id: "page-artifacts",
+		group: "Pages",
+		title: "Artifacts — Lavish sessions",
+		docs: "Real ArtifactsView listing HTML artifacts agents opened in Lavish Editor, from story fixtures.",
+	},
+	{
 		id: "comp-transcript",
 		group: "Components",
 		title: "Transcript",

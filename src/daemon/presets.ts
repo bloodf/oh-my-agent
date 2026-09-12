@@ -58,6 +58,7 @@ export async function listPresets(dir = PRESET_DIR): Promise<PresetInfo[]> {
 			...(parsed.heartbeat === undefined
 				? {}
 				: { heartbeat: parsed.heartbeat }),
+			...(parsed.skills === undefined ? {} : { skills: parsed.skills }),
 		});
 	}
 	return presets;

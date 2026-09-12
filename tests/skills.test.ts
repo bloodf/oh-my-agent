@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { loadSkills } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import { parseFrontmatter } from "@oh-my-pi/pi-utils";
 import { materializeWorker } from "../src/daemon/materializer";
+import { packageSkillRoots } from "../src/daemon/skill-roots";
 import { parsePeerDefinition } from "../src/shared/agent-definition";
 import { resolveOmpCli } from "../src/worker/lifecycle";
 
@@ -31,6 +32,7 @@ const EXPECTED_SKILLS = [
 	"omp-subagent-authoring",
 	"omp-orchestration",
 	"oh-my-agent-setup",
+	"lavish",
 ] as const;
 
 async function withTempRoot<T>(fn: (root: string) => Promise<T>): Promise<T> {
@@ -43,6 +45,18 @@ async function withTempRoot<T>(fn: (root: string) => Promise<T>): Promise<T> {
 }
 
 // ── CLI resolution under OMP's global resolver plugin ───────────────────────
+
+describe("packageSkillRoots", () => {
+	test("maps every shipped skill to its directory, and nothing else", () => {
+		const roots = packageSkillRoots();
+		expect(Object.keys(roots).sort()).toEqual([...EXPECTED_SKILLS].sort());
+		for (const [name, root] of Object.entries(roots)) {
+			expect(root).toBe(join(PACKAGE_ROOT, "skills", name));
+		}
+		// A checkout without the directory is an empty map, not a crash.
+		expect(packageSkillRoots(join(PACKAGE_ROOT, "no-such-skills"))).toEqual({});
+	});
+});
 
 describe("worker CLI resolution once OMP's skill loader is imported", () => {
 	test("resolveOmpCli returns a real path, not a poisoned specifier", () => {

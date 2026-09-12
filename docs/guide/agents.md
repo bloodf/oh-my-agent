@@ -89,7 +89,7 @@ Validated by OMP's `parseAgent`. Unknown extras still fail in oh-my-agent's pars
 | `autonomy` | object | `INVALID_AUTONOMY` - only keys `maxTurns` (positive **integer**) and `budgetUsd` (positive **finite** number). |
 | `sandbox` | boolean \| object | `INVALID_SANDBOX` - `true`/`false`, or `{ enabled, extraRoots, allowUnenforcedNetwork }`. `extraRoots` entries must be absolute; `allowUnenforcedNetwork` is a boolean. |
 | `mcps` | string[] | `INVALID_ARRAY` |
-| `skills` | string[] | `INVALID_ARRAY` - names to materialize into the worker root, e.g. `omp-orchestration`. |
+| `skills` | string[] | `INVALID_ARRAY` - names of skills this package ships, materialized into the worker root: `lavish` (HTML artifacts the operator reviews in Lavish Editor; the default crew and every preset declare it), `omp-orchestration`, `omp-agent-authoring`, `omp-subagent-authoring`. |
 | `schedules` | object[] | `INVALID_SCHEDULE` - each item needs non-empty `cron` and `prompt`; optional `room` must start with `#`/`@`. Only keys `cron`, `prompt`, `room`. |
 | `automations` | object[] | `INVALID_AUTOMATION` - each item needs non-empty `event` and `prompt`; optional `room` as above. Only keys `event`, `prompt`, `room`. |
 | `heartbeat` | object | `INVALID_HEARTBEAT` - `{ every, prompt? }`. `every` is a duration of at least 10s: `90s`, `30m`, `2h`, `1d`. Every `every`, a running peer gets `prompt` (default: read your rooms and plans, continue unfinished work, answer `idle` if nothing is pending) as its own turn, queued behind any turn in flight. Listed and armed as `<name>:heartbeat`; `omp-agent schedule <id> off` pauses it. |
