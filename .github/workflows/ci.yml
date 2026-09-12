@@ -37,6 +37,9 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --cwd web --frozen-lockfile
 
+      - name: Install server-rendered console dependencies
+        run: bun install --cwd web-next --frozen-lockfile
+
       - name: Install headless Chrome for the console suite
         run: bunx @puppeteer/browsers install chrome-headless-shell --path "$HOME/.cache/puppeteer"
 

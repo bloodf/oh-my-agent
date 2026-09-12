@@ -49,12 +49,15 @@
 		"typescript": "latest"
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit && bun run --cwd web typecheck",
+		"typecheck": "tsc --noEmit && bun run --cwd web typecheck && bun run --cwd web-next typecheck",
 		"console:dev": "bun run --cwd web dev",
 		"console:build": "bun run --cwd web build",
+		"console:next:dev": "bun run --cwd web-next dev",
+		"console:next:build": "bun run --cwd web-next build",
+		"console:next:start": "bun run --cwd web-next start",
 		"prepack": "bun run console:build && bun run typecheck && bun run test:fast",
 		"test": "bun test --timeout 30000",
-		"test:fast": "bun test --timeout 30000 --path-ignore-patterns 'tests/pack.test.ts' --path-ignore-patterns 'tests/consumer-install.test.ts' --path-ignore-patterns 'tests/console-client.test.ts'",
+		"test:fast": "bun test --timeout 30000 --path-ignore-patterns 'tests/pack.test.ts' --path-ignore-patterns 'tests/consumer-install.test.ts' --path-ignore-patterns 'tests/console-client.test.ts' --path-ignore-patterns 'tests/console-next.test.ts'",
 		"test:consumer-install": "bun test --timeout 30000 tests/consumer-install.test.ts",
 		"lint": "biome check .",
 		"format": "biome check --write .",

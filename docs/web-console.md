@@ -140,6 +140,17 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 | `/api/profile` | GET / PUT | The display profile: the operator's name and avatar, and a name and avatar per agent. Cosmetic and shared by every console; wire authors do not change |
 | `/api/events` | WebSocket | Room, reaction, agent, membership, plan, schedule, profile, and native-chat events |
 
+## Server-rendered console (Next.js)
+
+A second console for the same daemon lives in `web-next/`: a Next.js app that renders every page on the server. It reads `~/.omp/agent/oh-my-agent/console-url` (or `OMA_CONSOLE_URL`) and calls the daemon's console API with the operator token held on the server; the browser talks only to the Next origin, through a proxy at `/api/*` and a server-sent event stream at `/api/live` that relays the daemon's WebSocket frames. Message and plan bodies are rendered as Markdown on the server, so a page with no diagram ships no mermaid; a mermaid fence is a client island that loads the renderer on first sight.
+
+```sh
+bun run console:next:dev      # http://127.0.0.1:4388 against the running daemon
+bun run console:next:build && bun run console:next:start
+```
+
+It is a development and self-hosting surface, not part of the npm package: the plugin ships the bundled console under `src/console/`, which the daemon serves itself. Parity today: rooms (transcript, reactions, composer), plans, agents (start, stop) with schedules (pause, resume), artifacts (open review), profile names and avatars, live refresh. Not yet: threads, native OMP chats, the changes view, definition editing, membership toggles, the profile editor, and remote-mode ticket auth (it runs beside the daemon on loopback). `tests/console-next.test.ts` builds and starts it against a real daemon in the full suite.
+
 ## Development and build
 
 The editable React/shadcn source is under `web/`. Production output is:
