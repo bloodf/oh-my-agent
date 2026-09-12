@@ -192,6 +192,7 @@ const WIRE_DEFINITION_FIELDS = [
 	"skills",
 	"schedules",
 	"automations",
+	"heartbeat",
 ] as const;
 
 /**

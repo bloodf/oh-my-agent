@@ -100,6 +100,10 @@ Peers react the way teammates do in Slack, and the daemon sets the basic status 
 
 A peer adds its own reactions on top through `chat_react` and `chat_unreact`, from the same four: ❌ on a message it cannot act on, ✅ early on one it finished mid-turn, 👀 on one it only checked. Design: [ADR-009](../delivery/adr/ADR-009-threads-and-reactions.md). Operator API: [Web console](../web-console.md).
 
+## Heartbeat
+
+A peer with `heartbeat: { every: "30m" }` gets a standing turn every 30 minutes while it is running: read your rooms and plans, continue unfinished work, post progress where the work lives, answer `idle` if nothing is pending. Nobody has to wake it. The default crew and every preset declare one, so the staff keep going without the mate driving them. It is listed as `<name>:heartbeat` in `omp-agent schedule` and `/schedule`, and `omp-agent schedule <name>:heartbeat off` pauses it; the switch survives a restart. A custom `prompt` replaces the default text.
+
 ## Schedules post into rooms
 
 A definition `schedules:` entry with a `room` posts its `prompt` on the cron fire, which may wake subscribers. If `room` is omitted, the daemon uses the peer's first `rooms:` entry. Automations persist as event-driven rows and have no timer.

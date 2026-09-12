@@ -545,15 +545,37 @@ export class Supervisor {
 	 * waiting — burning a turn that will fail, or an empty one, helps nobody.
 	 */
 	async deliver(peerName: string): Promise<boolean> {
+		return await this.#serialized(peerName, () => this.#deliver(peerName));
+	}
+
+	/**
+	 * Prompt a running peer with a standing instruction — the heartbeat — in
+	 * the same queue as room delivery, so it never lands mid-turn. A peer
+	 * that is parked, stopped, or unregistered is left alone and the call
+	 * answers false; a quota block is respected the way delivery respects it.
+	 */
+	async nudge(peerName: string, prompt: string): Promise<boolean> {
+		return await this.#serialized(peerName, async () => {
+			const peer = this.#peers.get(peerName);
+			if (peer?.worker.state !== "running") return false;
+			if (!this.registry.wake(peer.accountId, peerName)) return false;
+			await peer.worker.prompt(prompt);
+			return true;
+		});
+	}
+
+	/** One turn at a time per peer: the next body starts when the last settled. */
+	async #serialized(
+		peerName: string,
+		body: () => Promise<boolean>,
+	): Promise<boolean> {
 		const previous = this.#deliveries.get(peerName) ?? Promise.resolve(false);
-		const delivery = previous
-			.catch(() => false)
-			.then(() => this.#deliver(peerName));
-		this.#deliveries.set(peerName, delivery);
+		const run = previous.catch(() => false).then(body);
+		this.#deliveries.set(peerName, run);
 		try {
-			return await delivery;
+			return await run;
 		} finally {
-			if (this.#deliveries.get(peerName) === delivery) {
+			if (this.#deliveries.get(peerName) === run) {
 				this.#deliveries.delete(peerName);
 			}
 		}

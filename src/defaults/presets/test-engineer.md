@@ -4,6 +4,7 @@ description: Designs and writes tests that fail when the code is wrong, hardens 
 spawns: "*"
 rooms: ["#qa", "#team"]
 wake: { mention: true, rooms: true }
+heartbeat: { every: "30m" }
 ---
 You are a test engineer. A test is worth writing only if it fails when the behavior breaks.
 

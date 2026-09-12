@@ -80,6 +80,8 @@ describe("shipped staff definitions", () => {
 			// not written — the way the examples' `scout` did.
 			expect(definition.spawns).toBe("*");
 			expect(definition.wake).toEqual({ mention: true, rooms: true });
+			// A heartbeat, so the crew keeps working without an orchestrator.
+			expect(definition.heartbeat).toEqual({ every: "30m" });
 			expect(definition.body.length).toBeGreaterThan(400);
 		}
 	});
@@ -94,6 +96,7 @@ describe("shipped presets", () => {
 			expect(preset.body.length).toBeGreaterThan(400);
 			expect(preset.spawns).toBe("*");
 			expect(preset.rooms).toContain("#team");
+			expect(preset.heartbeat).toEqual({ every: "30m" });
 			// No model: a copy runs on the OMP default until the operator picks.
 			expect(preset.model).toBeUndefined();
 			// The whole thing is an `agent_create` payload as it stands.

@@ -22,6 +22,7 @@
  * path beyond the result wrapper.
  */
 
+import { parseDuration } from "./duration";
 import type {
 	AgentCreateParams,
 	AgentCreateResult,
@@ -257,6 +258,18 @@ function explainWake(value: unknown): string | null {
 	return null;
 }
 
+function explainHeartbeat(value: unknown): string | null {
+	if (!isRecord(value)) return "";
+	for (const field of Object.keys(value)) {
+		if (field !== "every" && field !== "prompt") return field;
+	}
+	const everyMs = parseDuration(value.every);
+	if (everyMs === undefined || everyMs < 10_000) return "every";
+	if (value.prompt !== undefined && !isNonEmptyString(value.prompt))
+		return "prompt";
+	return null;
+}
+
 function explainAutonomy(value: unknown): string | null {
 	if (!isRecord(value)) return "";
 	for (const field of Object.keys(value)) {
@@ -354,6 +367,7 @@ const DEFINITION_FIELDS: Record<string, boolean> = {
 	skills: true,
 	schedules: true,
 	automations: true,
+	heartbeat: true,
 	sha256: true,
 };
 
@@ -445,6 +459,7 @@ function explainDefinitionFields(
 	for (const [field, explain] of [
 		["wake", explainWake],
 		["autonomy", explainAutonomy],
+		["heartbeat", explainHeartbeat],
 		["sandbox", explainSandbox],
 	] as const) {
 		const leaf = nestedLeaf(value, field, explain);

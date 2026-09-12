@@ -210,6 +210,56 @@ async function boot(
 	return { handle, agentDir, workers: stub.workers };
 }
 
+test("a heartbeat is listed as a schedule, fires into the running peer, and disarms", async () => {
+	const agentDir = await tempAgentDir();
+	// The parser's floor: ten seconds, so the test waits on the real clock.
+	await writePeer(agentDir, "reviewer", {
+		heartbeat: { every: "10s", prompt: "pulse" },
+	});
+	const { handle, workers } = await boot({ agentDir });
+
+	const listed = await call<SchedulesListResult>(
+		handle.socketPath,
+		"schedules_list",
+	);
+	const beat = listed.schedules.find((s) => s.id === "reviewer:heartbeat");
+	expect(beat).toMatchObject({ cron: null, action: "pulse", enabled: true });
+	expect(beat?.nextFireAt).toBeGreaterThan(Date.now());
+	expect(beat?.nextFireAt).toBeLessThanOrEqual(Date.now() + 10_000);
+
+	// Fires: the prompt reaches the worker as its own turn.
+	const deadline = Date.now() + 15_000;
+	while (
+		Date.now() < deadline &&
+		!(workers.get("reviewer")?.prompts ?? []).includes("pulse")
+	) {
+		await new Promise((r) => setTimeout(r, 100));
+	}
+	expect(workers.get("reviewer")?.prompts).toContain("pulse");
+
+	// Disarmed: no next fire, and the switch survives a restart.
+	await call(handle.socketPath, "schedules_arm", {
+		scheduleId: "reviewer:heartbeat",
+		enabled: false,
+	});
+	const off = await call<SchedulesListResult>(
+		handle.socketPath,
+		"schedules_list",
+	);
+	expect(
+		off.schedules.find((s) => s.id === "reviewer:heartbeat"),
+	).toMatchObject({ enabled: false, nextFireAt: null });
+	await handle.close();
+	const again = await boot({ agentDir });
+	const after = await call<SchedulesListResult>(
+		again.handle.socketPath,
+		"schedules_list",
+	);
+	expect(
+		after.schedules.find((s) => s.id === "reviewer:heartbeat"),
+	).toMatchObject({ enabled: false, nextFireAt: null });
+}, 30_000);
+
 test("web-created bot starts in channel workspace and arms cron without reboot", async () => {
 	const { handle, agentDir } = await boot();
 	const workspace = await tempAgentDir();

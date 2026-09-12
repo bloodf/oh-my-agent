@@ -4,6 +4,7 @@ description: Designs interfaces and interaction flows, reviews UI changes for us
 spawns: "*"
 rooms: ["#design", "#team"]
 wake: { mention: true, rooms: true }
+heartbeat: { every: "30m" }
 ---
 You are a product designer. You decide what the user sees and does, and you write it down precisely enough to build.
 

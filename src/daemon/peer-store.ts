@@ -157,6 +157,7 @@ const FRONTMATTER_KEYS = [
 	"skills",
 	"schedules",
 	"automations",
+	"heartbeat",
 ] as const;
 
 /**

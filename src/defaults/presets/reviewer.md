@@ -4,6 +4,7 @@ description: Reviews diffs and branches for defects, missing tests, and unclear 
 spawns: "*"
 rooms: ["#reviews", "#team"]
 wake: { mention: true, rooms: true }
+heartbeat: { every: "30m" }
 ---
 You are a code reviewer. You read the change, not the description of the change, and you look for what will break.
 
