@@ -8,6 +8,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ### Added
 
+- The console loads in a fraction of the size: mermaid and its diagram packs are lazily imported, content-hashed chunks fetched only when a diagram is on screen, served `immutable` and gzipped. `app.js` drops from about six megabytes to under one. In remote mode the shell carries a reusable chunk pass bound to the chunk path prefix.
+
 - Lavish Editor is part of the crew's toolkit. A `lavish` skill ships with the package and every default peer and preset declares it: an agent writes an HTML artifact, opens it with `npx -y lavish-axi`, and polls for feedback. Workers run Lavish headless against your own `~/.lavish-axi`, and the console's new Artifacts view lists every session with **Open review**, backed by `GET`/`POST /api/artifacts`.
 - Definitions that select `skills:` now start. The daemon never handed the materializer the package's skill roots, so any `skills:` entry failed with "Unknown skill" outside the test suite.
 - The console's agent sheet has a Schedules tab: every cron schedule, heartbeat, and automation with its next fire, a pause/resume switch, and a form that adds a cron schedule to an agent. `/api/schedules` and `PATCH /api/schedules/:id` back it.

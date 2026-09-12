@@ -492,7 +492,27 @@ export async function startConsoleApi(
 		return url.searchParams.get("token") ?? undefined;
 	};
 
-	const tickets = new Map<string, { path: string; expiresAt: number }>();
+	const tickets = new Map<
+		string,
+		{ path: string; expiresAt: number; reusable?: boolean }
+	>();
+	/**
+	 * A chunk pass: one ticket, good for every `chunk-*.js` for as long as a
+	 * tab plausibly stays open, minted into the shell beside the one-time
+	 * asset tickets. Chunks are the same public code as app.js; the pass only
+	 * keeps an anonymous caller from pulling the bundle, and a diagram opened
+	 * an hour into a session must still be able to fetch its renderer.
+	 */
+	const CHUNK_PASS_TTL_MS = 12 * 60 * 60 * 1000;
+	const mintChunkPass = (): string => {
+		const ticket = randomBytes(32).toString("base64url");
+		tickets.set(ticket, {
+			path: "/chunk-",
+			expiresAt: Date.now() + CHUNK_PASS_TTL_MS,
+			reusable: true,
+		});
+		return ticket;
+	};
 	const mintTicket = (path: string): string => {
 		const now = Date.now();
 		for (const [value, ticket] of tickets) {
@@ -506,6 +526,13 @@ export async function startConsoleApi(
 		const value = url.searchParams.get("ticket");
 		if (value === null) return false;
 		const ticket = tickets.get(value);
+		if (ticket?.reusable) {
+			if (ticket.expiresAt < Date.now()) {
+				tickets.delete(value);
+				return false;
+			}
+			return isChunkPath(url.pathname) && url.pathname.startsWith(ticket.path);
+		}
 		tickets.delete(value);
 		return (
 			ticket !== undefined &&
@@ -1906,6 +1933,28 @@ export async function startConsoleApi(
 	 * becomes a public URL.
 	 */
 	const STATIC_FILES = new Set(["index.html", "app.js", "style.css"]);
+	/**
+	 * The one other shape the build emits: a lazily imported chunk, named
+	 * by content hash. Still no directory walk — a stray file next to the
+	 * client is not this shape — and the hash makes it safe to cache forever.
+	 */
+	const CHUNK_FILE = /^chunk-[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.js$/;
+	const isChunkPath = (pathname: string): boolean =>
+		CHUNK_FILE.test(pathname.replace(/^\//, ""));
+
+	/** Gzip bodies, keyed by file and mtime, so a 6 MB diagram pack crosses once. */
+	const gzipCache = new Map<string, { mtime: number; body: Uint8Array }>();
+	const compressed = async (
+		file: Bun.BunFile,
+		key: string,
+	): Promise<Uint8Array> => {
+		const mtime = file.lastModified;
+		const hit = gzipCache.get(key);
+		if (hit && hit.mtime === mtime) return hit.body;
+		const body = Bun.gzipSync(new Uint8Array(await file.arrayBuffer()));
+		gzipCache.set(key, { mtime, body });
+		return body;
+	};
 
 	const consoleRoot = resolve(join(import.meta.dir, "..", "console"));
 
@@ -1934,25 +1983,58 @@ export async function startConsoleApi(
 		);
 		if (!path.startsWith(consoleRoot + sep)) return notFound();
 		const filename = path.slice(consoleRoot.length + 1);
-		if (!STATIC_FILES.has(filename)) return notFound();
+		const chunk = CHUNK_FILE.test(filename);
+		if (!STATIC_FILES.has(filename) && !chunk) return notFound();
 		const file = Bun.file(path);
 		if (!(await file.exists())) return notFound();
 
-		if (filename !== "index.html") return new Response(file);
+		if (filename !== "index.html") {
+			const headers: Record<string, string> = {
+				"content-type": file.type,
+				Vary: "Accept-Encoding",
+				// A hashed chunk never changes under its name; app.js does.
+				"Cache-Control": chunk
+					? "public, max-age=31536000, immutable"
+					: "no-cache",
+			};
+			const gzip = /\bgzip\b/.test(
+				request.headers.get("Accept-Encoding") ?? "",
+			);
+			if (!gzip || request.method === "HEAD") {
+				return new Response(file, { headers });
+			}
+			return new Response(await compressed(file, filename), {
+				headers: { ...headers, "Content-Encoding": "gzip" },
+			});
+		}
 		let html = await file.text();
+		// Lazy chunks are fetched by app.js at runtime with the same
+		// credential the shell's own assets carry: the loopback token as a
+		// query, or in remote mode a chunk pass minted for this shell.
+		const minter = (suffix: string): string =>
+			`<script>window.__omaAsset=(n)=>"/"+n+${JSON.stringify(suffix)};</script>`;
 		if (remoteRequest) {
 			const assetTicket = (asset: string): string =>
 				`${asset}?ticket=${encodeURIComponent(mintTicket(asset))}`;
 			html = html
 				.replace('<html lang="en"', '<html lang="en" data-auth-mode="remote"')
 				.replace('href="/style.css"', `href="${assetTicket("/style.css")}"`)
-				.replace('src="/app.js"', `src="${assetTicket("/app.js")}"`);
+				.replace('src="/app.js"', `src="${assetTicket("/app.js")}"`)
+				.replace(
+					'<script type="module"',
+					`${minter(`?ticket=${encodeURIComponent(mintChunkPass())}`)}<script type="module"`,
+				);
 		} else if (presented !== undefined) {
 			const query = `?token=${encodeURIComponent(presented)}`;
-			html = html.replace(
-				/(<(?:script|link)\b[^>]*?\b(?:src|href)=")(\/[^"?]*)(")/g,
-				`$1$2${query}$3`,
-			);
+			html = html
+				.replace(
+					/(<(?:script|link)\b[^>]*?\b(?:src|href)=")(\/[^"?]*)(")/g,
+					`$1$2${query}$3`,
+				)
+				.replace(
+					'<script type="module"',
+					`${minter(query)}<script type="module"`,
+				);
 		}
 		return new Response(html, {
 			headers: {

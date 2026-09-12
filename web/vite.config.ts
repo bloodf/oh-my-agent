@@ -28,6 +28,16 @@ export default defineConfig({
 		},
 	},
 	publicDir: false,
+	experimental: {
+		// A chunk URL is minted at load time by the daemon: it carries the
+		// loopback token or the remote chunk pass as a query, which a static
+		// relative import could not. `__omaAsset` is injected into index.html.
+		renderBuiltUrl(filename, { hostType }) {
+			if (hostType === "js")
+				return { runtime: `window.__omaAsset(${JSON.stringify(filename)})` };
+			return { relative: true };
+		},
+	},
 	build: {
 		outDir: path.resolve(import.meta.dirname, "../src/console"),
 		emptyOutDir: true,
@@ -35,10 +45,10 @@ export default defineConfig({
 		rollupOptions: {
 			output: {
 				entryFileNames: "app.js",
-				// One file: the daemon serves exactly app.js, style.css, and
-				// index.html, so mermaid's lazily loaded diagram modules must
-				// live inside app.js rather than as sibling chunks.
-				inlineDynamicImports: true,
+				// Lazily imported modules — mermaid and its diagram packs — are
+				// sibling chunks the daemon serves by this exact shape, cached
+				// immutably by hash. Everything else stays in app.js.
+				chunkFileNames: "chunk-[name]-[hash].js",
 				assetFileNames: (asset) =>
 					asset.names?.[0]?.endsWith(".css")
 						? "style.css"
