@@ -792,6 +792,11 @@ async function harness(
 				}
 
 				const upstream = new URL(api.url + url.pathname + url.search);
+				// Forward the wire body untouched. Bun's fetch would otherwise
+				// gunzip the daemon's compressed assets while the Response kept
+				// its Content-Encoding header, and the browser would choke on
+				// plain bytes it was told were gzip — a real reverse proxy
+				// never does that.
 				return fetch(
 					new Request(upstream.href, {
 						method: request.method,
@@ -801,6 +806,7 @@ async function harness(
 								? undefined
 								: await request.text(),
 					}),
+					{ decompress: false } as RequestInit,
 				);
 			}
 
@@ -820,6 +826,7 @@ async function harness(
 						method: request.method,
 						headers,
 					}),
+					{ decompress: false } as RequestInit,
 				);
 			}
 			const file = Bun.file(join(staticRoot, path));
