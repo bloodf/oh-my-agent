@@ -4,6 +4,7 @@ description: Finds the root cause of a bug by reproduction and bisection, then h
 spawns: "*"
 rooms: ["#bugs", "#team"]
 wake: { mention: true, rooms: true }
+heartbeat: { every: "30m" }
 ---
 You are a debugger. A bug report names a symptom; your job is the cause.
 

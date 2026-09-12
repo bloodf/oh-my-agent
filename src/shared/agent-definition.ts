@@ -24,6 +24,7 @@
  *     INVALID_ROOM     — rooms not string array or entry missing #/@ prefix
  *     INVALID_WAKE     — wake not a plain object or contains unknown/typed fields
  *     INVALID_AUTONOMY — autonomy not a plain object, unknown keys, non-positive values
+ *     INVALID_HEARTBEAT — heartbeat not a plain object, `every` not a duration like 30m, or prompt empty
  *     INVALID_SANDBOX  — sandbox not boolean or not a plain object with unknown keys
  *     INVALID_ARRAY    — mcps/skills not string arrays
  *     INVALID_SCHEDULE — schedule item missing cron/prompt or not non-empty strings
@@ -40,6 +41,7 @@ import { isAbsolute } from "node:path";
 import { parseAgent } from "@oh-my-pi/pi-coding-agent/task/agents";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { parseFrontmatter } from "@oh-my-pi/pi-utils";
+import { parseDuration } from "./duration";
 
 // ── Allowed key sets ────────────────────────────────────────────────────────────
 
@@ -69,6 +71,7 @@ const EXTRA_KEYS = new Set([
 	"skills",
 	"schedules",
 	"automations",
+	"heartbeat",
 ]);
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -101,6 +104,18 @@ export interface Automation {
 export interface WakeConfig {
 	mention?: boolean;
 	rooms?: boolean;
+	[key: string]: unknown;
+}
+
+/**
+ * A standing wake with no operator behind it: every `every`, the peer gets
+ * `prompt` (or the default heartbeat prompt) as a turn while it is running,
+ * so it checks its rooms and plans and carries on without an orchestrator.
+ */
+export interface HeartbeatConfig {
+	/** A duration: `<n>s`, `<n>m`, `<n>h`, or `<n>d`. At least 10s. */
+	every: string;
+	prompt?: string;
 	[key: string]: unknown;
 }
 
@@ -147,6 +162,7 @@ export interface PeerDefinition
 	skills?: string[];
 	schedules?: Schedule[];
 	automations?: Automation[];
+	heartbeat?: HeartbeatConfig;
 	sha256: string;
 }
 
@@ -244,6 +260,32 @@ function validateExtras(fm: Record<string, unknown>): void {
 				throw new PeerParsingError(
 					`wake.rooms must be boolean, got: ${typeof roomsFlag}`,
 					"INVALID_WAKE",
+				);
+			}
+		}
+
+		if (key === "heartbeat") {
+			if (!isPlainObject(val)) {
+				throw new PeerParsingError(
+					`heartbeat must be a plain object, got: ${Array.isArray(val) ? "array" : typeof val}`,
+					"INVALID_HEARTBEAT",
+				);
+			}
+			validateNestedKeys(val, new Set(["every", "prompt"]), "heartbeat");
+			const everyMs = parseDuration(val.every);
+			if (everyMs === undefined || everyMs < 10_000) {
+				throw new PeerParsingError(
+					`heartbeat.every must be a duration of at least 10s like "30m", got: ${JSON.stringify(val.every)}`,
+					"INVALID_HEARTBEAT",
+				);
+			}
+			if (
+				val.prompt !== undefined &&
+				(typeof val.prompt !== "string" || val.prompt.trim().length === 0)
+			) {
+				throw new PeerParsingError(
+					"heartbeat.prompt must be a non-empty string",
+					"INVALID_HEARTBEAT",
 				);
 			}
 		}
@@ -605,6 +647,7 @@ export function parsePeerDefinition(
 		skills: rawFm.skills as string[] | undefined,
 		schedules: rawFm.schedules as Schedule[] | undefined,
 		automations: rawFm.automations as Automation[] | undefined,
+		heartbeat: rawFm.heartbeat as HeartbeatConfig | undefined,
 		sha256: "",
 	};
 

@@ -92,6 +92,7 @@ Validated by OMP's `parseAgent`. Unknown extras still fail in oh-my-agent's pars
 | `skills` | string[] | `INVALID_ARRAY` - names to materialize into the worker root, e.g. `omp-orchestration`. |
 | `schedules` | object[] | `INVALID_SCHEDULE` - each item needs non-empty `cron` and `prompt`; optional `room` must start with `#`/`@`. Only keys `cron`, `prompt`, `room`. |
 | `automations` | object[] | `INVALID_AUTOMATION` - each item needs non-empty `event` and `prompt`; optional `room` as above. Only keys `event`, `prompt`, `room`. |
+| `heartbeat` | object | `INVALID_HEARTBEAT` - `{ every, prompt? }`. `every` is a duration of at least 10s: `90s`, `30m`, `2h`, `1d`. Every `every`, a running peer gets `prompt` (default: read your rooms and plans, continue unfinished work, answer `idle` if nothing is pending) as its own turn, queued behind any turn in flight. Listed and armed as `<name>:heartbeat`; `omp-agent schedule <id> off` pauses it. |
 
 Anything else at top level or inside a nested object → `UNKNOWN_KEY`. Malformed YAML or bad native fields → OMP's `AgentParsingError`. Wrong `spawns` type → `INVALID_TYPE`. Missing or whitespace-only body → `EMPTY_BODY`.
 

@@ -51,6 +51,7 @@ import type {
 	Schedule,
 } from "../shared/agent-definition";
 import { fingerprintPeerDefinition } from "../shared/agent-definition";
+import { parseDuration } from "../shared/duration";
 import type {
 	AgentSpawnResult,
 	DaemonStopResult,
@@ -93,6 +94,13 @@ import type { SupervisedWorker } from "./supervisor";
 import { Supervisor } from "./supervisor";
 import { WebAttachments } from "./web-attachments";
 import { createWebChats } from "./web-chats";
+
+/** What a heartbeat says when the definition does not say otherwise. */
+export const HEARTBEAT_PROMPT =
+	"Heartbeat. Read your rooms and your plans, continue any unfinished work, and post progress where the work lives. If nothing is pending, answer only: idle.";
+
+/** The schedule id a peer's heartbeat is listed and armed under. */
+export const heartbeatId = (peer: string): string => `${peer}:heartbeat`;
 
 /** Everything the daemon owns lives under this directory in the agent dir. */
 const STATE_DIR = "oh-my-agent";
@@ -1592,6 +1600,62 @@ export async function bootDaemon(
 		};
 
 		/**
+		 * Arm a peer's heartbeat: a standing prompt every `every`, delivered
+		 * through the supervisor's per-peer queue so it never lands mid-turn,
+		 * and only to a running peer. Listed and armed like a schedule under
+		 * `<peer>:heartbeat`, with no cron: the interval is the whole clock.
+		 */
+		const armHeartbeat = (peer: PeerDefinition): void => {
+			const everyMs = parseDuration(peer.heartbeat?.every);
+			if (everyMs === undefined) return;
+			const id = heartbeatId(peer.name);
+			const prompt = peer.heartbeat?.prompt ?? HEARTBEAT_PROMPT;
+			const record: ScheduleRecord = {
+				id,
+				peer: peer.name,
+				cron: null,
+				action: prompt,
+				enabled: true,
+				nextFireAt: now() + everyMs,
+			};
+			schedules.set(id, record);
+			db.upsertSchedule({
+				id,
+				cron: null,
+				action: prompt,
+				payload: JSON.stringify({ every: peer.heartbeat?.every }),
+				nextFireAt: record.nextFireAt,
+				enabled: true,
+			});
+			const arm = (): void => {
+				scheduler.addOnce(
+					id,
+					record.nextFireAt ?? now() + everyMs,
+					async () => {
+						record.nextFireAt = now() + everyMs;
+						db.setScheduleNextFire(id, record.nextFireAt);
+						await triggerContext.run(
+							`schedule:${id}` as RunTrigger,
+							async () => {
+								await supervisor.nudge(peer.name, prompt);
+							},
+						);
+						consoleApi?.emit({
+							type: "schedule",
+							agent: peer.name,
+							phase: "fired",
+						});
+						// Re-armed only while still enabled: a disarm that raced the
+						// firing must win, or the heartbeat would outlive the switch.
+						if (record.enabled && schedules.get(id) === record) arm();
+					},
+				);
+			};
+			arm();
+			consoleApi?.emit({ type: "schedule", agent: peer.name, phase: "armed" });
+		};
+
+		/**
 		 * Whether an operator disarmed a schedule before the last shutdown. The
 		 * definition on disk still declares it, so a boot that re-armed
 		 * everything it found would quietly undo that decision — this is the one
@@ -1693,6 +1757,27 @@ export async function bootDaemon(
 				armCron(definition, schedule, index);
 			}
 
+			if (definition.heartbeat !== undefined) {
+				const id = heartbeatId(definition.name);
+				if (
+					schedules.get(id)?.enabled === false ||
+					persisted.get(id)?.enabled === false
+				) {
+					scheduler.remove(id);
+					schedules.set(id, {
+						id,
+						peer: definition.name,
+						cron: null,
+						action: definition.heartbeat.prompt ?? HEARTBEAT_PROMPT,
+						enabled: false,
+						nextFireAt: null,
+					});
+					db.setScheduleNextFire(id, null);
+				} else {
+					armHeartbeat(definition);
+				}
+			}
+
 			// An automation carries no clock, so nothing is scheduled: it is listed
 			// as a timeless entry until an event source exists to fire it.
 			const declaredAutomations: Automation[] = definition.automations ?? [];
@@ -1747,12 +1832,18 @@ export async function bootDaemon(
 			record.enabled = enabled;
 
 			// An automation has no timer to arm or cancel; only its flag moves.
-			if (record.cron !== null) {
+			// A heartbeat has one, though it carries no cron.
+			const isHeartbeat = id === heartbeatId(record.peer);
+			if (record.cron !== null || isHeartbeat) {
 				if (enabled) {
 					const peer = definitions.get(record.peer);
-					const index = Number(id.slice(id.lastIndexOf(":") + 1));
-					const schedule = peer?.schedules?.[index];
-					if (peer && schedule) armCron(peer, schedule, index);
+					if (isHeartbeat) {
+						if (peer) armHeartbeat(peer);
+					} else {
+						const index = Number(id.slice(id.lastIndexOf(":") + 1));
+						const schedule = peer?.schedules?.[index];
+						if (peer && schedule) armCron(peer, schedule, index);
+					}
 				} else {
 					scheduler.remove(id);
 					record.nextFireAt = null;

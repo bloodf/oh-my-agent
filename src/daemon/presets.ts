@@ -55,6 +55,9 @@ export async function listPresets(dir = PRESET_DIR): Promise<PresetInfo[]> {
 			...(parsed.wake === undefined ? {} : { wake: parsed.wake }),
 			...(parsed.autonomy === undefined ? {} : { autonomy: parsed.autonomy }),
 			...(parsed.model === undefined ? {} : { model: parsed.model }),
+			...(parsed.heartbeat === undefined
+				? {}
+				: { heartbeat: parsed.heartbeat }),
 		});
 	}
 	return presets;

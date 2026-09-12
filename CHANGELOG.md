@@ -6,6 +6,10 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Added
+
+- A `heartbeat: { every, prompt? }` definition key. A running peer gets a standing turn every interval — read your rooms and plans, continue unfinished work, post progress, answer `idle` if nothing is pending — queued behind any turn in flight, so a crew keeps working without an orchestrator waking it. Listed and armed as `<name>:heartbeat` beside the schedules; `schedule <id> off` pauses it across restarts. The default crew and every preset declare `every: "30m"`.
+
 ## [1.4.0] - 2026-09-11
 
 ### Added

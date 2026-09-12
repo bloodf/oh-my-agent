@@ -362,7 +362,9 @@ export type PresetInfo = Pick<
 	DefinitionData,
 	"name" | "description" | "body" | "spawns"
 > &
-	Partial<Pick<DefinitionData, "rooms" | "wake" | "autonomy" | "model">>;
+	Partial<
+		Pick<DefinitionData, "rooms" | "wake" | "autonomy" | "model" | "heartbeat">
+	>;
 export type PresetsListParams = Record<string, never>;
 export interface PresetsListResult {
 	/** Every shipped preset, sorted by name. */

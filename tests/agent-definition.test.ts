@@ -420,6 +420,41 @@ test("parsePeerDefinition — nested unknown key inside wake → throws", () => 
 	);
 });
 
+// ─── heartbeat validation ──────────────────────────────────────────────────────
+
+test("parsePeerDefinition — heartbeat with a duration and an optional prompt parses", () => {
+	const content = buildAgentDoc(
+		{
+			name: "pulse",
+			description: "Keeps going.",
+			spawns: "*",
+			heartbeat: { every: "30m", prompt: "Check your plans." },
+		},
+		"You keep going.",
+	);
+	const parsed = parsePeerDefinition("/agents/pulse.md", content);
+	expect(parsed.heartbeat).toEqual({
+		every: "30m",
+		prompt: "Check your plans.",
+	});
+});
+
+test("parsePeerDefinition — heartbeat.every below 10s, non-duration, or unknown key → throws", () => {
+	for (const heartbeat of [
+		{ every: "5s" },
+		{ every: "soon" },
+		{ every: 30 },
+		{ every: "30m", cron: "* * * * *" },
+		{ every: "30m", prompt: "" },
+	]) {
+		const content = buildAgentDoc(
+			{ name: "pulse", description: "d", spawns: "*", heartbeat },
+			"body",
+		);
+		expect(() => parsePeerDefinition("/agents/pulse.md", content)).toThrow();
+	}
+});
+
 // ─── autonomy validation ───────────────────────────────────────────────────────
 
 test("parsePeerDefinition — negative maxTurns → throws", () => {

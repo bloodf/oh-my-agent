@@ -874,6 +874,69 @@ describe("status reactions", () => {
 	});
 });
 
+describe("nudge", () => {
+	test("prompts only a running peer, in the same queue as delivery", async () => {
+		const h = await harness();
+		await h.rooms.createRoom({ id: "#team", kind: "channel" });
+		const order: string[] = [];
+		let release: () => void = () => {};
+		const worker: SupervisedWorker = {
+			name: "reviewer",
+			state: "running",
+			prompt: async (message) => {
+				order.push(`start:${message}`);
+				if (message.endsWith("slow"))
+					await new Promise<void>((r) => {
+						release = r;
+					});
+				order.push(`end:${message}`);
+			},
+			park: async () => {},
+			resume: async () => {},
+			stop: async () => {},
+		};
+		await h.supervisor.register({
+			worker,
+			accountId: "acct-nudge",
+			mode: "subscription",
+			rooms: ["#team"],
+		});
+
+		// A room turn is in flight; the heartbeat must wait behind it.
+		const turn = h.supervisor.post({
+			room: "#team",
+			author: "@you",
+			body: "slow",
+		});
+		await new Promise((r) => setTimeout(r, 0));
+		const nudged = h.supervisor.nudge("reviewer", "Heartbeat");
+		await new Promise((r) => setTimeout(r, 0));
+		expect(order).toEqual(["start:[#team] @you: slow"]);
+		release();
+		await turn;
+		expect(await nudged).toBe(true);
+		expect(order).toEqual([
+			"start:[#team] @you: slow",
+			"end:[#team] @you: slow",
+			"start:Heartbeat",
+			"end:Heartbeat",
+		]);
+
+		// Not running: left alone, answered false.
+		const stopped = stubWorker("sleeper");
+		await h.supervisor.register({
+			worker: stopped.worker,
+			accountId: "acct-sleep",
+			mode: "subscription",
+			rooms: [],
+		});
+		await stopped.worker.park();
+		expect(await h.supervisor.nudge("sleeper", "Heartbeat")).toBe(false);
+		expect(stopped.prompts).toEqual([]);
+		expect(await h.supervisor.nudge("ghost", "Heartbeat")).toBe(false);
+	});
+});
+
 describe("wake filters", () => {
 	test("wake.mention true wakes a named peer on @mention", async () => {
 		const h = await harness();
