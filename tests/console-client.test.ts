@@ -925,6 +925,86 @@ describe("rendering", () => {
 		},
 	);
 
+	browserTest(
+		"bodies render as Markdown: headings, tables, code, and mermaid diagrams",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const posted = await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: [
+					"## Findings",
+					"",
+					"| check | result |",
+					"|---|---|",
+					"| build | **green** |",
+					"",
+					"- [x] tests pass",
+					"- inline `code` here, <b>not html</b>",
+					"",
+					"```diff",
+					"- old",
+					"+ new",
+					"```",
+					"",
+					"```mermaid",
+					"graph LR",
+					"  A[plan] --> B[build]",
+					"```",
+				].join("\n"),
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			const selector = `#messages .message[data-id="${posted.id}"] .body`;
+			await waitFor(
+				"markdown body",
+				() =>
+					page
+						.$(selector)
+						.then((el) => (el ? el.evaluate((n) => n.innerHTML) : "")),
+				(html) => html.includes("<h2") && html.includes("<table"),
+			);
+			const shape = await page.$eval(selector, (n) => ({
+				h2: n.querySelector("h2")?.textContent ?? "",
+				cell: n.querySelector("td strong")?.textContent ?? "",
+				checkbox:
+					n.querySelector('input[type="checkbox"]')?.hasAttribute("checked") ??
+					false,
+				inlineCode: n.querySelector("li code")?.textContent ?? "",
+				// HTML in a body is text, never markup.
+				escaped: (n.textContent ?? "").includes("<b>not html</b>"),
+				boldTag: n.querySelector("b") !== null,
+				diffAdded:
+					n.querySelector("pre span.block:last-child")?.textContent ?? "",
+			}));
+			expect(shape).toEqual({
+				h2: "Findings",
+				cell: "green",
+				checkbox: true,
+				inlineCode: "code",
+				escaped: true,
+				boldTag: false,
+				diffAdded: "+ new",
+			});
+			// The diagram is drawn: an SVG with the node labels, not the source.
+			const diagram = await waitFor(
+				"mermaid diagram",
+				() =>
+					page.$eval(
+						selector,
+						(n) =>
+							n.querySelector('[data-diagram="mermaid"] svg')?.textContent ??
+							"",
+					),
+				(text) => text.includes("plan") && text.includes("build"),
+			);
+			expect(diagram).toContain("plan");
+			expect(errors).toEqual([]);
+		},
+	);
+
 	browserTest("message mentions render as distinct affordances", async () => {
 		const h = await harness();
 		await h.ensureRoom("#reviews");

@@ -7,7 +7,7 @@
  * Performance: Markdown parsing is linear in message length; no unsafe HTML is interpreted.
  */
 import { Check, Clock3, Eye, MessageSquare, Plus, X } from "lucide-react";
-import { Fragment, useState, type ReactNode } from "react";
+import { useState } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { HUMAN_AUTHOR, type RoomMessage } from "@/lib/types";
+import { Markdown } from "./Markdown";
 
 const REACTIONS = [
   ["👀", "Eyes", Eye],
@@ -63,131 +64,10 @@ function timeLabel(createdAt: number) {
   }).format(new Date(createdAt));
 }
 
-function inlineMarkdown(value: string): ReactNode[] {
-  const parts = value.split(
-    /(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g,
-  );
-  return parts.map((part, index) => {
-    if (part.startsWith("`") && part.endsWith("`")) {
-      return (
-        <code
-          key={index}
-          className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em] text-foreground"
-        >
-          {part.slice(1, -1)}
-        </code>
-      );
-    }
-    if (part.startsWith("**") && part.endsWith("**"))
-      return <strong key={index}>{part.slice(2, -2)}</strong>;
-    const link = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(part);
-    if (link)
-      return (
-        <a
-          key={index}
-          href={link[2]}
-          target="_blank"
-          rel="noreferrer"
-          className="text-primary underline underline-offset-2 hover:text-primary/80"
-        >
-          {link[1]}
-        </a>
-      );
-    return <Fragment key={index}>{part}</Fragment>;
-  });
-}
-
-function Prose({ value }: { value: string }) {
-  return (
-    <>
-      {value.split("\n").map((line, index) => {
-        const heading = /^(#{1,3})\s+(.+)$/.exec(line);
-        if (heading)
-          return (
-            <p
-              key={index}
-              className="mt-2 font-semibold text-foreground first:mt-0"
-            >
-              {inlineMarkdown(heading[2])}
-            </p>
-          );
-        const bullet = /^\s*[-*]\s+(.+)$/.exec(line);
-        if (bullet)
-          return (
-            <div key={index} className="flex gap-2 pl-2">
-              <span aria-hidden="true" className="text-muted-foreground">
-                •
-              </span>
-              <span>{inlineMarkdown(bullet[1])}</span>
-            </div>
-          );
-        if (line.startsWith("> "))
-          return (
-            <blockquote
-              key={index}
-              className="border-l-2 border-primary/50 pl-3 text-muted-foreground"
-            >
-              {inlineMarkdown(line.slice(2))}
-            </blockquote>
-          );
-        return (
-          <p key={index} className={line ? "min-h-4" : "h-1"}>
-            {inlineMarkdown(line)}
-          </p>
-        );
-      })}
-    </>
-  );
-}
-
 export function MessageBody({ body }: { body: string }) {
-  const blocks: Array<{
-    kind: "prose" | "code";
-    value: string;
-    language?: string;
-  }> = [];
-  const fence = /```([^\n]*)\n([\s\S]*?)(?:\n```|$)/g;
-  let start = 0;
-  for (const match of body.matchAll(fence)) {
-    if (match.index > start)
-      blocks.push({ kind: "prose", value: body.slice(start, match.index) });
-    blocks.push({ kind: "code", language: match[1].trim(), value: match[2] });
-    start = match.index + match[0].length;
-  }
-  if (start < body.length)
-    blocks.push({ kind: "prose", value: body.slice(start) });
-  if (blocks.length === 0) blocks.push({ kind: "prose", value: body });
-
   return (
     <div className="body min-w-0 space-y-1 break-words text-sm leading-5 text-foreground/90">
-      {blocks.map((block, blockIndex) =>
-        block.kind === "prose" ? (
-          <Prose key={blockIndex} value={block.value} />
-        ) : (
-          <div
-            key={blockIndex}
-            className="overflow-hidden rounded-lg border bg-muted/40"
-          >
-            {block.language && (
-              <div className="border-b px-3 py-1 font-mono text-[10px] text-muted-foreground">
-                {block.language}
-              </div>
-            )}
-            <pre className="overflow-x-auto p-3 font-mono text-xs leading-5">
-              <code>
-                {block.value.split("\n").map((line, lineIndex) => (
-                  <span
-                    key={lineIndex}
-                    className={`block min-w-max ${block.language === "diff" && line.startsWith("+") ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300" : block.language === "diff" && line.startsWith("-") ? "bg-red-500/10 text-red-800 dark:text-red-300" : ""}`}
-                  >
-                    {line || " "}
-                  </span>
-                ))}
-              </code>
-            </pre>
-          </div>
-        ),
-      )}
+      <Markdown body={body} />
     </div>
   );
 }
