@@ -169,7 +169,6 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tsconfig.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-1631](tasks/T-1631-console-next.md) | — |
 | `web-next/README.md` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
 | `web-next/bun.lock` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
-| `web-next/next-env.d.ts` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
 | `web-next/next.config.ts` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
 | `web-next/package.json` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
 | `web-next/postcss.config.mjs` | yes | [T-1631](tasks/T-1631-console-next.md) | — |

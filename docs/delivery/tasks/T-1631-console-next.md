@@ -21,7 +21,6 @@ A Next.js app renders the console on the server: pages fetch the daemon with the
 - `web-next/next.config.ts`
 - `web-next/tsconfig.json`
 - `web-next/postcss.config.mjs`
-- `web-next/next-env.d.ts`
 - `web-next/README.md`
 - `web-next/src/lib/daemon.ts`
 - `web-next/src/lib/types.ts`
@@ -57,7 +56,6 @@ A Next.js app renders the console on the server: pages fetch the daemon with the
 | [`web-next/next.config.ts`](../../../web-next/next.config.ts) | New | Strict mode, no powered-by header, the app as its own workspace root. |
 | [`web-next/tsconfig.json`](../../../web-next/tsconfig.json) | New | Next's defaults. |
 | [`web-next/postcss.config.mjs`](../../../web-next/postcss.config.mjs) | New | Tailwind v4. |
-| [`web-next/next-env.d.ts`](../../../web-next/next-env.d.ts) | New | Next's ambient types. |
 | [`web-next/README.md`](../../../web-next/README.md) | New | How to run it and where it finds the daemon. |
 | [`web-next/src/lib/daemon.ts`](../../../web-next/src/lib/daemon.ts) | New | Resolves the daemon from console-url or OMA_CONSOLE_URL; server-only fetch with the token. |
 | [`web-next/src/lib/types.ts`](../../../web-next/src/lib/types.ts) | New | Wire shapes and personaFor. |

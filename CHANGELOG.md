@@ -6,6 +6,10 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Fixed
+
+- The release workflow verifies a tag from a clean checkout again: it installs the server-rendered console's dependencies before the pack lifecycle, and the delivery tree no longer names `web-next/next-env.d.ts`, a file Next generates and gitignores, which made the docs gate drift on the 1.5.0 tag.
+
 ## [1.5.0] - 2026-09-12
 
 ### Added
