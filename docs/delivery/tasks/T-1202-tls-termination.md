@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-12](../epics/EP-12-remote-exposure.md) | [SP-13](../sprints/SP-13-beyond-loopback.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-12](../epics/EP-12-remote-exposure.md) | [SP-13](../sprints/SP-13-beyond-loopback.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -40,14 +40,24 @@ Remote mode is reachable only behind TLS: the docs ship copy-paste proxy recipes
 
 ## Acceptance
 
-- [ ] Each usable HTTPS recipe's three checks appear verbatim in the doc and are mirrored by suite assertions; the SSH-only configuration (SSH with no paired TLS/auth proxy) is explicitly rejected, distinct from the accepted SSH-tunnel-with-loopback-Caddy recipe.
-- [ ] Each usable HTTPS recipe is verified once end-to-end against a real proxy, with the date and versions recorded in the doc.
-- [ ] `omp-agent console` prints a URL that is correct when the daemon sits behind the documented proxy.
-- [ ] Remote mode with the console enabled and no external origin configured fails before the pidfile or any listener opens; a headless remote daemon (OMA_CONSOLE=0) boots without one, and loopback mode is unaffected.
+- [x] Each usable HTTPS recipe's three checks appear verbatim in the doc and are mirrored by suite assertions; the SSH-only configuration (SSH with no paired TLS/auth proxy) is explicitly rejected, distinct from the accepted SSH-tunnel-with-loopback-Caddy recipe.
+- [x] Each usable HTTPS recipe is verified once end-to-end against a real proxy, with the date and versions recorded in the doc.
+- [x] `omp-agent console` prints a URL that is correct when the daemon sits behind the documented proxy.
+- [x] Remote mode with the console enabled and no external origin configured fails before the pidfile or any listener opens; a headless remote daemon (OMA_CONSOLE=0) boots without one, and loopback mode is unaffected.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| Each recipe ends with the three checks verbatim, and the SSH-only configuration is rejected | [`docs/remote-exposure.md`](../../../docs/remote-exposure.md) |
+| The three checks, the external console origin, and the missing-origin preflight are suite assertions | [`tests/remote-exposure.test.ts`](../../../tests/remote-exposure.test.ts) |
+| The missing-origin refusal runs before the pidfile or any listener opens | [`src/daemon/runtime.ts`](../../../src/daemon/runtime.ts) |
+| Real-proxy evidence: Caddy and SSH tunnel with loopback Caddy on 2026-09-03, tailscale serve on 2026-09-13 across two tailnet devices, each 11/11 checks with dates and versions in the doc | [`docs/remote-exposure.md`](../../../docs/remote-exposure.md) |
+| The tailscale serve run found and fixed two recipe defects: a Caddy site with no bind that listened on every interface and never matched the tailnet Host, and a missing trusted_proxies that recorded 127.0.0.1 as every operator's source | [`docs/remote-exposure.md`](../../../docs/remote-exposure.md) |
 
 ## Out of scope
 
-- The daemon terminating TLS (ADR-012 rejects it) and the login flow UX (T-1203). Remaining blocker: acceptance is per-recipe, and two of the three usable HTTPS recipes are now verified end to end against real Caddy-terminated TLS from a separate operator machine on 2026-09-03 -- Caddy with public TLS and SSH tunnel paired with loopback Caddy, each 11/11 checks, both on an internal CA rather than public ACME. The tailscale serve row stays UNVERIFIED: it needs two tailnet devices, and no second device on the available tailnet accepted a shell nor was an auth key available to enlist one. That single row is what keeps this task and T-1205 blocked.
+- The daemon terminating TLS (ADR-012 rejects it) and the login flow UX (T-1203). Public ACME issuance and renewal: the Caddy and SSH-tunnel runs used an internal CA and the tailscale serve run used the certificate tailscale serve provisions, so no run exercised Caddy's ACME client. The doc marks that cell PARTIAL and says so.
 
 ## Depends on
 
