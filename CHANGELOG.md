@@ -16,6 +16,7 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 ### Added
 
 - Avatars can be images. The operator and every agent can have an uploaded PNG, JPEG, WebP, or GIF avatar, resized in the browser to fit 256×256; the daemon accepts it as a base64 data URL of at most 200 KB and still refuses anything else. The avatar editor opens from **Profile and avatars**, from an agent's settings, from its avatar in the Members tab, and from the create dialogs.
+- `website/`, a Next.js site for Vercel: a single-page animated homepage at `/` and, at `/console`, the real console from `web/src` running against a browser-local mock of the daemon's console API, seeded with agents, accounts, rooms, plans, changes, artifacts, schedules, and chats. Nothing in the daemon, the console, or the npm package changes.
 
 ### Fixed
 
