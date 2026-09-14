@@ -4006,7 +4006,7 @@ describe("accessibility", () => {
 	);
 
 	browserTest(
-		"appearance preserves drafts and restores the selected palette and mode",
+		"appearance preserves drafts and restores the selected theme and mode",
 		async () => {
 			const h = await harness();
 			await h.ensureRoom("#reviews");
@@ -4019,8 +4019,8 @@ describe("accessibility", () => {
 				(node) => getComputedStyle(node).backgroundColor,
 			);
 			await page.click('[aria-label="Appearance"]');
-			await page.type('[aria-label="Search color palettes"]', "Catppuccin");
-			await page.click('aria/Catppuccin[role="button"]');
+			await page.type('[aria-label="Search color palettes"]', "Ochin");
+			await page.click('aria/Ochin[role="button"]');
 			await page.click('aria/Dark[role="button"]');
 			await page.keyboard.press("Escape");
 			expect(
@@ -4048,9 +4048,9 @@ describe("accessibility", () => {
 					node.getAttribute("aria-pressed"),
 				),
 			).toBe("true");
-			await page.type('[aria-label="Search color palettes"]', "Catppuccin");
+			await page.type('[aria-label="Search color palettes"]', "Ochin");
 			expect(
-				await page.$eval('aria/Catppuccin[role="button"]', (node) =>
+				await page.$eval('aria/Ochin[role="button"]', (node) =>
 					node.getAttribute("aria-pressed"),
 				),
 			).toBe("true");
