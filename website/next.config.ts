@@ -17,6 +17,8 @@ const nextConfig: NextConfig = {
 		resolveAlias: {
 			"@": join(repoRoot, "web", "src"),
 			"@site": join(siteRoot, "src"),
+			// @designcodeio/threeui pins three@0.128 as "three128"; share the app's three.
+			three128: "three",
 		},
 	},
 	webpack: (config) => {
@@ -25,6 +27,7 @@ const nextConfig: NextConfig = {
 			...config.resolve.alias,
 			"@": join(repoRoot, "web", "src"),
 			"@site": join(siteRoot, "src"),
+			three128: join(siteRoot, "node_modules", "three"),
 		};
 		return config;
 	},

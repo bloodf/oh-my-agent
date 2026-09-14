@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-labelledby="title desc">
+  <title id="title">oh-my-agent mark</title>
+  <desc id="desc">A lowercase o conversation mark in aubergine and sky blue.</desc>
+  <rect width="128" height="128" rx="28" fill="#451b52"/>
+  <rect x="6" y="6" width="116" height="116" rx="23.5" fill="none" stroke="#ffffff" stroke-opacity=".12" stroke-width="1"/>
+  <circle cx="61.5" cy="61.5" r="28" fill="none" stroke="#f8fafc" stroke-width="14.5"/>
+  <path d="M80.5 82.25c8.5-2.25 14.25-7.5 17.5-14.75-.5 10.75-4.25 19.25-11.75 25.5l-5.75-10.75Z" fill="#f8fafc"/>
+  <circle cx="93" cy="35" r="6.75" fill="#7dd3fc"/>
+</svg>

@@ -13,6 +13,7 @@
 			"!**/docs/diagrams",
 			"!**/docs/assets",
 			"!**/web",
+			"!**/website",
 			"!**/web-next/.next",
 			"!**/web-next/next-env.d.ts",
 			"!**/src/console/app.js",

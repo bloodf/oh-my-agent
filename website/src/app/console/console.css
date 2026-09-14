@@ -1,0 +1,28 @@
+/* The real console stylesheet, scanned against the real console sources. */
+@import "../../../../web/src/index.css";
+@source "../../../../web/src";
+@source "../../components/demo";
+@source "./";
+
+:root {
+  --demo-banner-height: 2rem;
+}
+
+.console-shell {
+  height: calc(100svh - var(--demo-banner-height)) !important;
+}
+
+/*
+ * The agent sheet's Schedules tab sits outside the sheet's scroll area, so a
+ * crew with many schedules pushes "Add schedule" below the fold. Let that tab
+ * scroll on its own.
+ */
+[data-slot="tabs-content"]:has(> #schedules) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+#schedules {
+  grid-template-columns: minmax(0, 1fr);
+}

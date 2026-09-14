@@ -17,7 +17,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `README.md` | yes | [T-703](tasks/T-703-root-readme-and-metadata.md), [T-1205](tasks/T-1205-exposure-runbook.md), [T-1302](tasks/T-1302-versioning-policy.md), [T-1304](tasks/T-1304-install-docs.md) | — |
 | `agents/example-researcher.md` | yes | [T-501](tasks/T-501-peer-store.md) | — |
 | `agents/example-reviewer.md` | yes | [T-501](tasks/T-501-peer-store.md) | — |
-| `biome.json` | yes | [T-702](tasks/T-702-biome-lint.md), [T-1303](tasks/T-1303-release-ci.md), [T-1631](tasks/T-1631-console-next.md) | — |
+| `biome.json` | yes | [T-702](tasks/T-702-biome-lint.md), [T-1303](tasks/T-1303-release-ci.md), [T-1631](tasks/T-1631-console-next.md), [T-1701](tasks/T-1701-public-site.md) | — |
 | `bun.lock` | yes | [T-1503](tasks/T-1503-drop-resolve-walk.md), [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
 | `docs/develop/modules.md` | yes | [T-1504](tasks/T-1504-drop-rpc-pid-patch.md) | — |
 | `docs/develop/release.md` | yes | [T-1303](tasks/T-1303-release-ci.md) | — |
@@ -166,7 +166,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `tests/worker-inprocess.test.ts` | yes | [T-1006](tasks/T-1006-in-process-worker-path.md), [T-1612](tasks/T-1612-shared-supervisor-contract.md) | — |
 | `tests/worker-lifecycle.test.ts` | yes | [T-401](tasks/T-401-worker-lifecycle.md), [T-1003](tasks/T-1003-worker-pid-on-the-wire.md), [T-1612](tasks/T-1612-shared-supervisor-contract.md) | — |
 | `tests/workspace-changes.test.ts` | yes | [T-603](tasks/T-603-console-client.md) | — |
-| `tsconfig.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-1631](tasks/T-1631-console-next.md) | — |
+| `tsconfig.json` | yes | [T-001](tasks/T-001-package-scaffold.md), [T-1631](tasks/T-1631-console-next.md), [T-1701](tasks/T-1701-public-site.md) | — |
 | `web-next/README.md` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
 | `web-next/bun.lock` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
 | `web-next/next.config.ts` | yes | [T-1631](tasks/T-1631-console-next.md) | — |
@@ -208,3 +208,85 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `web/src/lib/types.ts` | yes | [T-1628](tasks/T-1628-console-schedules-profile.md) | — |
 | `web/src/main.tsx` | yes | [T-1630](tasks/T-1630-console-lazy-chunks.md) | — |
 | `web/vite.config.ts` | yes | [T-1627](tasks/T-1627-console-markdown-mermaid.md), [T-1630](tasks/T-1630-console-lazy-chunks.md) | — |
+| `website/.gitignore` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/AGENTS.md` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/CLAUDE.md` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/README.md` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/bun.lock` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/next.config.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/package.json` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/postcss.config.mjs` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/public/home/collaboration.png` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/public/home/console.png` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/public/home/favicon.svg` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/public/home/mark.svg` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/public/home/social.png` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/scripts/mock-smoke.mjs` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/(home)/closing.css` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/(home)/hero.css` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/(home)/home.css` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/(home)/layout.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/(home)/page.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/(home)/responsive.css` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/(home)/story.css` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/(home)/systems.css` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/console/console.css` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/console/layout.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/console/login/page.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/console/page.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/console/review/[id]/page.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/globals.css` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/app/layout.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/demo/ConsoleApp.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/demo/ConsoleClient.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/demo/DemoBanner.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/demo/DemoGuard.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/demo/DemoLogin.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/data.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/hero/Hero.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/hero/HeroCanvas.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/hero/TerminalWindow.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Artifacts.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Clients.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Compare.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Daemon.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/DemoTeaser.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/FinalCta.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Footer.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Hierarchy.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Isolation.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/QuickStart.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Quota.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Remote.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Rooms.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Schedules.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/sections/Transcript.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/three/Scene.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/three/constellation.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/threeui/ThreeStage.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/ui/chrome.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/components/home/ui/primitives.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/activity.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/bus.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/cron.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/demoPassword.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/fixtures/agents.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/fixtures/chats.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/fixtures/index.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/fixtures/rooms.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/fixtures/workspace.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/http.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/index.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/messages.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/router.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/routes/agents.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/routes/rooms.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/routes/system.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/routes/workspace.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/session.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/store.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/transport.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/types.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/shaders/agents.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/shaders/night.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/tsconfig.json` | yes | [T-1701](tasks/T-1701-public-site.md) | — |

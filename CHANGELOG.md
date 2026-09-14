@@ -6,6 +6,10 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Added
+
+- `website/`, a Next.js site for Vercel: a single-page animated homepage at `/` and, at `/console`, the real console from `web/src` running against a browser-local mock of the daemon's console API, seeded with agents, accounts, rooms, plans, changes, artifacts, schedules, and chats. The demo password is `melon`. Nothing in the daemon, the console, or the npm package changes.
+
 ## [1.5.1] - 2026-09-12
 
 ### Fixed
