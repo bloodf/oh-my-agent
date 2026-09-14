@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ConsoleCall } from "./CreateChannelDialog";
@@ -67,10 +67,24 @@ function isWorkspaceFile(value: unknown): value is WorkspaceFile {
 
 function lineStyle(line: string) {
   if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("---") || line.startsWith("+++")) return "text-muted-foreground";
-  if (line.startsWith("+")) return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-  if (line.startsWith("-")) return "bg-red-500/10 text-red-700 dark:text-red-300";
-  if (line.startsWith("@@")) return "bg-blue-500/10 text-blue-700 dark:text-blue-300";
-  return "text-foreground/80";
+  if (line.startsWith("+")) return "border-l-2 border-[var(--presence-active)] bg-[var(--presence-active)]/10 text-[#006146] dark:text-[#7fe0b5]";
+  if (line.startsWith("-")) return "border-l-2 border-[#e01e5a] bg-[#e01e5a]/8 text-[#a3103f] dark:text-[#f59ab5]";
+  if (line.startsWith("@@")) return "border-l-2 border-[#1d9bd1] bg-[#1d9bd1]/10 text-[#0b4c80] dark:text-[#7cc5f0]";
+  return "border-l-2 border-transparent text-foreground/80";
+}
+
+const LETTER_STYLE: Record<string, string> = {
+  M: "border-[#e8912d]/50 bg-[#e8912d]/12 text-[#9a5b0f] dark:text-[#f2b96a]",
+  A: "border-[var(--presence-active)]/50 bg-[var(--presence-active)]/12 text-[#007a5a] dark:text-[#5fd3a3]",
+  D: "border-[#e01e5a]/50 bg-[#e01e5a]/10 text-[#b3124a] dark:text-[#f47aa0]",
+  R: "border-[#1d9bd1]/50 bg-[#1d9bd1]/12 text-[#0b4c80] dark:text-[#7cc5f0]",
+  "?": "border-input bg-muted text-muted-foreground",
+};
+
+/** The first non-blank porcelain letter picks the pill colour. */
+function letterStyle(file: WorkspaceFile) {
+  const letter = `${file.indexStatus}${file.worktreeStatus}`.replace(/[\s.]/g, "").charAt(0);
+  return LETTER_STYLE[letter] ?? LETTER_STYLE["?"];
 }
 
 function statusLabel(file: WorkspaceFile) {
@@ -165,23 +179,23 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
 
   return (
     <section
-      className="flex min-h-0 flex-1 flex-col p-3 sm:p-5"
+      className="@container/changes flex min-h-0 min-w-0 flex-1 flex-col px-3 py-4 sm:px-6 sm:py-6"
       aria-labelledby="changes-heading"
     >
-      <div className="mx-auto flex w-full max-w-[1400px] items-center justify-between gap-3 pb-4">
+      <div className="flex w-full min-w-0 items-center justify-between gap-3 pb-4">
         <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
-            <h2 id="changes-heading" className="text-xl font-semibold">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2">
+            <h2 id="changes-heading" className="text-[22px] leading-7 font-black">
               Changes
             </h2>
             {changes?.branch && (
-              <Badge variant="outline" className="max-w-48 truncate">
+              <Badge variant="outline" className="h-6 max-w-48 truncate rounded-md font-mono text-xs">
                 {changes.branch}
               </Badge>
             )}
           </div>
           <p
-            className="truncate text-sm text-muted-foreground"
+            className="truncate font-mono text-[13px] text-muted-foreground"
             title={changes?.root ?? cwd}
           >
             {changes?.root ?? cwd}
@@ -190,7 +204,8 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
         <Button
           type="button"
           variant="outline"
-          size="icon"
+          size="icon-lg"
+          className="shrink-0"
           disabled={loading}
           aria-label="Refresh workspace changes"
           onClick={() => void loadChanges()}
@@ -200,7 +215,7 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
       </div>
 
       {error && (
-        <Alert variant="destructive" className="mx-auto max-w-[1400px]">
+        <Alert variant="destructive">
           <AlertTitle>Could not load workspace changes</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
           <Button
@@ -215,17 +230,17 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
         </Alert>
       )}
       {loading && !changes && (
-        <div className="mx-auto grid min-h-0 w-full max-w-[1400px] flex-1 gap-3 md:grid-cols-[minmax(15rem,22rem)_minmax(0,1fr)]">
+        <div className="grid min-h-0 w-full min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-3 @[56rem]/changes:grid-cols-[minmax(15rem,22rem)_minmax(0,1fr)]">
           <Skeleton className="min-h-64" />
           <Skeleton className="min-h-64" />
         </div>
       )}
       {!loading && !error && changes?.files.length === 0 && (
-        <div className="mx-auto flex w-full max-w-[1400px] flex-1 items-center justify-center rounded-xl border border-dashed p-10 text-center">
+        <div className="flex w-full flex-1 items-center justify-center rounded-lg border border-dashed px-6 py-14 text-center">
           <div>
-            <FileDiff className="mx-auto mb-3 size-8 text-muted-foreground" />
-            <p className="font-medium">Working tree is clean</p>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <FileDiff className="mx-auto mb-3 size-10 text-muted-foreground" />
+            <p className="text-lg font-black">Working tree is clean</p>
+            <p className="mt-1 text-[15px] text-muted-foreground">
               No staged, modified, or untracked files.
             </p>
           </div>
@@ -233,19 +248,19 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
       )}
 
       {changes && changes.files.length > 0 && (
-        <div className="mx-auto grid min-h-0 w-full max-w-[1400px] flex-1 gap-3 md:grid-cols-[minmax(15rem,22rem)_minmax(0,1fr)]">
-          <div className="min-h-40 overflow-hidden rounded-xl border bg-card md:min-h-0">
-            <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">
+        <div className="grid min-h-0 w-full min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-3 @[56rem]/changes:grid-cols-[minmax(15rem,22rem)_minmax(0,1fr)]">
+          <div className="min-h-40 min-w-0 overflow-hidden rounded-lg border bg-card @[56rem]/changes:min-h-0">
+            <div className="flex h-9 items-center border-b px-3 text-[13px] font-bold text-muted-foreground">
               {changes.files.length} changed{" "}
               {changes.files.length === 1 ? "file" : "files"}
             </div>
-            <ScrollArea className="h-[min(34vh,20rem)] md:h-[calc(100%-2.25rem)]">
-              <ul className="p-1.5">
+            <ScrollArea className="h-[min(34vh,20rem)] @[56rem]/changes:h-[calc(100%-2.25rem)]">
+              <ul className="grid gap-px p-1">
                 {changes.files.map((file) => (
                   <li key={file.path}>
                     <button
                       type="button"
-                      className={`w-full rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring ${selectedPath === file.path ? "bg-muted" : ""}`}
+                      className={`grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2.5 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-[var(--surface-hover)] focus-visible:ring-2 focus-visible:ring-ring/40 ${selectedPath === file.path ? "bg-accent text-accent-foreground hover:bg-accent" : ""}`}
                       onClick={() => {
                         setSelectedPath(file.path);
                         setSide(
@@ -256,24 +271,23 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
                       }}
                     >
                       <span
-                        className="block truncate font-mono text-xs text-foreground"
+                        aria-hidden
+                        className={`row-span-2 inline-flex h-5 min-w-7 items-center justify-center rounded-md border px-1 font-mono text-[11px] font-bold ${letterStyle(file)}`}
+                      >
+                        {`${file.indexStatus}${file.worktreeStatus}`.trim() || "?"}
+                      </span>
+                      <span
+                        className="block truncate font-mono text-[13px] text-foreground"
                         title={file.path}
                       >
                         {file.path}
                       </span>
                       {file.originalPath && (
-                        <span className="block truncate text-[11px] text-muted-foreground">
+                        <span className="col-start-2 block truncate text-xs text-muted-foreground">
                           from {file.originalPath}
                         </span>
                       )}
-                      <span className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                        <Badge
-                          variant="outline"
-                          className="h-4 px-1.5 text-[10px]"
-                        >
-                          {file.indexStatus}
-                          {file.worktreeStatus}
-                        </Badge>
+                      <span className="col-start-2 text-xs text-muted-foreground">
                         {statusLabel(file)}
                       </span>
                     </button>
@@ -283,16 +297,16 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
             </ScrollArea>
           </div>
 
-          <div className="flex min-h-[28rem] min-w-0 flex-col overflow-hidden rounded-xl border bg-card md:min-h-0">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
+          <div className="flex min-h-[28rem] min-w-0 flex-col overflow-hidden rounded-lg border bg-card @[56rem]/changes:min-h-0">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b bg-muted/50 px-3 py-1.5">
               <div className="min-w-0">
                 <p
-                  className="truncate font-mono text-xs font-medium"
+                  className="truncate font-mono text-[13px] font-bold"
                   title={selectedFile?.path}
                 >
                   {selectedFile?.path}
                 </p>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {selectedFile?.originalPath
                     ? `Renamed from ${selectedFile.originalPath}`
                     : "Unified diff"}
@@ -301,8 +315,9 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
               <Tabs
                 value={effectiveSide}
                 onValueChange={(value) => setSide(value as DiffSide)}
+                className="max-w-full min-w-0 overflow-x-auto [scrollbar-width:none]"
               >
-                <TabsList aria-label="Diff source">
+                <TabsList variant="line" aria-label="Diff source">
                   <TabsTrigger
                     value="working"
                     disabled={
@@ -341,21 +356,21 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
             )}
             {!diffLoading && diff?.binary && (
               <div className="m-auto p-8 text-center">
-                <p className="font-medium">Binary file</p>
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="text-lg font-black">Binary file</p>
+                <p className="mt-1 text-[15px] text-muted-foreground">
                   Text diff is not available for this file.
                 </p>
               </div>
             )}
             {!diffLoading && diff && !diff.binary && diff.diff.length === 0 && (
-              <div className="m-auto p-8 text-center text-sm text-muted-foreground">
+              <div className="m-auto p-8 text-center text-[15px] text-muted-foreground">
                 No {effectiveSide} diff for this file.
               </div>
             )}
             {!diffLoading && diff && !diff.binary && diff.diff.length > 0 && (
-              <ScrollArea className="min-h-0 flex-1 bg-muted/20">
+              <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain bg-background">
                 <pre
-                  className="min-w-max py-2 font-mono text-xs leading-5"
+                  className="w-max min-w-full py-2 font-mono text-[13px] leading-5"
                   aria-label={`${side} diff for ${diff.path}`}
                 >
                   <code>
@@ -369,8 +384,7 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
                     ))}
                   </code>
                 </pre>
-                <ScrollBar orientation="horizontal" />
-              </ScrollArea>
+              </div>
             )}
             {diff?.truncated && (
               <Alert className="m-3">

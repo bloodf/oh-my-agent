@@ -1,22 +1,46 @@
 import {
+  AtSign,
+  Bold,
+  Code,
   FileIcon,
   FolderOpen,
+  Italic,
+  Link,
+  List,
+  ListOrdered,
   LoaderCircle,
   Paperclip,
-  Send,
+  Plus,
+  SendHorizontal,
+  Smile,
+  SquareCode,
+  Strikethrough,
+  Type,
   Upload,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import {
+  Fragment,
   useRef,
   useState,
   type ClipboardEvent,
+  type ComponentProps,
   type DragEvent,
   type KeyboardEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { AttachmentUpload, ManagedAttachment } from "@/lib/attachments";
+import { applyFormat, insertText, type FormatKind, type TextSelection } from "@/lib/markdown-format";
+import { EmojiPickerPopover } from "./EmojiPicker";
 
 export type ComposerProps = {
   idPrefix?: string;
@@ -41,6 +65,34 @@ type Draft = {
 };
 const EMPTY_DRAFT: Draft = { body: "", paths: [], uploads: [], active: [], revision: 0 };
 
+/** [format, label, icon, divider after]. */
+const FORMATS: [FormatKind, string, LucideIcon, boolean][] = [
+  ["bold", "Bold", Bold, false],
+  ["italic", "Italic", Italic, false],
+  ["strike", "Strikethrough", Strikethrough, true],
+  ["link", "Link", Link, true],
+  ["orderedList", "Ordered list", ListOrdered, false],
+  ["bulletList", "Bulleted list", List, true],
+  ["code", "Code", Code, false],
+  ["codeBlock", "Code block", SquareCode, false],
+];
+
+const ICON_BUTTON =
+  "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40 aria-pressed:text-foreground data-[state=open]:bg-muted pointer-coarse:size-11 [&_svg]:size-[18px]";
+
+function ComposerIcon({ label, children, ...props }: { label: string } & ComponentProps<"button">) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" aria-label={label} className={ICON_BUTTON} {...props}>
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function pathName(path: string) {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
@@ -55,7 +107,7 @@ export function Composer({
   idPrefix = "composer",
   onSend,
   disabled = false,
-  placeholder = "Message the conversation",
+  placeholder,
   roomKey,
   supportsAttachments = true,
   onPickFiles,
@@ -66,6 +118,9 @@ export function Composer({
   const [sendingByRoom, setSendingByRoom] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showFormatting, setShowFormatting] = useState(true);
+  const label = placeholder ?? (roomKey.startsWith("#") ? `Message ${roomKey}` : "Message the conversation");
   const draft = drafts[roomKey] ?? EMPTY_DRAFT;
   const sending = sendingByRoom[roomKey] === true;
   const error = errors[roomKey] ?? "";
@@ -162,7 +217,29 @@ export function Composer({
     }
   };
 
+  const locked = disabled || sending;
+  /** Applies a pure edit to the draft at the textarea selection, then restores the selection. */
+  const edit = (change: (selection: TextSelection) => TextSelection) => {
+    if (locked) return;
+    const element = textareaRef.current;
+    const value = (drafts[roomKey] ?? EMPTY_DRAFT).body;
+    const next = change({ value, start: element?.selectionStart ?? value.length, end: element?.selectionEnd ?? value.length });
+    updateDraft((current) => ({ ...current, body: next.value, revision: current.revision + 1 }));
+    requestAnimationFrame(() => {
+      element?.focus();
+      element?.setSelectionRange(next.start, next.end);
+    });
+  };
+  const format = (kind: FormatKind) => edit((selection) => applyFormat(kind, selection));
+  const insert = (text: string) => edit((selection) => insertText(selection, text));
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const key = event.key.toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && (key === "b" || key === "i")) {
+      event.preventDefault();
+      format(key === "b" ? "bold" : "italic");
+      return;
+    }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     void submit();
@@ -191,73 +268,134 @@ export function Composer({
   return (
     <form
       id={idPrefix}
-      className="composer-shell shrink-0 px-3 pb-3 pt-2 sm:px-5 sm:pb-4"
+      className="composer-shell shrink-0 bg-background px-3 pb-3 sm:px-5 sm:pb-5"
       onSubmit={(event) => { event.preventDefault(); void submit(); }}
       onDragOver={(event) => {
         if (supportsAttachments && (event.dataTransfer.files.length > 0 || event.dataTransfer.types.includes("text/plain"))) event.preventDefault();
       }}
       onDrop={onDrop}
     >
-      <div className="composer-box overflow-hidden rounded-lg border border-foreground/25 bg-background shadow-sm focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
+      <div className="composer-box rounded-lg border border-[var(--composer-border)] bg-background transition-[border-color,box-shadow] focus-within:border-foreground/50 focus-within:shadow-[var(--shadow-float)]">
+        {showFormatting && (
+          <div role="toolbar" aria-label="Formatting" className="flex h-9 items-center gap-0.5 overflow-x-auto rounded-t-lg px-1 pt-1">
+            {FORMATS.map(([kind, label, Icon, divider]) => (
+              <Fragment key={kind}>
+                <ComposerIcon label={label} disabled={locked} onMouseDown={(event) => event.preventDefault()} onClick={() => format(kind)}>
+                  <Icon />
+                </ComposerIcon>
+                {divider && <span aria-hidden="true" className="mx-1 h-5 w-px shrink-0 bg-border" />}
+              </Fragment>
+            ))}
+          </div>
+        )}
         {(draft.paths.length > 0 || draft.uploads.length > 0 || draft.active.length > 0) && (
-          <div className="flex flex-wrap gap-2 border-b bg-muted/20 p-2" aria-label="Attachments">
+          <div className="flex flex-wrap gap-2 px-3 pt-2" aria-label="Attachments">
             {draft.paths.map((path, index) => (
               <span key={path} title={path} className="attachment-chip">
-                <FolderOpen className="size-4 shrink-0" />
-                <span className="min-w-0"><span className="block max-w-44 truncate font-medium">{pathName(path)}</span><span className="block text-[10px] text-muted-foreground">Local reference · original stays in place</span></span>
-                <Button type="button" size="icon-xs" variant="ghost" aria-label={`Remove ${pathName(path)}`} onClick={() => updateDraft((current) => ({ ...current, paths: current.paths.filter((_, pathIndex) => pathIndex !== index), revision: current.revision + 1 }))}><X /></Button>
+                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#1264A3] text-white"><FolderOpen className="size-4" /></span>
+                <span className="min-w-0"><span className="block max-w-44 truncate font-bold">{pathName(path)}</span><span className="block text-[11px] text-muted-foreground">Local reference · original stays in place</span></span>
+                <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-11" aria-label={`Remove ${pathName(path)}`} onClick={() => updateDraft((current) => ({ ...current, paths: current.paths.filter((_, pathIndex) => pathIndex !== index), revision: current.revision + 1 }))}><X /></Button>
               </span>
             ))}
             {draft.uploads.map((attachment) => (
               <span key={attachment.id} title={attachment.path} className="attachment-chip">
-                <FileIcon className="size-4 shrink-0" />
-                <span className="min-w-0"><span className="block max-w-44 truncate font-medium">{attachment.name}</span><span className="block text-[10px] text-muted-foreground">Temporary upload · {fileSize(attachment.size)}</span></span>
-                <Button type="button" size="icon-xs" variant="ghost" aria-label={`Remove temporary upload ${attachment.name}`} onClick={() => void removeUpload(attachment)}><X /></Button>
+                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#2EB67D] text-white"><FileIcon className="size-4" /></span>
+                <span className="min-w-0"><span className="block max-w-44 truncate font-bold">{attachment.name}</span><span className="block text-[11px] text-muted-foreground">Temporary upload · {fileSize(attachment.size)}</span></span>
+                <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-11" aria-label={`Remove temporary upload ${attachment.name}`} onClick={() => void removeUpload(attachment)}><X /></Button>
               </span>
             ))}
             {draft.active.map((item) => (
               <span key={item.name} className="attachment-chip" role="status">
-                <LoaderCircle className="size-4 shrink-0 animate-spin" />
-                <span className="min-w-0"><span className="block max-w-44 truncate font-medium">{item.name.split(":")[0]}</span><span className="block text-[10px] text-muted-foreground">Uploading {Math.round(item.progress * 100)}%</span></span>
-                <Button type="button" size="icon-xs" variant="ghost" aria-label={`Cancel upload ${item.name.split(":")[0]}`} onClick={item.cancel}><X /></Button>
+                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /></span>
+                <span className="min-w-0"><span className="block max-w-44 truncate font-bold">{item.name.split(":")[0]}</span><span className="block text-[11px] text-muted-foreground">Uploading {Math.round(item.progress * 100)}%</span></span>
+                <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-11" aria-label={`Cancel upload ${item.name.split(":")[0]}`} onClick={item.cancel}><X /></Button>
               </span>
             ))}
           </div>
         )}
         <Textarea
+          ref={textareaRef}
           id={inputId}
-          rows={2}
-          aria-label={placeholder}
-          placeholder={placeholder}
-          className="max-h-48 min-h-16 resize-none border-0 bg-transparent px-3 py-2.5 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
+          rows={1}
+          aria-label={label}
+          placeholder={label}
+          className="max-h-60 min-h-[44px] resize-none rounded-none border-0 bg-transparent px-3 py-2 text-[15px] leading-[1.46] shadow-none focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent md:text-[15px] dark:bg-transparent dark:disabled:bg-transparent"
           value={draft.body}
           disabled={disabled || sending}
           onChange={(event) => updateDraft((current) => ({ ...current, body: event.target.value, revision: current.revision + 1 }))}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
         />
-        <div className="flex min-h-10 items-center justify-between gap-2 border-t border-border/70 px-2 py-1.5">
-          <div className="flex min-w-0 items-center gap-1">
-            {supportsAttachments && onUpload && <>
-              <input ref={inputRef} className="sr-only" type="file" multiple aria-label="Upload files from this device" onChange={(event) => { uploadFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
-              <Button type="button" size="icon-sm" variant="ghost" className="min-h-11 min-w-11" disabled={disabled || sending} aria-label="Upload files from this device" title="Upload files to managed temporary storage" onClick={() => inputRef.current?.click()}><Upload /></Button>
-            </>}
-            {supportsAttachments && onPickFiles && (
-              <Button type="button" size="icon-sm" variant="ghost" className="min-h-11 min-w-11" disabled={disabled || sending} aria-label="Reference local files by path" title="Reference original local files" onClick={() => void onPickFiles().then(addLocalPaths).catch((cause) => setError(cause instanceof Error ? cause.message : "Files could not be selected."))}><Paperclip /></Button>
-            )}
-            <span className="composer-hint hidden truncate text-[11px] text-muted-foreground sm:inline"><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line</span>
-          </div>
-          <Button id={`${idPrefix}-send`} type="submit" size="sm" className="min-h-11 min-w-11" aria-label={idPrefix === "thread-composer" ? "Reply" : "Send"} disabled={disabled || sending || draft.active.length > 0 || (draft.body.trim().length === 0 && draft.paths.length === 0 && draft.uploads.length === 0)}>
-            {sending ? <LoaderCircle className="animate-spin" /> : <Send />}
-            <span className="hidden min-[360px]:inline">{idPrefix === "thread-composer" ? "Reply" : "Send"}</span>
+        <div className="flex h-10 items-center gap-0.5 px-1.5 pb-1 pointer-coarse:h-12">
+          {supportsAttachments && onUpload && (
+            <input ref={inputRef} className="sr-only" tabIndex={-1} type="file" multiple aria-label="Upload files from this device" onChange={(event) => { uploadFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
+          )}
+          {supportsAttachments && (onUpload || onPickFiles) && (
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <button type="button" aria-label="Attach" disabled={locked} className={`${ICON_BUTTON.replace("rounded-md", "rounded-full")} bg-muted text-foreground/80 hover:bg-foreground/15`}>
+                      <Plus />
+                    </button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent>Attach</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="start" side="top" className="min-w-64">
+                {onUpload && (
+                  <DropdownMenuItem aria-label="Upload files from this device" onSelect={() => inputRef.current?.click()}>
+                    <Upload />
+                    <span className="flex flex-col"><span>Upload from this device</span><span className="text-[11px] text-muted-foreground">Managed temporary storage</span></span>
+                  </DropdownMenuItem>
+                )}
+                {onPickFiles && (
+                  <DropdownMenuItem aria-label="Reference local files by path" onSelect={() => void onPickFiles().then(addLocalPaths).catch((cause) => setError(cause instanceof Error ? cause.message : "Files could not be selected."))}>
+                    <Paperclip />
+                    <span className="flex flex-col"><span>Reference local files by path</span><span className="text-[11px] text-muted-foreground">Originals stay in place</span></span>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <ComposerIcon label={showFormatting ? "Hide formatting" : "Show formatting"} aria-pressed={showFormatting} onClick={() => setShowFormatting((value) => !value)}>
+            <Type />
+          </ComposerIcon>
+          <EmojiPickerPopover
+            side="top"
+            tooltip="Emoji"
+            onSelect={insert}
+            trigger={
+              <button type="button" aria-label="Emoji" disabled={locked} className={ICON_BUTTON}>
+                <Smile />
+              </button>
+            }
+          />
+          <ComposerIcon label="Mention someone" disabled={locked} onMouseDown={(event) => event.preventDefault()} onClick={() => insert("@")}>
+            <AtSign />
+          </ComposerIcon>
+          <span className="flex-1" />
+          <span aria-hidden="true" className="mx-1 h-5 w-px bg-border" />
+          <Button
+            id={`${idPrefix}-send`}
+            type="submit"
+            size="icon-sm"
+            className="size-8 rounded-md bg-[var(--send)] text-white hover:bg-[var(--send-hover)] disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-100 pointer-coarse:size-11"
+            aria-label={idPrefix === "thread-composer" ? "Reply" : "Send"}
+            disabled={locked || draft.active.length > 0 || (draft.body.trim().length === 0 && draft.paths.length === 0 && draft.uploads.length === 0)}
+          >
+            {sending ? <LoaderCircle className="animate-spin" /> : <SendHorizontal />}
           </Button>
         </div>
       </div>
-      {supportsAttachments ? (
-        <p className="mt-1.5 px-1 text-[10px] text-muted-foreground">Temporary uploads expire on daemon retention cleanup. Removing before send deletes managed bytes; local originals are never deleted.</p>
-      ) : (
-        <p className="mt-1.5 px-1 text-[10px] text-muted-foreground">File upload and local path access require full control for this connection.</p>
-      )}
+      <div className="mt-1 flex flex-wrap items-start justify-between gap-x-4 px-1 text-[11px] leading-4 text-muted-foreground">
+        {supportsAttachments ? (
+          <p className="min-w-56 flex-1">Temporary uploads expire on daemon retention cleanup. Removing before send deletes managed bytes; local originals are never deleted.</p>
+        ) : (
+          <p className="min-w-56 flex-1">File upload and local path access require full control for this connection.</p>
+        )}
+        <p className="composer-hint hidden shrink-0 whitespace-nowrap sm:block"><kbd className="font-sans font-bold">Enter</kbd> to send · <kbd className="font-sans font-bold">Shift</kbd> + <kbd className="font-sans font-bold">Enter</kbd> for new line</p>
+      </div>
       {error && <p role="alert" className="mt-1 px-1 text-xs text-destructive">{error}</p>}
     </form>
   );

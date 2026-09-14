@@ -26,6 +26,21 @@ export type TranscriptProps = {
 
 type ScrollSnapshot = { height: number; top: number; nearBottom: boolean };
 
+/** Slack's day label: "Today", "Yesterday", else "Monday, September 8th". */
+function dayLabel(date: Date) {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  const day = date.getDate();
+  const suffix = day % 10 === 1 && day !== 11 ? "st" : day % 10 === 2 && day !== 12 ? "nd" : day % 10 === 3 && day !== 13 ? "rd" : "th";
+  const weekday = date.toLocaleDateString("en-US", { weekday: "long" });
+  const month = date.toLocaleDateString("en-US", { month: "long" });
+  const year = date.getFullYear() === today.getFullYear() ? "" : `, ${date.getFullYear()}`;
+  return `${weekday}, ${month} ${day}${suffix}${year}`;
+}
+
 export function Transcript({
   messages,
   status,
@@ -84,6 +99,12 @@ export function Transcript({
     };
   };
   const roots = messages.filter((message) => message.parentId === null);
+  const repliesByRoot = new Map<number, RoomMessage[]>();
+  for (const message of messages) {
+    const rootId = message.threadRootId ?? message.parentId;
+    if (message.parentId === null || rootId === null) continue;
+    repliesByRoot.set(rootId, [...(repliesByRoot.get(rootId) ?? []), message]);
+  }
   const showState = status !== null || roots.length === 0;
   const effectiveState = status ?? "empty";
 
@@ -96,7 +117,7 @@ export function Transcript({
       aria-live="polite"
       tabIndex={0}
       onScroll={captureScroll}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:py-3"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-background pt-2 pb-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
       {showState ? (
         <section
@@ -189,12 +210,10 @@ export function Transcript({
         return (
           <Fragment key={message.id}>
             {!sameDay && (
-              <div className="my-3 flex items-center gap-3 px-4" aria-label="Message date">
-                <span className="h-px flex-1 bg-border" />
-                <time dateTime={date.toISOString()} className="rounded-full border bg-background px-3 py-1 text-xs font-medium">
-                  {date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
-                </time>
-                <span className="h-px flex-1 bg-border" />
+              <div className="date-divider mx-0 mt-4 mb-1 first:mt-1" role="separator" aria-label={dayLabel(date)}>
+                <span>
+                  <time dateTime={date.toISOString()}>{dayLabel(date)}</time>
+                </span>
               </div>
             )}
             <Message
@@ -203,6 +222,7 @@ export function Transcript({
               onThread={onThread}
               onReact={onReact}
               interactive={interactive}
+              threadReplies={repliesByRoot.get(message.id)}
             />
           </Fragment>
         );

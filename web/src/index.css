@@ -48,114 +48,135 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * Content surfaces follow Slack's light and dark canvases. Every text token
+ * clears WCAG AAA (7:1) on surface-0/1/2; tests/console-client.test.ts checks it.
+ */
 :root {
-  --background: oklch(0.995 0.002 300);
-  --foreground: oklch(0.2 0.015 300);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.015 300);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.015 300);
-  --primary: oklch(0.48 0.17 320);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.955 0.01 300);
-  --secondary-foreground: oklch(0.24 0.02 300);
-  --muted: oklch(0.965 0.006 300);
-  --muted-foreground: oklch(0.5 0.02 300);
-  --accent: oklch(0.94 0.025 320);
-  --accent-foreground: oklch(0.28 0.08 320);
-  --destructive: oklch(0.56 0.22 27);
-  --border: oklch(0.89 0.012 300);
-  --input: oklch(0.89 0.012 300);
-  --ring: oklch(0.58 0.17 320);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --background: #ffffff;
+  --foreground: #1d1c1d;
+  --card: #ffffff;
+  --card-foreground: #1d1c1d;
+  --popover: #ffffff;
+  --popover-foreground: #1d1c1d;
+  --primary: #0b4c80;
+  --primary-foreground: #ffffff;
+  --secondary: #f6f6f6;
+  --secondary-foreground: #1d1c1d;
+  --muted: #f6f6f6;
+  --muted-foreground: #4f4e50;
+  --accent: #e8f5fa;
+  --accent-foreground: #0b4c80;
+  --destructive: #b3261e;
+  --border: #dddddd;
+  --input: #bcbcbc;
+  --ring: #1d9bd1;
+  --chart-1: #1264a3;
+  --chart-2: #2bac76;
+  --chart-3: #e8912d;
+  --chart-4: #e01e5a;
+  --chart-5: #36c5f0;
   --radius: 0.5rem;
-  --sidebar: oklch(0.31 0.11 320);
-  --sidebar-foreground: oklch(0.98 0.01 300);
-  --sidebar-primary: oklch(0.9 0.05 320);
-  --sidebar-primary-foreground: oklch(0.25 0.08 320);
-  --sidebar-accent: oklch(0.43 0.11 320);
-  --sidebar-accent-foreground: oklch(1 0 0);
-  --sidebar-border: oklch(1 0 0 / 14%);
-  --sidebar-ring: oklch(0.9 0.05 320);
+  --sidebar: var(--ws-sidebar);
+  --sidebar-foreground: var(--ws-text);
+  --sidebar-primary: var(--ws-active);
+  --sidebar-primary-foreground: var(--ws-active-text);
+  --sidebar-accent: var(--ws-hover);
+  --sidebar-accent-foreground: var(--ws-text);
+  --sidebar-border: var(--ws-border);
+  --sidebar-ring: var(--ws-text);
   --surface-0: var(--background);
   --surface-1: var(--card);
   --surface-2: var(--muted);
+  --surface-hover: #f8f8f8;
   --text-primary: var(--foreground);
   --text-muted: var(--muted-foreground);
-  --success: oklch(0.72 0.17 150);
+  --success: #007a5a;
+  --success-foreground: #ffffff;
+  --send: #007a5a;
+  --send-hover: #148567;
+  --link: #0b4c80;
+  --mention-bg: #fdf4e0;
+  --mention-text: #7a4a00;
+  --reaction-mine-bg: #e8f5fa;
+  --reaction-mine-border: #1d9bd1;
+  --reaction-mine-text: #0b4c80;
+  --composer-border: #a3a3a3;
+  --presence-active: #2bac76;
+  --presence-parked: #e8912d;
+  --presence-stopped: #8d8d8d;
   --role-agent: var(--foreground);
-  --role-you: oklch(0.45 0.10 65);
+  --role-you: #7a4a00;
   --role-system: var(--muted-foreground);
+  --shadow-float: 0 0 0 1px rgb(29 28 29 / 13%), 0 4px 12px rgb(0 0 0 / 8%);
+  --shadow-modal: 0 0 0 1px rgb(29 28 29 / 13%), 0 18px 48px rgb(0 0 0 / 22%);
 }
 
 .dark {
-  --background: oklch(0.17 0.004 260);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.215 0.004 260);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.81 0.09 230);
-  --primary-foreground: oklch(0.18 0.02 240);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.77 0.005 260);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.81 0.09 230);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.195 0.004 260);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-  --surface-0: var(--background);
-  --surface-1: var(--card);
-  --surface-2: var(--muted);
-  --text-primary: var(--foreground);
-  --text-muted: var(--muted-foreground);
-  --success: oklch(0.72 0.17 150);
+  --background: #1a1d21;
+  --foreground: #e8e8e8;
+  --card: #222529;
+  --card-foreground: #e8e8e8;
+  --popover: #222529;
+  --popover-foreground: #e8e8e8;
+  --primary: #7cc5f0;
+  --primary-foreground: #0b1b26;
+  --secondary: #27292d;
+  --secondary-foreground: #e8e8e8;
+  --muted: #27292d;
+  --muted-foreground: #b8b8ba;
+  --accent: #1d2f3c;
+  --accent-foreground: #7cc5f0;
+  --destructive: #f28b82;
+  --border: #35373b;
+  --input: #565856;
+  --ring: #1d9bd1;
+  --surface-hover: #222529;
+  --success: #2bac76;
+  --success-foreground: #0b1b26;
+  --send: #007a5a;
+  --send-hover: #148567;
+  --link: #7cc5f0;
+  --mention-bg: #3b2f17;
+  --mention-text: #f2c94c;
+  --reaction-mine-bg: rgb(29 155 209 / 18%);
+  --reaction-mine-border: #1d9bd1;
+  --reaction-mine-text: #7cc5f0;
+  --composer-border: #565856;
   --role-agent: var(--foreground);
-  --role-you: oklch(0.86 0.12 85);
+  --role-you: #f2c94c;
   --role-system: var(--muted-foreground);
+  --shadow-float: 0 0 0 1px rgb(255 255 255 / 10%), 0 4px 12px rgb(0 0 0 / 45%);
+  --shadow-modal: 0 0 0 1px rgb(255 255 255 / 10%), 0 18px 48px rgb(0 0 0 / 60%);
 }
 
+/*
+ * Workspace chrome: rail, toolbar, and sidebar. lib/theme.ts overrides these
+ * per curated theme; the defaults are Aubergine so the first paint is right.
+ */
 :root {
-  --workspace-bar: oklch(0.37 0.14 323.23);
-  --workspace-foreground: oklch(1 0 0);
-  --workspace-sidebar: var(--workspace-bar);
-  --workspace-accent: var(--workspace-foreground);
-  --workspace-accent-foreground: var(--workspace-bar);
-  --workspace-border: color-mix(in oklch, var(--workspace-foreground) 18%, transparent);
+  --ws-rail: #2b0a2c;
+  --ws-toolbar: #350d36;
+  --ws-sidebar: #3f0e40;
+  --ws-sidebar-end: #350d36;
+  --ws-text: #ffffff;
+  --ws-text-dim: #d1d2d3;
+  --ws-hover: rgb(255 255 255 / 10%);
+  --ws-hover-strong: rgb(255 255 255 / 20%);
+  --ws-active: #1164a3;
+  --ws-active-text: #ffffff;
+  --ws-border: rgb(255 255 255 / 12%);
+  --ws-badge: #cd2553;
+  --ws-badge-text: #ffffff;
+  --ws-search: rgb(255 255 255 / 16%);
+  --ws-search-hover: rgb(255 255 255 / 24%);
+  --ws-tile: #ffffff;
+  --ws-tile-text: #3f0e40;
+  --ws-rail-gradient: linear-gradient(180deg, color-mix(in srgb, var(--ws-rail) 90%, white) 0%, var(--ws-rail) 28%, color-mix(in srgb, var(--ws-rail) 86%, black) 100%);
+  --ws-sidebar-gradient: linear-gradient(180deg, var(--ws-sidebar) 0%, var(--ws-sidebar-end) 100%);
+  --ws-toolbar-gradient: linear-gradient(90deg, color-mix(in srgb, var(--ws-toolbar) 92%, black) 0%, var(--ws-toolbar) 50%, color-mix(in srgb, var(--ws-toolbar) 92%, black) 100%);
 }
 
-
-.workspace-drawer [data-slot="sheet-close"] {
-  color: var(--workspace-foreground);
-  min-width: 44px;
-  min-height: 44px;
-  top: 2px;
-}
-
-.workspace-drawer [data-slot="sheet-close"]:hover {
-  background: var(--workspace-accent);
-  color: var(--workspace-accent-foreground);
-}
 
 
 
@@ -179,7 +200,8 @@
     margin: 0;
   }
   body {
-    font-size: 14px;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
   }
   [hidden] {
     display: none !important;
@@ -190,9 +212,8 @@
   }
   .workspace-rail :focus-visible,
   [aria-label="Global workspace controls"] :focus-visible,
-  nav[aria-label="Workspace"] :focus-visible,
-  .workspace-drawer [data-slot="sheet-close"]:focus-visible {
-    outline-color: var(--workspace-foreground) !important;
+  nav[aria-label="Workspace"] :focus-visible {
+    outline-color: var(--ws-text) !important;
   }
   button,
   input,
@@ -231,18 +252,74 @@
 }
 
 @layer components {
-  .rail-heading {
-    @apply mb-1 flex min-h-7 items-center justify-between px-2 text-xs font-semibold text-sidebar-foreground/70;
+  /* Workspace chrome surfaces. */
+  .ws-rail-surface {
+    background: var(--ws-rail-gradient);
+    color: var(--ws-text);
   }
-  .attachment-chip {
-    @apply inline-flex max-w-full items-center gap-2 rounded-md border bg-background py-1 pl-2 pr-1 text-xs shadow-xs;
+  .ws-toolbar-surface {
+    background: var(--ws-toolbar-gradient);
+    color: var(--ws-text);
+    box-shadow: inset 0 -1px 0 var(--ws-border);
+  }
+  .ws-sidebar-surface {
+    background: var(--ws-sidebar-gradient);
+    color: var(--ws-text-dim);
+    box-shadow: inset -1px 0 0 var(--ws-border);
+  }
+  .ws-control {
+    @apply rounded-md text-[var(--ws-text-dim)] transition-colors hover:bg-[var(--ws-hover)] hover:text-[var(--ws-text)];
+  }
+  .rail-heading {
+    @apply flex min-h-7 items-center justify-between px-1 text-[13px] font-semibold text-[var(--ws-text-dim)];
+  }
+  .ws-row {
+    @apply flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-2.5 text-left text-[15px] leading-7 font-normal text-[var(--ws-text-dim)] transition-colors hover:bg-[var(--ws-hover)];
+  }
+  .ws-row.active,
+  .ws-row[aria-selected="true"],
+  .ws-row[aria-current="page"] {
+    @apply bg-[var(--ws-active)] font-medium text-[var(--ws-active-text)] hover:bg-[var(--ws-active)];
+  }
+  .ws-row.unread {
+    @apply font-bold text-[var(--ws-text)];
+  }
+  .ws-badge {
+    @apply ml-auto inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--ws-badge)] px-1.5 text-[11px] font-bold text-[var(--ws-badge-text)];
+  }
+  .presence-dot {
+    @apply absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-[var(--ws-sidebar)];
+  }
+
+  /* Conversation surfaces. */
+  .date-divider {
+    @apply relative my-2 flex h-7 items-center justify-center;
+  }
+  .date-divider::before {
+    content: "";
+    @apply absolute inset-x-0 top-1/2 h-px bg-border;
+  }
+  .date-divider > span {
+    @apply relative inline-flex h-7 items-center rounded-full border bg-background px-4 text-[13px] font-bold text-foreground shadow-[var(--shadow-float)];
   }
   .message {
-    @apply rounded-none;
+    @apply rounded-none transition-colors;
   }
   .message:hover,
   .message:focus-within {
-    @apply bg-muted/55;
+    background: var(--surface-hover);
+  }
+  .hover-toolbar {
+    @apply absolute -top-4 right-4 z-10 flex items-center gap-0.5 rounded-lg border bg-background p-0.5;
+    box-shadow: var(--shadow-float);
+  }
+  .attachment-chip {
+    @apply inline-flex max-w-full items-center gap-2 rounded-lg border bg-background py-1.5 pl-2.5 pr-1 text-[13px];
+    box-shadow: var(--shadow-float);
+  }
+  .slack-modal {
+    border-radius: 0.75rem;
+    box-shadow: var(--shadow-modal);
   }
 }
 

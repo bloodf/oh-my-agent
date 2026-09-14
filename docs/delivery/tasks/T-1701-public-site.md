@@ -211,7 +211,7 @@ Evidence:
 
 ## Out of scope
 
-- Fixing the two agent-sheet layout defects in web/ itself; the demo patches them in its own CSS and notes them for upstream. Lighthouse and frame-rate measurement on real GPUs.
+- Lighthouse and frame-rate measurement on real GPUs. The two agent-sheet layout defects the demo first worked around in its own CSS are fixed in web/ by T-1632.
 
 ## Depends on
 

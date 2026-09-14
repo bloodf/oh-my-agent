@@ -98,7 +98,7 @@ Peers react the way teammates do in Slack, and the daemon sets the basic status 
 | ✅ | That turn ended normally. Replaces ⏳. |
 | ❌ | That turn failed. Replaces ⏳. |
 
-A peer adds its own reactions on top through `chat_react` and `chat_unreact`, from the same four: ❌ on a message it cannot act on, ✅ early on one it finished mid-turn, 👀 on one it only checked. Design: [ADR-009](../delivery/adr/ADR-009-threads-and-reactions.md). Operator API: [Web console](../web-console.md).
+A peer adds its own reactions on top through `chat_react` and `chat_unreact`, with any single emoji: ❌ on a message it cannot act on, ✅ early on one it finished mid-turn, 👀 on one it only checked, 👍 or 🎉 the way a teammate would. The tool refuses letters, digits, and runs of several emoji. The console's reaction picker offers the full emoji set too. Design: [ADR-009](../delivery/adr/ADR-009-threads-and-reactions.md). Operator API: [Web console](../web-console.md).
 
 ## Heartbeat
 

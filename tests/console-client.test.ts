@@ -261,7 +261,7 @@ async function focusInPage(page: Page, selector: string): Promise<void> {
 	}, selector);
 }
 
-type AgentTab = "Members" | "Operations" | "Accounts" | "Schedules";
+type AgentTab = "Members" | "Operations" | "Schedules";
 
 /** Open the agent sheet through its visible trigger and select a visible tab. */
 async function openAgentTab(
@@ -286,9 +286,7 @@ async function openAgentTab(
 			? "#agents"
 			: tab === "Operations"
 				? "#ops"
-				: tab === "Schedules"
-					? "#schedules"
-					: "#ops-accounts",
+				: "#schedules",
 		{ visible: true },
 	);
 }
@@ -1629,16 +1627,17 @@ describe("definition editor", () => {
 		await page.waitForSelector('.definition-edit[data-name="reviewer"]');
 
 		// Opened by keyboard, and focus follows into the editor rather than
-		// being left behind on a control the panel now covers.
+		// being left behind on a control the panel now covers: the settings
+		// dialog opens on the Soul section, so focus lands in the soul.
 		await focusInPage(page, '.definition-edit[data-name="reviewer"]');
 		await page.keyboard.press("Enter");
 		await waitForAgentSheet(page, false);
 		const inside = await waitFor(
 			"focus inside the editor",
 			() => focusProbe(page),
-			(probe) => (probe?.id ?? "") === "definition-changes",
+			(probe) => (probe?.id ?? "") === "definition-body",
 		);
-		expect(inside?.id).toBe("definition-changes");
+		expect(inside?.id).toBe("definition-body");
 
 		// The editor is a labelled dialog, so a screen-reader user is told
 		// which agent they are editing rather than "dialog".
@@ -1944,7 +1943,7 @@ describe("membership controls", () => {
 // ── Operations panel (T-1605) ────────────────────────────────────────────────
 
 /**
- * Kill, inject, logs tail, and budget bump, driven from the browser.
+ * Kill, inject, and logs tail, driven from the browser.
  *
  * Every one of these runs keyboard-only — Tab to reach the control, Enter to
  * activate it — because an operator surface that needs a pointer is one an
@@ -2153,45 +2152,6 @@ describe("operations panel", () => {
 			tail.indexOf("turn 1: answered"),
 		);
 		expect(await page.$eval("#ops-logs-output", (n) => n.tagName)).toBe("PRE");
-		expect(errors).toEqual([]);
-	});
-
-	browserTest("a bump renders the new ceiling", async () => {
-		const h = await harness();
-		await h.ensureRoom("#reviews");
-		await h.registerPeer("spender", ["#reviews"], {
-			accountId: "acct-metered",
-			mode: "metered",
-			budgetUsd: 5,
-		});
-
-		const { page, errors } = await openPage();
-		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
-		await openAgentTab(page, "Accounts");
-		await page.waitForSelector(
-			'#ops-accounts .ops-account[data-account="acct-metered"]',
-		);
-
-		await focusInPage(
-			page,
-			'#ops-accounts .ops-account[data-account="acct-metered"] .ops-bump-input',
-		);
-		await page.keyboard.type("42");
-		await page.keyboard.press("Enter");
-
-		// The ceiling repaints from the budget frame (T-1604), not a poll.
-		const ceiling = await waitFor(
-			"the new ceiling",
-			() =>
-				page
-					.$eval(
-						'#ops-accounts .ops-account[data-account="acct-metered"] .ops-budget',
-						(node) => node.textContent ?? "",
-					)
-					.catch(() => ""),
-			(text) => text.includes("42"),
-		);
-		expect(ceiling).toContain("42");
 		expect(errors).toEqual([]);
 	});
 
@@ -4006,7 +3966,7 @@ describe("accessibility", () => {
 	);
 
 	browserTest(
-		"appearance preserves drafts and restores the selected palette and mode",
+		"appearance preserves drafts and restores the selected theme and mode",
 		async () => {
 			const h = await harness();
 			await h.ensureRoom("#reviews");
@@ -4019,8 +3979,8 @@ describe("accessibility", () => {
 				(node) => getComputedStyle(node).backgroundColor,
 			);
 			await page.click('[aria-label="Appearance"]');
-			await page.type('[aria-label="Search color palettes"]', "Catppuccin");
-			await page.click('aria/Catppuccin[role="button"]');
+			await page.type('[aria-label="Search color palettes"]', "Ochin");
+			await page.click('aria/Ochin[role="button"]');
 			await page.click('aria/Dark[role="button"]');
 			await page.keyboard.press("Escape");
 			expect(
@@ -4048,9 +4008,9 @@ describe("accessibility", () => {
 					node.getAttribute("aria-pressed"),
 				),
 			).toBe("true");
-			await page.type('[aria-label="Search color palettes"]', "Catppuccin");
+			await page.type('[aria-label="Search color palettes"]', "Ochin");
 			expect(
-				await page.$eval('aria/Catppuccin[role="button"]', (node) =>
+				await page.$eval('aria/Ochin[role="button"]', (node) =>
 					node.getAttribute("aria-pressed"),
 				),
 			).toBe("true");

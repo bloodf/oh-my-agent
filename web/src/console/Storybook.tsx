@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bot, Menu, Users } from "lucide-react";
+import { Bot, ChevronDown, Folder, Menu, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -20,7 +20,10 @@ import { CreateChannelDialog, type ConsoleCall } from "./CreateChannelDialog";
 import { PlansView } from "./PlansView";
 import { ThreadPanel } from "./ThreadPanel";
 import { Transcript } from "./Transcript";
-import { WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
+import { AvatarTile, WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
+import { EMPTY_PROFILE, ProfileContext, type Profile } from "./profile";
+
+const PROFILE: Profile = { ...EMPTY_PROFILE, operator: { displayName: "Heitor", avatar: "🧭" }, agents: { researcher: { avatar: "🔬" } } };
 
 const NOW = Date.UTC(2026, 8, 4, 14, 30);
 const ROOMS: RoomInfo[] = [
@@ -159,6 +162,8 @@ function useFixtureCall(): ConsoleCall {
           { file: "/workspace/oh-my-agent/plans/release-checklist.html", url: "http://127.0.0.1:4387/s/def", status: "open", pendingPrompts: 0, updatedAt: new Date(NOW - 7_200_000).toISOString() },
         ],
       };
+    if (path === "/api/models") return { models: [{ provider: "durindoor", id: "cx/gpt-5.6-sol" }, { provider: "durindoor", id: "cc/claude-opus-5" }] };
+    if (path === "/api/presets") return { presets: [] };
     if (path === "/api/profile") return { profile: { operator: { displayName: "Heitor", avatar: "🧭" }, agents: { researcher: { avatar: "🔬" } } } };
     if (path.startsWith("/api/workspace/changes"))
       return {
@@ -201,13 +206,28 @@ function useFixtureCall(): ConsoleCall {
       };
     if (path.endsWith("/definition"))
       return {
+        name: "researcher",
+        filePath: "/home/op/.omp/agents/researcher.md",
         definition: {
           name: "researcher",
           description: "Investigates repository behavior",
+          model: ["durindoor/cx/gpt-5.6-sol", "durindoor/cc/claude-opus-5"],
+          thinkingLevel: "high",
+          tools: ["read", "edit", "bash"],
           spawns: ["reviewer"],
-          body: "Work from evidence. Keep changes narrow.",
+          body: "# Researcher\n\nWork from evidence. Keep changes **narrow**.\n\n- Reproduce first\n- Hand off with proof",
+          workspace: "/workspace/oh-my-agent",
+          rooms: ["#research", "@reviewer"],
+          wake: { mention: true, rooms: false },
+          heartbeat: { every: "15m", prompt: "Check your rooms and plans." },
+          autonomy: { maxTurns: 40 },
+          sandbox: { enabled: true, extraRoots: ["/tmp/scratch"] },
+          mcps: ["github"],
+          skills: ["tdd"],
+          schedules: [{ cron: "0 9 * * 1-5", prompt: "Post the daily status", room: "#research" }],
         },
       };
+    if (path === "/api/channels") return { channels: ROOMS };
     if (path.includes("/rooms")) return { notice: "Membership updated." };
     if (path.endsWith("/inject")) return { name: "researcher", queued: false };
     if (path.includes("/bump")) return { account: "durindoor", budgetUsd: 12 };
@@ -240,9 +260,13 @@ function StoryFrame({
   const [agentOpen, setAgentOpen] = useState(false);
   const [botOpen, setBotOpen] = useState(false);
   const call = useFixtureCall();
-  const rail = (
+  const current = ROOMS.find((candidate) => candidate.id === room);
+  const members = AGENTS.filter((agent) => agent.rooms?.includes(room));
+  const rail = (onClose?: () => void) => (
     <ChannelRail
+      resizable={!onClose}
       rooms={ROOMS}
+      agents={AGENTS}
       chats={[{ id: "chat-1", title: "Resolver investigation", cwd: "/workspace/oh-my-agent" }]}
       current={room}
       unread={new Set(["#operations"])}
@@ -252,36 +276,43 @@ function StoryFrame({
       onNewRoom={() => setChannelOpen(true)}
       onNewAgent={() => setAgentOpen(true)}
       onNewBot={() => setBotOpen(true)}
-      onClose={() => setMobileNav(false)}
+      onClose={onClose}
       connected={connected}
     />
   );
   return (
+    <ProfileContext.Provider value={PROFILE}>
     <div className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
       <WorkspaceToolbar onSearch={noop} onProfile={noop} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <WorkspaceNavigation onConversations={noop} onAgents={() => setAgentsOpen(true)} onNewChat={noop} />
-        <div className="hidden border-r md:block">{rail}</div>
+        <WorkspaceNavigation onConversations={noop} onAgents={() => setAgentsOpen(true)} onNewChat={noop} connected={connected} />
+        <div className="hidden md:block">{rail()}</div>
         <main id="main" className="flex min-w-0 flex-1 flex-col">
-          <header id="current-channel" role="banner" className="flex min-h-14 items-center gap-3 border-b px-3 md:px-5">
+          <header id="current-channel" role="banner" className="channel-header @container/header flex h-[49px] min-w-0 shrink-0 items-center gap-1 pr-3 pl-2 sm:pr-4 sm:pl-3">
             <Button type="button" className="md:hidden" variant="ghost" size="icon-sm" aria-label="Open navigation" onClick={() => setMobileNav(true)}><Menu /></Button>
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-base font-bold">{room}</h1>
-              <p className="truncate text-[11px] text-muted-foreground">Shared room · 2 active agents</p>
+            <div className="flex min-w-0 flex-1 items-center gap-0.5">
+              <h1 className="flex min-w-0 items-baseline truncate px-1.5 text-[18px] leading-7 font-black tracking-[-0.01em]"><span className="mr-0.5 font-bold text-muted-foreground">{room[0]}</span><span className="truncate">{room.slice(1)}</span></h1>
+              {current?.kind === "channel" && <Button type="button" variant="ghost" size="icon-xs" className="rounded-md text-muted-foreground hover:bg-[var(--surface-hover)]" aria-label="Edit channel workspace" title="Edit channel workspace" onClick={noop}><ChevronDown className="size-4" /></Button>}
             </div>
-            <Button id="open-agents" variant="outline" size="sm" onClick={() => setAgentsOpen(true)}><Users /><span className="hidden sm:inline">Agents</span></Button>
+            <Button id="open-agents" variant="outline" size="sm" title="Agents in this workspace" className="h-7 shrink-0 gap-1.5 rounded-md pr-2 pl-1 shadow-xs" onClick={() => setAgentsOpen(true)}>
+              <span aria-hidden className="hidden -space-x-1.5 @[20rem]/header:flex">{members.slice(0, 3).map((agent) => <AvatarTile key={agent.name} author={agent.name} className="size-6 bg-muted text-[17px] text-foreground ring-2 ring-background" />)}</span><Users aria-hidden className="@[20rem]/header:hidden" />
+              <span className="sr-only">Agents</span>
+              <span className="text-[13px] font-semibold">{AGENTS.length}</span>
+            </Button>
           </header>
-          <div className="border-b px-4 py-2 md:px-6">
-            <Tabs value={view} onValueChange={(next) => setView(next as typeof view)}>
-              <TabsList variant="line">
+          <div className="@container/tabs flex h-9 min-w-0 shrink-0 items-center gap-3 border-b pr-3 pl-2 sm:pr-4 sm:pl-3">
+            <Tabs value={view} onValueChange={(next) => setView(next as typeof view)} className="h-full min-w-0 overflow-x-auto overscroll-x-contain [scrollbar-width:none]">
+              <TabsList variant="line" className="h-full">
                 <TabsTrigger value="conversation">Conversation</TabsTrigger>
                 <TabsTrigger value="plans">Plans</TabsTrigger>
                 <TabsTrigger value="changes">Changes</TabsTrigger>
                 <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
               </TabsList>
             </Tabs>
+            <span className="flex-1" />
+            <span title={current?.workspace} className="hidden h-6 max-w-[45%] min-w-0 shrink-[999] items-center gap-1.5 rounded-md bg-muted px-2 text-[12px] text-muted-foreground @[34rem]/tabs:flex"><Folder aria-hidden className="size-3.5 shrink-0" /><span className="truncate">{current?.workspace ?? "Daemon working directory"}</span></span>
           </div>
-          <div className="flex min-h-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1">
             {view === "conversation" ? <>
               <div className="flex min-w-0 flex-1 flex-col">
                 <Transcript messages={messages} status={status} statusDetail={status === "offline" ? "Connection to the daemon was lost." : status === "load-failure" ? "The room history request failed." : ""} currentRoom={room} onThread={setThread} onReact={noopAsync} onRetry={noopAsync} />
@@ -293,13 +324,14 @@ function StoryFrame({
         </main>
       </div>
       <Sheet open={mobileNav} onOpenChange={setMobileNav}>
-        <SheetContent side="left" className="w-[260px] p-0"><SheetTitle className="sr-only">Conversations</SheetTitle><SheetDescription className="sr-only">Switch rooms and chats</SheetDescription>{mobileNav && rail}</SheetContent>
+        <SheetContent side="left" showCloseButton={false} className="workspace-drawer w-[260px] gap-0 border-0 bg-[var(--ws-sidebar)] p-0 data-[side=left]:w-[260px] data-[side=left]:border-r-0 data-[side=left]:sm:max-w-[260px]"><SheetTitle className="sr-only">Conversations</SheetTitle><SheetDescription className="sr-only">Switch rooms and chats</SheetDescription>{mobileNav && rail(() => setMobileNav(false))}</SheetContent>
       </Sheet>
       <AgentPanel open={agentsOpen} onOpenChange={setAgentsOpen} agents={AGENTS} currentRoom={room} call={call} onRefresh={noopAsync} onNotice={noop} />
       <CreateChannelDialog open={channelOpen} onOpenChange={setChannelOpen} call={call} onCreated={setRoom} onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")} />
       <CreateAgentDialog open={agentOpen} onOpenChange={setAgentOpen} call={call} onCreated={noop} onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")} />
       <CreateAgentDialog open={botOpen} onOpenChange={setBotOpen} call={call} onCreated={noop} initialKind="bot" onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")} />
     </div>
+    </ProfileContext.Provider>
   );
 }
 
@@ -341,6 +373,7 @@ function AgentStory({
     });
   }, [initialTab, open]);
   return (
+    <ProfileContext.Provider value={PROFILE}>
     <ComponentStage title="Agent controls">
       <div className="grid min-h-[34rem] place-items-center">
         <Button id="open-agents" onClick={() => setOpen(true)}>
@@ -358,6 +391,7 @@ function AgentStory({
         onNotice={noop}
       />
     </ComponentStage>
+    </ProfileContext.Provider>
   );
 }
 
@@ -365,6 +399,7 @@ function DialogStory({ agent, bot }: { agent?: boolean; bot?: boolean }) {
   const call = useFixtureCall();
   const [open, setOpen] = useState(true);
   return (
+    <ProfileContext.Provider value={PROFILE}>
     <ComponentStage title={bot ? "Automated bot creation" : agent ? "Agent creation" : "Channel creation"}>
       <div className="grid min-h-[34rem] place-items-center">
         <Button
@@ -393,6 +428,7 @@ function DialogStory({ agent, bot }: { agent?: boolean; bot?: boolean }) {
         />
       )}
     </ComponentStage>
+    </ProfileContext.Provider>
   );
 }
 

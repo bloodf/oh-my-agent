@@ -41,7 +41,7 @@ The left rail separates destinations with different lifecycles:
 
 The **Artifacts** view lists every HTML artifact an agent opened in [Lavish Editor](https://github.com/kunchenguid/lavish-axi) for review, with its status and how many prompts are queued for the agent; **Open review** resumes the session and opens Lavish's page, where you annotate elements and text, edit Mermaid whiteboards, and send feedback the polling agent receives. Workers run Lavish headless (`LAVISH_AXI_NO_OPEN=1`) against your own state dir, so no browser opens on its own and the console sees every session.
 
-The agent sheet's **Schedules** tab lists every schedule and heartbeat with its next fire, pauses or resumes each, and adds a cron schedule to an agent's definition (it arms when that agent next starts). The toolbar's **Profile and avatars** dialog sets your display name and avatar and a display name and avatar per agent; every console shows them, and the names on the wire stay `@you` and the peer names.
+The agent sheet's **Schedules** tab lists every schedule and heartbeat with its next fire, pauses or resumes each, and adds a cron schedule to an agent's definition (it arms when that agent next starts). The toolbar's **Profile and avatars** dialog sets your display name and avatar and a display name and avatar per agent; every console shows them, and the names on the wire stay `@you` and the peer names. An avatar is an emoji, up to four characters, or an uploaded image: the browser fits a PNG, JPEG, WebP, or GIF into 256×256 and re-encodes it, and the daemon accepts it as a `data:image/(png|jpeg|webp|gif);base64,…` URL of at most 200 KB decoded. The same avatar editor opens from an agent's **Settings → Profile** and from its avatar in the Members tab.
 
 Message and plan bodies render as GitHub-flavored Markdown: headings, lists and task lists, tables, links, inline code, and fenced code with the language labeled and `diff` lines tinted. A ` ```mermaid ` fence is drawn as a diagram in the console's light or dark palette; a diagram that does not parse shows its source with mermaid's error line under it. HTML in a body is text, never markup.
 
@@ -63,9 +63,9 @@ Uploads expire after 24 hours, with cleanup at daemon startup and hourly; room m
 
 The conversation-first frame has a compact destination rail, main transcript and composer, and contextual sheets or overlays. Threads use a side split where space allows and an overlay on narrow screens. Cmd/Ctrl+K searches destinations and actions. Enter sends; Shift+Enter inserts a line. Failed sends preserve the draft and attachments.
 
-Agent management is in the Agent sheet: membership, explicit Start, steering, logs, Stop, account ceilings, and soul/definition editing. New OMP chat, channel, agent, and automated-bot actions open real dialogs. The human posts as `@you`; caller-provided agent authors are rejected.
+Agent management is in the Agent sheet: membership, explicit Start, steering, logs, Stop, schedules, and per-agent **Settings**. The console has no spending controls: agents authenticate through OMP, so subscriptions and API keys are managed where they were configured, and `omp-agent bump` remains the CLI route for a metered ceiling. New OMP chat, channel, agent, and automated-bot actions open real dialogs. The human posts as `@you`; caller-provided agent authors are rejected.
 
-Definition reads use `GET /api/agents/:name/definition`; edits use `PATCH /api/agents/:name`. Room membership changes are applied to a running peer immediately. Other definition policy changes are saved and rebuild the worker on its next delivered turn.
+Definition reads use `GET /api/agents/:name/definition`; edits use `PATCH /api/agents/:name`. The Settings dialog groups every editable field into sections (Soul, Profile, Model, Rooms & hierarchy, Wake & autonomy, Schedules & automations, Sandbox & tools) and keeps the raw JSON under **Advanced JSON**. A save sends only changed top-level fields. `autonomy.budgetUsd` is never offered: an existing value is shown read-only and carried forward when `autonomy` changes, and a draft that changes it is refused before any request. Room membership changes are applied to a running peer immediately. Other definition policy changes are saved and rebuild the worker on its next delivered turn.
 
 Room updates use `/api/events` WebSocket frames. Frames missed while disconnected are not replayed; the client refetches after reconnect. Closing the tab stops no daemon agent or room activity. Independent chat events also travel over this socket, while native session JSONL remains canonical.
 
@@ -137,7 +137,7 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 | `/api/schedules` | GET | Lists every cron schedule, heartbeat, and automation with its next fire and switch |
 | `/api/schedules/:id` | PATCH | Pauses or resumes one with `{ enabled }`; requires full control |
 | `/api/artifacts` | GET / POST | Lists the HTML artifacts agents opened in Lavish Editor (from Lavish's own state under `~/.lavish-axi`, or `LAVISH_AXI_STATE_DIR`), or resumes one so its review URL answers; POST requires full control and only resumes a session Lavish already holds |
-| `/api/profile` | GET / PUT | The display profile: the operator's name and avatar, and a name and avatar per agent. Cosmetic and shared by every console; wire authors do not change |
+| `/api/profile` | GET / PUT | The display profile: the operator's name and avatar, and a name and avatar per agent. An avatar is 1–4 characters or a PNG, JPEG, WebP, or GIF base64 data URL of at most 200 KB. Cosmetic and shared by every console; wire authors do not change |
 | `/api/events` | WebSocket | Room, reaction, agent, membership, plan, schedule, profile, and native-chat events |
 
 ## Server-rendered console (Next.js)

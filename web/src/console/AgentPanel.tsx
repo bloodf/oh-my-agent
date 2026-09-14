@@ -1,15 +1,14 @@
 import {
   Bot,
-  FilePenLine,
   MessageCircle,
   Play,
   ScrollText,
   Send,
+  Settings,
   Square,
 } from "lucide-react";
 import { useState } from "react";
 import { SchedulesTab } from "./SchedulesTab";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -25,14 +24,38 @@ import type { AgentInfo } from "@/lib/types";
 import type { ConsoleCall } from "./CreateChannelDialog";
 import { DefinitionDialog } from "./DefinitionDialog";
 import { KillDialog } from "./KillDialog";
+import { AvatarDialog } from "./definition/AvatarEditor";
+import { personaFor, useProfile } from "./profile";
+import { AvatarTile } from "./WorkspaceToolbar";
+
+/** Slack's green primary action, used for every confirm in the agent sheet. */
+const SEND_BUTTON = "bg-[var(--send)] text-white hover:bg-[var(--send-hover)] focus-visible:ring-[var(--send)]/40";
+/** Row actions grow to a 44px touch target on narrow screens. */
+const TOUCH = "max-sm:h-11 max-sm:px-3";
+const SECTION_LABEL = "text-[13px] font-bold text-muted-foreground";
+
+const PRESENCE: Record<string, string> = {
+  running: "bg-[var(--presence-active)]",
+  parked: "bg-[var(--presence-parked)]",
+};
+
+/** Slack-style state pill: coloured dot plus the daemon's own state word. */
+function StatePill({ state }: { state: string }) {
+  return (
+    <span className="agent-state inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full border border-border bg-background px-2 text-xs font-semibold text-muted-foreground">
+      <span aria-hidden className={`size-2 rounded-full ${PRESENCE[state] ?? "bg-[var(--presence-stopped)]"}`} />
+      {state}
+    </span>
+  );
+}
 
 /**
- * Purpose: Present room membership, agent operations, account bumps, and definition editing.
+ * Purpose: Present room membership, agent operations, schedules, avatars, and agent settings.
  * Public API: AgentPanel and AgentPanelProps.
  * Upstream deps: shadcn Sheet/Tabs controls, AgentInfo, and console API operations.
  * Downstream consumers: ConsoleShell contextual agent action.
  * Failure modes: operation errors render in #ops-error; failed forms retain drafts.
- * Performance: linear rendering over agents and their account IDs.
+ * Performance: linear rendering over agents.
  */
 
 export type AgentPanelProps = {
@@ -60,13 +83,14 @@ export function AgentPanel({
 }: AgentPanelProps) {
   const [definitionTarget, setDefinitionTarget] = useState<string | null>(null);
   const [killTarget, setKillTarget] = useState<string | null>(null);
+  const [avatarTarget, setAvatarTarget] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("members");
   const [injectDrafts, setInjectDrafts] = useState<Record<string, string>>({});
   const [logs, setLogs] = useState("");
-  const [budgets, setBudgets] = useState<Record<string, number>>({});
   const [logsTitle, setLogsTitle] = useState("Logs");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const profile = useProfile();
   const restoreFocus = (selector: string) => {
     requestAnimationFrame(() =>
       requestAnimationFrame(() =>
@@ -74,13 +98,6 @@ export function AgentPanel({
       ),
     );
   };
-  const accounts = [
-    ...new Set(
-      agents
-        .map((agent) => agent.account)
-        .filter((account): account is string => Boolean(account)),
-    ),
-  ];
 
   const membership = (agent: AgentInfo) => {
     if (!currentRoom) return;
@@ -112,75 +129,88 @@ export function AgentPanel({
   return (
     <>
       <Sheet
-        open={open && definitionTarget === null && killTarget === null}
+        open={open && definitionTarget === null && killTarget === null && avatarTarget === null}
         onOpenChange={onOpenChange}
       >
         <SheetContent
-          className="w-full! max-w-full! gap-0 sm:max-w-md!"
+          className="w-full! max-w-full! gap-0 sm:max-w-[30rem]!"
           onCloseAutoFocus={(event) => {
-            if (definitionTarget !== null || killTarget !== null) event.preventDefault();
+            if (definitionTarget !== null || killTarget !== null || avatarTarget !== null) event.preventDefault();
           }}
         >
-          <SheetHeader className="border-b">
+          <SheetHeader className="h-[49px] shrink-0 border-b">
             <SheetTitle>Agents</SheetTitle>
-            <SheetDescription>
-              Membership, live operations, and account controls.
+            <SheetDescription className="sr-only">
+              Membership, live operations, and schedules.
             </SheetDescription>
           </SheetHeader>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="min-h-0 flex-1 gap-0">
-            <TabsList variant="line" className="mx-4 mt-2 w-[calc(100%-2rem)]">
+            <TabsList variant="line" className="h-10! w-full shrink-0 justify-start gap-2 border-b px-3">
               <TabsTrigger value="members">Members</TabsTrigger>
               <TabsTrigger value="operations">Operations</TabsTrigger>
-              <TabsTrigger value="accounts">Accounts</TabsTrigger>
               <TabsTrigger value="schedules">Schedules</TabsTrigger>
             </TabsList>
-            <TabsContent value="schedules" className="p-4 pt-3">
-              <SchedulesTab call={call} agents={agents} onNotice={onNotice} />
-            </TabsContent>
             <ScrollArea className="min-h-0 flex-1">
-              <TabsContent value="members" className="p-4 pt-3">
-                <p className="mb-3 text-xs text-muted-foreground">
+              <TabsContent value="schedules" className="px-5 py-4">
+                <SchedulesTab call={call} agents={agents} onNotice={onNotice} />
+              </TabsContent>
+              <TabsContent value="members" className="px-3 py-4">
+                <p className={`mb-2 px-2 ${SECTION_LABEL}`}>
                   {currentRoom
                     ? `Membership in ${currentRoom}`
                     : "Select a room to change membership."}
                 </p>
-                <ul id="agents" className="space-y-1.5">
+                <ul id="agents" className="grid gap-0.5">
                   {agents.map((agent) => {
                     const member = currentRoom
                       ? (agent.rooms ?? []).includes(currentRoom)
                       : false;
+                    const persona = personaFor(profile, agent.name);
                     return (
                       <li
                         key={agent.name}
-                        className="agent flex min-h-11 flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2"
+                        className="agent flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--surface-hover)]"
                         data-name={agent.name}
                       >
-                        <div className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
-                          <div className="flex items-center gap-1.5 truncate text-sm font-medium">
-                            {agent.automation && <Bot className="size-3.5 shrink-0" aria-label="Automated bot" />}
-                            <span className="truncate">{agent.name}</span>
+                        <button
+                          type="button"
+                          className="member-avatar grid size-7 shrink-0 place-items-center rounded-md text-[22px] outline-none focus-visible:ring-2 focus-visible:ring-ring/60 max-sm:size-11"
+                          data-name={agent.name}
+                          aria-label={`Change ${persona.name} avatar`}
+                          title="Change avatar"
+                          onClick={() => setAvatarTarget(agent.name)}
+                        >
+                          <AvatarTile author={agent.name} className="size-7 border border-border bg-muted text-foreground" />
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-2">
+                            {agent.automation && <Bot className="size-3.5 shrink-0 text-muted-foreground" aria-label="Automated bot" />}
+                            <span className="truncate text-[15px] font-bold">{agent.name}</span>
+                            <StatePill state={agent.state} />
                           </div>
-                          <div className="text-xs text-muted-foreground">
-                            {agent.state}{agent.automation ? ` · Bot${agent.automation.wakeRooms ? " · message wake" : ""}${agent.automation.schedules.length ? ` · ${agent.automation.schedules.join(", ")}` : ""}` : " · Agent"}
+                          <div className="truncate text-[13px] text-muted-foreground">
+                            {agent.automation ? `Bot${agent.automation.wakeRooms ? " · message wake" : ""}${agent.automation.schedules.length ? ` · ${agent.automation.schedules.join(", ")}` : ""}` : "Agent"}
                           </div>
                         </div>
+                        <div className="flex basis-full flex-wrap items-center justify-end gap-1 pl-10 sm:basis-auto sm:pl-0">
                         <Button
                           type="button"
                           size="xs"
                           variant="ghost"
-                          className="definition-edit"
+                          className={`definition-edit ${TOUCH}`}
                           data-name={agent.name}
-                          aria-label={`Edit ${agent.name} soul and definition`}
+                          aria-label={`${agent.name} settings`}
                           onClick={() => setDefinitionTarget(agent.name)}
                         >
-                          <FilePenLine />
-                          Soul & definition
+                          <Settings />
+                          Settings
                         </Button>
                         {onDirectMessage ? (
                           <Button
                             type="button"
                             size="xs"
                             variant="ghost"
+                            className={TOUCH}
                             disabled={busy !== null}
                             onClick={() => {
                               setError("");
@@ -203,11 +233,11 @@ export function AgentPanel({
                         <Button
                           type="button"
                           size="xs"
-                          variant={member ? "secondary" : "outline"}
+                          variant={member ? "outline" : "default"}
                           className={
                             member
-                              ? "membership-toggle member"
-                              : "membership-toggle"
+                              ? `membership-toggle member ${TOUCH}`
+                              : `membership-toggle ${TOUCH} ${SEND_BUTTON}`
                           }
                           data-member={String(member)}
                           disabled={!currentRoom || busy !== null}
@@ -215,30 +245,32 @@ export function AgentPanel({
                         >
                           {member ? "Leave" : "Join"}
                         </Button>
+                        </div>
                       </li>
                     );
                   })}
                 </ul>
               </TabsContent>
 
-              <TabsContent id="ops" value="operations" aria-label="Operations" className="p-4 pt-3">
-                <ul id="ops-agents" className="space-y-3">
+              <TabsContent id="ops" value="operations" aria-label="Operations" className="px-5 py-4">
+                <ul id="ops-agents" className="grid gap-3">
                   {agents.map((agent) => (
                     <li
                       key={agent.name}
                       className="ops-agent rounded-lg border bg-card p-3"
                       data-name={agent.name}
                     >
-                      <div className="ops-name flex items-center justify-between">
-                        <span className="font-medium">{agent.name}</span>
-                        <Badge variant="outline">{agent.state}</Badge>
+                      <div className="ops-name flex items-center gap-3">
+                        <span className="text-[22px] leading-none"><AvatarTile author={agent.name} className="size-7 border border-border bg-muted text-foreground" /></span>
+                        <span className="min-w-0 flex-1 truncate text-[15px] font-bold">{agent.name}</span>
+                        <StatePill state={agent.state} />
                       </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
+                      <div className="mt-3 flex flex-wrap gap-1.5">
                         <Button
                           type="button"
                           size="xs"
-                          variant="destructive"
-                          className="ops-kill"
+                          variant="outline"
+                          className={`ops-kill ${TOUCH} border-destructive/40 text-destructive hover:bg-destructive hover:text-white dark:hover:bg-destructive dark:hover:text-[#1a1d21]`}
                           disabled={agent.state === "stopped"}
                           onClick={() => {
                             setActiveTab("operations");
@@ -252,8 +284,8 @@ export function AgentPanel({
                           <Button
                             type="button"
                             size="xs"
-                            variant="secondary"
-                            className="ops-start"
+                            variant="outline"
+                            className={`ops-start ${TOUCH}`}
                             disabled={busy !== null || !fullControl}
                             title={fullControl ? "Start agent" : "Full control disabled remotely"}
                             onClick={() => {
@@ -274,7 +306,7 @@ export function AgentPanel({
                           type="button"
                           size="xs"
                           variant="outline"
-                          className="ops-logs"
+                          className={`ops-logs ${TOUCH}`}
                           onClick={() => {
                             setError("");
                             setBusy(`logs:${agent.name}`);
@@ -309,13 +341,13 @@ export function AgentPanel({
                           type="button"
                           size="xs"
                           variant="ghost"
-                          className="definition-edit"
+                          className={`definition-edit ${TOUCH}`}
                           data-name={agent.name}
-                          aria-label={`Edit ${agent.name} soul and definition`}
+                          aria-label={`${agent.name} settings`}
                           onClick={() => setDefinitionTarget(agent.name)}
                         >
-                          <FilePenLine />
-                          Soul & definition
+                          <Settings />
+                          Settings
                         </Button>
                       </div>
                       <form
@@ -367,7 +399,7 @@ export function AgentPanel({
                         <Button
                           type="submit"
                           size="icon"
-                          variant="secondary"
+                          className={`size-9 max-sm:size-11 ${SEND_BUTTON}`}
                           disabled={busy !== null}
                           aria-label={`Send instruction to ${agent.name}`}
                         >
@@ -379,7 +411,7 @@ export function AgentPanel({
                 </ul>
                 <h2
                   id="ops-logs-title"
-                  className="mt-2 text-xs font-medium text-muted-foreground"
+                  className={`mt-5 ${SECTION_LABEL}`}
                 >
                   {logsTitle}
                 </h2>
@@ -387,98 +419,18 @@ export function AgentPanel({
                   id="ops-logs-output"
                   role="log"
                   aria-live="polite"
-                  className="mt-2 max-h-52 min-h-20 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre-wrap"
+                  className="mt-2 max-h-64 min-h-24 overflow-auto rounded-lg border border-black/40 bg-[#1d1c1d] p-3 font-mono text-xs leading-5 whitespace-pre-wrap text-[#e8e8e8] dark:border-white/10 dark:bg-[#0e0f11]"
                 >
                   {logs}
                 </pre>
               </TabsContent>
 
-              <TabsContent value="accounts" className="p-4 pt-3">
-                <ul id="ops-accounts" className="space-y-2">
-                  {accounts.map((account) => (
-                    <li
-                      key={account}
-                      className="ops-account rounded-lg border bg-card p-3"
-                      data-account={account}
-                    >
-                      <div className="ops-name text-sm font-medium">
-                        {account}
-                      </div>
-                      <div className="ops-budget text-xs text-muted-foreground">
-                        {budgets[account] === undefined ? "Metered account" : `$${budgets[account]}`}
-                      </div>
-                      <form
-                        className="ops-bump mt-3 flex gap-2"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          const input = event.currentTarget.elements.namedItem(
-                            "budget",
-                          ) as HTMLInputElement;
-                          const budgetUsd = Number(input.value);
-                          if (!Number.isFinite(budgetUsd) || budgetUsd <= 0) {
-                            setError("Budget must be a positive number.");
-                            return;
-                          }
-                          setError("");
-                          setBusy(`bump:${account}`);
-                          void call(
-                            `/api/accounts/${encodeURIComponent(account)}/bump`,
-                            { method: "POST", body: { budgetUsd } },
-                          )
-                            .then(async (result) => {
-                              const appliedBudget = Number(result.budgetUsd);
-                              if (Number.isFinite(appliedBudget)) {
-                                setBudgets((current) => ({ ...current, [account]: appliedBudget }));
-                              }
-                              input.value = "";
-                              onNotice(
-                                `Raised ${String(result.account ?? account)} to $${String(result.budgetUsd)}.`,
-                              );
-                              await onRefresh();
-                            })
-                            .catch((cause) =>
-                              setError(
-                                cause instanceof Error
-                                  ? cause.message
-                                  : String(cause),
-                              ),
-                            )
-                            .finally(() => setBusy(null));
-                        }}
-                      >
-                        <Input
-                          name="budget"
-                          aria-label={`New budget for ${account}`}
-                          className="ops-bump-input"
-                          type="number"
-                          min="0.01"
-                          step="any"
-                          placeholder="New USD ceiling"
-                        />
-                        <Button
-                          type="submit"
-                          size="sm"
-                          disabled={busy !== null}
-                        >
-                          Raise
-                        </Button>
-                      </form>
-                    </li>
-                  ))}
-                </ul>
-                <p
-                  role="alert"
-                  className="mt-3 min-h-5 text-xs text-destructive"
-                >
-                  {error}
-                </p>
-              </TabsContent>
             </ScrollArea>
           </Tabs>
           <p
             id="ops-error"
             role="alert"
-            className="border-t px-4 py-2 text-xs text-destructive"
+            className="border-t px-5 py-2 text-[13px] text-destructive empty:hidden"
           >
             {error}
           </p>
@@ -496,6 +448,20 @@ export function AgentPanel({
         name={definitionTarget}
         call={call}
         onRefresh={onRefresh}
+        onNotice={onNotice}
+        agents={agents}
+        fullControl={fullControl}
+      />
+      <AvatarDialog
+        key={avatarTarget ?? "avatar-closed"}
+        name={avatarTarget}
+        onOpenChange={(next) => {
+          if (next || avatarTarget === null) return;
+          const selector = `.member-avatar[data-name="${CSS.escape(avatarTarget)}"]`;
+          setAvatarTarget(null);
+          restoreFocus(selector);
+        }}
+        call={call}
         onNotice={onNotice}
       />
       <KillDialog

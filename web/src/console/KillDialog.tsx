@@ -97,7 +97,7 @@ export function KillDialog({
           <label
             id="ops-kill-keep-label"
             htmlFor="ops-kill-keep"
-            className="flex min-h-10 items-center gap-3 rounded-lg border p-3 text-sm"
+            className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border bg-muted/40 px-4 py-3 text-[15px] font-bold transition-colors hover:bg-[var(--surface-hover)]"
           >
             <Checkbox
               id="ops-kill-keep"
@@ -110,7 +110,7 @@ export function KillDialog({
           <p
             id="ops-kill-error"
             role="alert"
-            className="min-h-5 text-xs text-destructive"
+            className="-my-2 min-h-5 text-[13px] text-destructive"
           >
             {error}
           </p>
@@ -119,6 +119,7 @@ export function KillDialog({
               id="ops-kill-cancel"
               type="button"
               variant="outline"
+              className="h-9 px-4 font-bold max-sm:h-11"
               disabled={busy}
               onClick={() => setOpen(false)}
             >
@@ -128,6 +129,7 @@ export function KillDialog({
               id="ops-kill-confirm"
               type="button"
               variant="destructive"
+              className="h-9 bg-destructive px-4 font-bold text-white hover:bg-destructive/90 max-sm:h-11 dark:bg-[#e01e5a] dark:hover:bg-[#e01e5a]/90"
               disabled={busy}
               onClick={() => {
                 if (!name || busy) return;

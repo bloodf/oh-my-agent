@@ -44,3 +44,8 @@ export function personaFor(profile: Profile, author: string): { name: string; av
     avatar: persona?.avatar ?? initials(author),
   };
 }
+
+/** An avatar that is an uploaded image rather than an emoji or initials. */
+export function isImageAvatar(avatar: string | undefined): avatar is string {
+  return typeof avatar === "string" && /^data:image\/(png|jpeg|webp|gif);base64,/.test(avatar);
+}

@@ -14,10 +14,11 @@ import {
   getThemePreference,
   getResolvedThemeMode,
   setThemeMode,
-  setThemePalette,
+  setWorkspaceTheme,
   subscribeTheme,
-  themePalettes,
+  themes,
   type ThemeMode,
+  type WorkspaceTheme,
 } from "@/lib/theme";
 
 const modes: Array<{
@@ -33,7 +34,7 @@ const modes: Array<{
 export function ThemeSelector() {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
-  const theme = useSyncExternalStore(
+  const theme_ = useSyncExternalStore(
     subscribeTheme,
     getThemePreference,
     getThemePreference,
@@ -42,10 +43,8 @@ export function ThemeSelector() {
   const palettes = useMemo(() => {
     const query = filter.trim().toLocaleLowerCase();
     return query.length === 0
-      ? themePalettes
-      : themePalettes.filter(({ name }) =>
-          name.toLocaleLowerCase().includes(query),
-        );
+      ? themes
+      : themes.filter(({ name }) => name.toLocaleLowerCase().includes(query));
   }, [filter]);
 
   return (
@@ -57,31 +56,31 @@ export function ThemeSelector() {
       }}
     >
       <DialogTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" className="min-h-11 min-w-11" aria-label="Appearance">
+        <Button type="button" variant="ghost" size="sm" className="ws-control h-7 min-w-7 px-1.5 hover:bg-[var(--ws-hover-strong)]" aria-label="Appearance" title="Appearance">
           <Palette />
-          <span className="hidden sm:inline">Appearance</span>
+          <span className="hidden text-[13px] lg:inline">Appearance</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="flex max-h-[calc(100svh-1rem)] w-[calc(100%-1rem)] flex-col gap-3 overflow-hidden p-3 sm:max-w-2xl sm:p-4">
+      <DialogContent className="slack-modal flex max-h-[calc(100svh-1rem)] w-[calc(100%-1rem)] flex-col gap-5 overflow-hidden p-5 sm:max-w-2xl sm:p-7">
         <DialogHeader>
-          <DialogTitle>Appearance</DialogTitle>
+          <DialogTitle className="text-[22px] font-black tracking-tight">Appearance</DialogTitle>
           <DialogDescription>
-            Choose a color palette and how light or dark mode follows your device.
+            Pick a sidebar theme and whether messages use a light or dark canvas.
           </DialogDescription>
         </DialogHeader>
 
         <fieldset>
-          <legend className="mb-1.5 text-xs font-medium text-muted-foreground">
-            Mode
+          <legend className="mb-2 text-[13px] font-bold text-foreground">
+            Color mode
           </legend>
-          <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
+          <div className="grid grid-cols-3 gap-1 rounded-lg border bg-muted p-1">
             {modes.map(({ id, name, icon: Icon }) => (
               <Button
                 key={id}
                 type="button"
-                variant={theme.mode === id ? "secondary" : "ghost"}
+                variant={theme_.mode === id ? "secondary" : "ghost"}
                 className="min-h-11"
-                aria-pressed={theme.mode === id}
+                aria-pressed={theme_.mode === id}
                 onClick={() => setThemeMode(id)}
               >
                 <Icon />
@@ -96,7 +95,7 @@ export function ThemeSelector() {
           <Input
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
-            placeholder={`Search ${themePalettes.length} palettes`}
+            placeholder={`Search ${themes.length} themes`}
             aria-label="Search color palettes"
             className="h-10 pl-8"
           />
@@ -105,41 +104,31 @@ export function ThemeSelector() {
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
           {palettes.length === 0 ? (
             <p role="status" className="py-12 text-center text-sm text-muted-foreground">
-              No palettes match “{filter.trim()}”.
+              No themes match “{filter.trim()}”.
             </p>
           ) : (
             <div
               role="group"
-              aria-label={`${themePalettes.length} color palettes`}
-              className="grid grid-cols-1 gap-2 min-[430px]:grid-cols-2 sm:grid-cols-3"
+              aria-label={`${themes.length} sidebar themes`}
+              className="grid grid-cols-1 gap-3 min-[430px]:grid-cols-2 sm:grid-cols-3"
             >
-              {palettes.map((palette) => {
-                const selected = palette.id === theme.palette;
+              {palettes.map((theme) => {
+                const selected = theme.id === theme_.palette;
                 return (
                   <Button
-                    key={palette.id}
+                    key={theme.id}
                     type="button"
                     aria-pressed={selected}
+                    aria-label={theme.name}
                     variant="outline"
-                    className="h-auto min-h-12 justify-start gap-2 px-2 py-2 text-left"
-                    onClick={() => setThemePalette(palette.id)}
+                    className={`h-auto flex-col items-stretch gap-2 rounded-xl p-2 text-left ${selected ? "border-[var(--ring)] ring-2 ring-[var(--ring)]/40" : ""}`}
+                    onClick={() => setWorkspaceTheme(theme.id)}
                   >
-                    <span className="flex shrink-0 -space-x-1" aria-hidden="true">
-                      {["background", "primary", "accent", "foreground"].map(
-                        (key) => (
-                          <span
-                            key={key}
-                            className="size-5 rounded-full border border-black/15 shadow-sm"
-                            style={{ backgroundColor: palette[resolvedMode][key] }}
-                          />
-                        ),
-                      )}
+                    <ThemePreview theme={theme} dark={resolvedMode === "dark"} />
+                    <span className="flex items-center gap-2 px-1 pb-0.5 text-[13px] font-bold">
+                      <span className="min-w-0 flex-1 truncate">{theme.name}</span>
+                      <Check className={selected ? "size-4 opacity-100" : "size-4 opacity-0"} aria-hidden="true" />
                     </span>
-                    <span className="min-w-0 flex-1 truncate">{palette.name}</span>
-                    <Check
-                      className={selected ? "opacity-100" : "opacity-0"}
-                      aria-hidden="true"
-                    />
                   </Button>
                 );
               })}
@@ -148,5 +137,26 @@ export function ThemeSelector() {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** A miniature workspace: rail, sidebar with an active row, and the message canvas. */
+function ThemePreview({ theme, dark }: { theme: WorkspaceTheme; dark: boolean }) {
+  const c = theme.chrome;
+  return (
+    <span aria-hidden="true" className="flex h-20 overflow-hidden rounded-lg border">
+      <span className="w-4 shrink-0" style={{ background: c.rail }} />
+      <span className="flex w-16 shrink-0 flex-col gap-1 p-1.5" style={{ background: `linear-gradient(180deg, ${c.sidebar}, ${c["sidebar-end"]})` }}>
+        <span className="h-1.5 w-9 rounded-sm" style={{ background: c.text, opacity: 0.85 }} />
+        <span className="h-1.5 w-11 rounded-sm" style={{ background: c["text-dim"], opacity: 0.5 }} />
+        <span className="h-2.5 w-full rounded-sm" style={{ background: c.active }} />
+        <span className="h-1.5 w-10 rounded-sm" style={{ background: c["text-dim"], opacity: 0.5 }} />
+      </span>
+      <span className="flex flex-1 flex-col gap-1.5 p-2" style={{ background: dark ? "#1a1d21" : "#ffffff" }}>
+        <span className="flex items-center gap-1"><span className="size-2.5 rounded-sm bg-[#e8912d]" /><span className="h-1.5 w-8 rounded-sm" style={{ background: dark ? "#e8e8e8" : "#1d1c1d" }} /></span>
+        <span className="h-1.5 w-full rounded-sm" style={{ background: dark ? "#35373b" : "#dddddd" }} />
+        <span className="h-1.5 w-3/4 rounded-sm" style={{ background: dark ? "#35373b" : "#dddddd" }} />
+      </span>
+    </span>
   );
 }
