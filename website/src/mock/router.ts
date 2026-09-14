@@ -2,7 +2,7 @@
  * One entry point for every mocked `/api/*` request, independent of the
  * browser: `scripts/mock-smoke.mjs` drives it directly.
  */
-import { DEMO_PASSWORD } from "./demoPassword";
+import { DEMO_TOKEN } from "./demoToken";
 import { type ApiResult, HttpError, type Route } from "./http";
 import { agentRoutes } from "./routes/agents";
 import { roomRoutes } from "./routes/rooms";
@@ -23,7 +23,7 @@ const error = (status: number, code: string, message: string): ApiResult => ({ s
 
 export function hasOperatorToken(headers: Record<string, string>): boolean {
 	const bearer = headers.authorization?.replace(/^Bearer\s+/i, "");
-	return headers["x-operator-token"] === DEMO_PASSWORD || bearer === DEMO_PASSWORD;
+	return headers["x-operator-token"] === DEMO_TOKEN || bearer === DEMO_TOKEN;
 }
 
 export async function handleApi(request: ApiRequest): Promise<ApiResult> {

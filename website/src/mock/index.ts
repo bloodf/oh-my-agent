@@ -6,8 +6,8 @@ import { cancelActivity } from "./activity";
 import { resetDemoData } from "./store";
 import { installDemoTransport } from "./transport";
 
-export { DEMO_PASSWORD } from "./demoPassword";
-export { isDemoAuthenticated, signIn, signOut } from "./session";
+export { DEMO_TOKEN } from "./demoToken";
+export { ensureDemoSession } from "./session";
 
 export function installDemoBackend(): void {
 	installDemoTransport();

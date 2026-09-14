@@ -5,7 +5,7 @@
  */
 import { ensureLive } from "./activity";
 import { subscribe } from "./bus";
-import { DEMO_PASSWORD } from "./demoPassword";
+import { DEMO_TOKEN } from "./demoToken";
 import { handleApi, hasOperatorToken } from "./router";
 import { recordUpload } from "./routes/workspace";
 
@@ -83,7 +83,7 @@ function installWebSocket(): void {
 				return new RealWebSocket(url, protocols) as unknown as DemoEventsSocket;
 			}
 			this.url = target.href;
-			const authorized = target.searchParams.get("token") === DEMO_PASSWORD || target.searchParams.has("ticket");
+			const authorized = target.searchParams.get("token") === DEMO_TOKEN || target.searchParams.has("ticket");
 			setTimeout(() => {
 				if (this.readyState !== 0) return;
 				if (!authorized) {

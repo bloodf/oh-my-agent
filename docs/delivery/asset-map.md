@@ -232,7 +232,6 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `website/src/app/(home)/systems.css` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/app/console/console.css` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/app/console/layout.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
-| `website/src/app/console/login/page.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/app/console/page.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/app/console/review/[id]/page.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/app/globals.css` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
@@ -240,8 +239,6 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `website/src/components/demo/ConsoleApp.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/components/demo/ConsoleClient.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/components/demo/DemoBanner.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
-| `website/src/components/demo/DemoGuard.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
-| `website/src/components/demo/DemoLogin.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/components/home/data.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/components/home/hero/Hero.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/components/home/hero/HeroCanvas.tsx` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
@@ -269,7 +266,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `website/src/mock/activity.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/mock/bus.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/mock/cron.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
-| `website/src/mock/demoPassword.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
+| `website/src/mock/demoToken.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/mock/fixtures/agents.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/mock/fixtures/chats.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |
 | `website/src/mock/fixtures/index.ts` | yes | [T-1701](tasks/T-1701-public-site.md) | — |

@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { DemoGuard } from "@site/components/demo/DemoGuard";
 import "./console.css";
 
 export const metadata: Metadata = {
@@ -9,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function ConsoleLayout({ children }: { children: ReactNode }) {
-	return <DemoGuard>{children}</DemoGuard>;
+	return children;
 }

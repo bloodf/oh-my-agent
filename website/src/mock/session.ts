@@ -1,26 +1,13 @@
-import { DEMO_PASSWORD } from "./demoPassword";
+import { DEMO_TOKEN } from "./demoToken";
 
 /** The key the real console reads its operator token from. */
 export const TOKEN_STORAGE_KEY = "oh-my-agent.operator-token";
 
-export function isDemoAuthenticated(): boolean {
+/** Puts the demo token where the console expects an operator token. */
+export function ensureDemoSession(): void {
 	try {
-		return sessionStorage.getItem(TOKEN_STORAGE_KEY) === DEMO_PASSWORD;
+		sessionStorage.setItem(TOKEN_STORAGE_KEY, DEMO_TOKEN);
 	} catch {
-		return false;
-	}
-}
-
-export function signIn(password: string): boolean {
-	if (password !== DEMO_PASSWORD) return false;
-	sessionStorage.setItem(TOKEN_STORAGE_KEY, DEMO_PASSWORD);
-	return true;
-}
-
-export function signOut(): void {
-	try {
-		sessionStorage.removeItem(TOKEN_STORAGE_KEY);
-	} catch {
-		// Storage can be unavailable; the guard still sends the visitor to login.
+		// Storage can be unavailable; every API call then answers 401 and the console shows it.
 	}
 }

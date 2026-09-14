@@ -1,8 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, KeyRound } from "lucide-react";
-import { DEMO_PASSWORD } from "@site/mock/demoPassword";
-import { CopyButton, Reveal } from "../ui/primitives";
+import { ArrowRight } from "lucide-react";
+import { Reveal } from "../ui/primitives";
 
 
 export default function DemoTeaser() {
@@ -20,13 +19,6 @@ export default function DemoTeaser() {
 						The demo mounts the real console UI from this repository against mock data, so you can click through rooms,
 						agents, and schedules without running a daemon.
 					</p>
-					<div className="demo-pass">
-						<KeyRound size={18} aria-hidden="true" />
-						<span>
-							Password <code>{DEMO_PASSWORD}</code>
-						</span>
-						<CopyButton text={DEMO_PASSWORD} label="Copy" />
-					</div>
 					<Link href="/console" className="btn btn-primary btn-large">
 						Open the console demo <ArrowRight size={18} aria-hidden="true" />
 					</Link>

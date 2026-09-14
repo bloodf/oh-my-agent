@@ -22,7 +22,7 @@ const { cancelActivity } = await import("../src/mock/activity.ts");
 const frames = [];
 subscribe((frame) => frames.push(frame.type));
 
-const TOKEN = { "x-operator-token": "melon" };
+const TOKEN = { "x-operator-token": "demo" };
 const q = encodeURIComponent;
 const PROJECT = "/Users/you/code/quarry";
 

@@ -878,14 +878,15 @@ ADRS += [
             "Add website/, a Next.js app that is not part of the npm package and not served by the daemon. Its "
             "homepage is static. Its /console route mounts the real console from web/src, unchanged, against a "
             "browser-local mock of the daemon's console API: fetch, the events WebSocket, and the upload XHR are "
-            "patched in the browser, state is seeded from fixtures and persisted in localStorage, and a fixed "
-            "demo password gates entry. Nothing under web/ or src/ changes for the demo."
+            "patched in the browser, state is seeded from fixtures and persisted in localStorage, and the demo "
+            "operator token is written into the session before the console mounts, so there is no login. Nothing "
+            "under web/ or src/ changes for the demo."
         ),
         consequences=[
             "The demo drifts from the daemon only when the console API changes; the mock is a route table beside console-api.ts and a smoke script calls every route.",
             "The package still ships zero runtime dependencies; the site's tree lives in website/node_modules only.",
             "Two console layout defects surfaced under realistic data and are patched in the demo's CSS; the upstream fix belongs in web/.",
-            "The demo password is public by design: it is a stage door, not authentication.",
+            "The demo has no login: the mock still refuses requests without the operator token, so the console's auth path runs, but the token is written into the session for every visitor.",
         ],
         alternatives=[
             ("Rebuild the console for the demo", "Doubles every view and drifts on the first change; mounting the real components is what makes the demo honest."),
@@ -1476,7 +1477,7 @@ EPICS = [
         acceptance=[
             "The homepage renders its WebGL scenes lazily, degrades under reduced motion, and has no horizontal overflow at 400px.",
             "Every console view, sheet, tab, and dialog is reachable in the demo and every mutation persists across a reload.",
-            "The demo refuses any password but the documented one.",
+            "The demo opens without a login and still exercises the console's operator-token path.",
             "A smoke script calls every mocked route and reports zero throws.",
         ],
         adrs=["ADR-017"],
@@ -5140,7 +5141,7 @@ TASKS += [
     Task(
         id="T-1701", slug="public-site", title="Public homepage and mocked console demo on Vercel",
         epic="EP-17", sprint="SP-18", status="Done",
-        goal="A Next.js site under website/ hosts a single-page animated homepage at / and, at /console, the real console from web/src mounted against a browser-local mock of the daemon's console API, seeded with agents, accounts, rooms, threads, plans, changes, artifacts, schedules, and chats, gated by a fixed demo password, with every mutation persisted in localStorage. It deploys from the repository to Vercel and stays out of the npm package.",
+        goal="A Next.js site under website/ hosts a single-page animated homepage at / and, at /console, the real console from web/src mounted against a browser-local mock of the daemon's console API, seeded with agents, accounts, rooms, threads, plans, changes, artifacts, schedules, and chats, with every mutation persisted in localStorage. It deploys from the repository to Vercel and stays out of the npm package.",
         read_first=[
             ("The decision", "docs/delivery/adr/ADR-017-public-site.md"),
             ("The console API the mock answers", "src/daemon/console-api.ts"),
@@ -5176,13 +5177,10 @@ TASKS += [
             "website/src/app/console/layout.tsx",
             "website/src/app/console/page.tsx",
             "website/src/app/console/console.css",
-            "website/src/app/console/login/page.tsx",
             "website/src/app/console/review/[id]/page.tsx",
             "website/src/components/demo/ConsoleApp.tsx",
             "website/src/components/demo/ConsoleClient.tsx",
             "website/src/components/demo/DemoBanner.tsx",
-            "website/src/components/demo/DemoGuard.tsx",
-            "website/src/components/demo/DemoLogin.tsx",
             "website/src/components/home/data.ts",
             "website/src/components/home/hero/Hero.tsx",
             "website/src/components/home/hero/HeroCanvas.tsx",
@@ -5209,7 +5207,7 @@ TASKS += [
             "website/src/components/home/sections/Footer.tsx",
             "website/src/shaders/night.ts",
             "website/src/shaders/agents.ts",
-            "website/src/mock/demoPassword.ts",
+            "website/src/mock/demoToken.ts",
             "website/src/mock/index.ts",
             "website/src/mock/session.ts",
             "website/src/mock/types.ts",
@@ -5262,13 +5260,10 @@ TASKS += [
             ("website/src/app/console/layout.tsx", "New", "Loads the console's index.css and wraps pages in the demo guard."),
             ("website/src/app/console/page.tsx", "New", "Mounts the console client-only."),
             ("website/src/app/console/console.css", "New", "Banner offset and two layout fixes for the agent sheet's Schedules tab."),
-            ("website/src/app/console/login/page.tsx", "New", "The demo password screen."),
             ("website/src/app/console/review/[id]/page.tsx", "New", "Stand-in for a Lavish review page the demo cannot open."),
             ("website/src/components/demo/ConsoleApp.tsx", "New", "Installs the mock backend, __omaAsset, and the theme, then renders the console's App, in main.tsx's order."),
             ("website/src/components/demo/ConsoleClient.tsx", "New", "next/dynamic with ssr off."),
-            ("website/src/components/demo/DemoBanner.tsx", "New", "Demo notice with the password on login and reset and log out on the console."),
-            ("website/src/components/demo/DemoGuard.tsx", "New", "Redirects to the login page when the session token is not the demo password."),
-            ("website/src/components/demo/DemoLogin.tsx", "New", "AuthScreen markup with the same ids; refuses every other value."),
+            ("website/src/components/demo/DemoBanner.tsx", "New", "Demo notice with reset."),
             ("website/src/components/home/data.ts", "New", "Every count on the page with a comment naming its source in the repo."),
             ("website/src/components/home/hero/Hero.tsx", "New", "The WebGL hero."),
             ("website/src/components/home/hero/HeroCanvas.tsx", "New", "The WebGL hero."),
@@ -5295,7 +5290,7 @@ TASKS += [
             ("website/src/components/home/sections/Footer.tsx", "New", "One homepage section."),
             ("website/src/shaders/night.ts", "New", "The WebGL hero."),
             ("website/src/shaders/agents.ts", "New", "The WebGL hero."),
-            ("website/src/mock/demoPassword.ts", "New", "The one password the demo accepts."),
+            ("website/src/mock/demoToken.ts", "New", "The operator token the mock accepts; written into the session before the console mounts."),
             ("website/src/mock/index.ts", "New", "Part of the mock backend."),
             ("website/src/mock/session.ts", "New", "Part of the mock backend."),
             ("website/src/mock/types.ts", "New", "Part of the mock backend."),
@@ -5321,22 +5316,22 @@ TASKS += [
         ],
         steps=[
             "Scaffold the site with @ aliased to web/src and one React, and prove an empty build.",
-            "Mount the real console client-only behind a password screen; patch fetch, the events WebSocket, and the upload XHR; seed fixtures and persist state; answer every route in console-api.ts.",
+            "Mount the real console client-only with the demo token already in the session; patch fetch, the events WebSocket, and the upload XHR; seed fixtures and persist state; answer every route in console-api.ts.",
             "Build the homepage from the README and ARCHITECTURE with lazy WebGL scenes and ThreeUI components; source every number.",
             "Drive both surfaces in a real browser at desktop and phone widths, then link the Vercel project with website as its root.",
         ],
         acceptance=[
-            "The demo refuses any password but the documented one and lands on the console shell with the seeded rooms.",
+            "Opening /console lands on the console shell with the seeded rooms; a request without the demo token is refused with 401.",
             "Every console view, the agent sheet's four tabs, plans with revision conflicts, changes with diffs, artifacts, profile, appearance, the command palette, every creation dialog, uploads, and OMP chats work in the browser, and a reload keeps what was changed.",
             "The mock smoke script calls every route in the mock's table and reports zero throws.",
             "The homepage has no horizontal overflow at 400px, mounts its canvases lazily, and degrades under reduced motion.",
             "The site builds and typechecks on its own; the root typecheck and lint exclude it; nothing under web/ or src/ changes.",
         ],
         evidence=[
-            ("Wrong password refused, melon accepted, every view and dialog driven in Chrome at 1440 and 390 wide with zero uncaught errors, on 2026-09-14", "website/src/components/demo/DemoLogin.tsx"),
+            ("Every view and dialog driven in Chrome at 1440 and 390 wide with zero uncaught errors, on 2026-09-14", "website/src/components/demo/ConsoleApp.tsx"),
             ("46 of 46 mocked routes called, no throws, no unexpected statuses", "website/scripts/mock-smoke.mjs"),
             ("Homepage scrolled end to end at 1440 dark and light and 400 with reduced motion: canvases mounted, no overflow, zero errors from site code", "website/src/components/home/threeui/ThreeStage.tsx"),
-            ("next build lists /, /console, /console/login, /console/review/[id]; tsc clean in website; root lint and typecheck clean with website excluded", "website/package.json"),
+            ("next build lists /, /console, /console/review/[id]; tsc clean in website; root lint and typecheck clean with website excluded", "website/package.json"),
         ],
         out_of_scope=["Fixing the two agent-sheet layout defects in web/ itself; the demo patches them in its own CSS and notes them for upstream. Lighthouse and frame-rate measurement on real GPUs."],
     ),

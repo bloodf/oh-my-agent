@@ -26,7 +26,7 @@ A README cannot show a running daemon, a room with agents talking, or the agent 
 
 - [x] The homepage renders its WebGL scenes lazily, degrades under reduced motion, and has no horizontal overflow at 400px.
 - [x] Every console view, sheet, tab, and dialog is reachable in the demo and every mutation persists across a reload.
-- [x] The demo refuses any password but the documented one.
+- [x] The demo opens without a login and still exercises the console's operator-token path.
 - [x] A smoke script calls every mocked route and reports zero throws.
 
 ## Decisions
