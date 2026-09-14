@@ -33,3 +33,8 @@ chrome-headless-shell/
 !.agentic/presets.yml
 # Next.js console build output
 web-next/.next/
+# Local agent and browser tooling state, never part of the project
+.claude/
+.playwright-mcp/
+# Bun is the only package manager; npm lockfiles split the dependency tree
+package-lock.json
