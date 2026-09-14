@@ -37,3 +37,25 @@ bun scripts/mock-smoke.mjs
 ```
 
 Limits: two open tabs each keep their own copy and the last write wins in `localStorage`. File uploads record name, type, and size only; bytes are discarded.
+
+## Commands
+
+```sh
+bun install
+bun run dev          # http://localhost:3300, webpack dev server
+bun run build        # next build --webpack
+bun run typecheck
+bun scripts/mock-smoke.mjs   # calls every mocked console route once
+```
+
+The console demo compiles files under `../web/src`, whose imports resolve
+from `../web/node_modules`, so `bun install --cwd ../web` is needed once
+locally. The build uses webpack because it pins module resolution to this
+directory's `node_modules`, which keeps one React instance across both trees.
+
+## Deploy
+
+Vercel project `oh-my-agent` (team `hr-teconologia`), Root Directory
+`website`, framework Next.js, production branch `main`. `vercel.json` pins
+Bun 1.4.2 for install and build (the platform default cannot read this
+lockfile) and installs `../web`'s dependencies during the build.
