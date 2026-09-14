@@ -6,6 +6,10 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Added
+
+- `website/`, a Next.js site for Vercel: a single-page animated homepage at `/` and, at `/console`, the real console from `web/src` running against a browser-local mock of the daemon's console API, seeded with agents, accounts, rooms, plans, changes, artifacts, schedules, and chats. Nothing in the daemon, the console, or the npm package changes.
+
 ### Fixed
 
 - The `tailscale serve` recipe in `docs/remote-exposure.md` binds its Caddy boundary to loopback and matches any host. As written before, Caddy listened on every interface, so a LAN client that sent `Host: 127.0.0.1:8443` reached the daemon over plaintext with the proxy secret injected, while tailnet requests never matched the site. The recipe also sets `trusted_proxies`, so the audit records the operator's tailnet address instead of `127.0.0.1`. Both were found by the first end-to-end run of that recipe on two tailnet devices, which now passes 11/11 checks.
