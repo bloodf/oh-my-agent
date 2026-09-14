@@ -130,7 +130,7 @@ Runtime, TUI, CLI, and browser console ship in the npm package `@bloodf/oh-my-ag
 
 Known limitations:
 
-- **The `tailscale serve` recipe in [remote exposure](https://github.com/bloodf/oh-my-agent/blob/main/docs/remote-exposure.md) is UNVERIFIED.** It needs two tailnet devices and has not been run end to end. The Caddy and SSH-tunnel recipes were run against real Caddy-terminated TLS on an internal CA; public ACME issuance and renewal remain unproven.
+- **Public ACME issuance in [remote exposure](https://github.com/bloodf/oh-my-agent/blob/main/docs/remote-exposure.md) is UNVERIFIED.** All three proxy recipes were run end to end, but the Caddy and SSH-tunnel runs used an internal CA, so public ACME issuance and renewal remain unproven.
 
 ## Security
 

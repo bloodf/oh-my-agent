@@ -3682,7 +3682,7 @@ TASKS += [
     ),
     Task(
         id="T-1202", slug="tls-termination", title="Proxy recipes and behind-proxy correctness",
-        epic="EP-12", sprint="SP-13", status="Blocked",
+        epic="EP-12", sprint="SP-13", status="Done",
         goal="Remote mode is reachable only behind TLS: the docs ship copy-paste proxy recipes, and the suite proves the daemon behaves correctly behind a proxy.",
         read_first=[
             ("ADR-012: remote exposure", "docs/delivery/adr/ADR-012-remote-exposure.md"),
@@ -3714,8 +3714,15 @@ TASKS += [
             "`omp-agent console` prints a URL that is correct when the daemon sits behind the documented proxy.",
             "Remote mode with the console enabled and no external origin configured fails before the pidfile or any listener opens; a headless remote daemon (OMA_CONSOLE=0) boots without one, and loopback mode is unaffected.",
         ],
+        evidence=[
+            ("Each recipe ends with the three checks verbatim, and the SSH-only configuration is rejected", "docs/remote-exposure.md"),
+            ("The three checks, the external console origin, and the missing-origin preflight are suite assertions", "tests/remote-exposure.test.ts"),
+            ("The missing-origin refusal runs before the pidfile or any listener opens", "src/daemon/runtime.ts"),
+            ("Real-proxy evidence: Caddy and SSH tunnel with loopback Caddy on 2026-09-03, tailscale serve on 2026-09-13 across two tailnet devices, each 11/11 checks with dates and versions in the doc", "docs/remote-exposure.md"),
+            ("The tailscale serve run found and fixed two recipe defects: a Caddy site with no bind that listened on every interface and never matched the tailnet Host, and a missing trusted_proxies that recorded 127.0.0.1 as every operator's source", "docs/remote-exposure.md"),
+        ],
         depends_on=["T-1201"],
-        out_of_scope=["The daemon terminating TLS (ADR-012 rejects it) and the login flow UX (T-1203). Remaining blocker: acceptance is per-recipe, and two of the three usable HTTPS recipes are now verified end to end against real Caddy-terminated TLS from a separate operator machine on 2026-09-03 -- Caddy with public TLS and SSH tunnel paired with loopback Caddy, each 11/11 checks, both on an internal CA rather than public ACME. The tailscale serve row stays UNVERIFIED: it needs two tailnet devices, and no second device on the available tailnet accepted a shell nor was an auth key available to enlist one. That single row is what keeps this task and T-1205 blocked."],
+        out_of_scope=["The daemon terminating TLS (ADR-012 rejects it) and the login flow UX (T-1203). Public ACME issuance and renewal: the Caddy and SSH-tunnel runs used an internal CA and the tailscale serve run used the certificate tailscale serve provisions, so no run exercised Caddy's ACME client. The doc marks that cell PARTIAL and says so."],
     ),
     Task(
         id="T-1203", slug="remote-console-auth", title="Operator-token flow in the console client",
@@ -3798,7 +3805,7 @@ TASKS += [
     ),
     Task(
         id="T-1205", slug="exposure-runbook", title="Threat model and operator checklist",
-        epic="EP-12", sprint="SP-13", status="Blocked",
+        epic="EP-12", sprint="SP-13", status="Done",
         goal="One page an operator reads before flipping remote mode: the threat model, the checklist, and the audit commands — so 'should I enable this' has a written answer.",
         read_first=[
             ("ADR-012: remote exposure", "docs/delivery/adr/ADR-012-remote-exposure.md"),
@@ -3824,8 +3831,15 @@ TASKS += [
             "The runbook names every precondition T-1201 enforces, in the same words the daemon prints on stderr.",
             "The threat model exists in exactly one file; README and ARCHITECTURE carry a link plus at most two sentences.",
         ],
+        evidence=[
+            ("The checklist quotes the daemon's stderr for the non-loopback, missing-origin, and token-mode refusals, and the trust model line", "src/daemon/runtime.ts"),
+            ("The checklist quotes the unsafe audit-directory refusal", "src/daemon/socket.ts"),
+            ("The threat model, checklist, and audit commands live in one file", "docs/remote-exposure.md"),
+            ("README links the runbook", "README.md §How it works"),
+            ("ARCHITECTURE links the runbook in two sentences", "ARCHITECTURE.md §7"),
+        ],
         depends_on=["T-1202", "T-1206"],
-        out_of_scope=["Remaining blocker: T-1202 needs a dated end-to-end run against each of its three usable HTTPS recipes, not just one; T-1206 is Done and no longer blocks this runbook. This task's own acceptance already passes."],
+        out_of_scope=["Multi-tenant operation, which the threat model names as out of scope."],
     ),
     Task(
         id="T-1206", slug="authenticated-connection-audit", title="Authenticated-connection audit surface",
@@ -6033,9 +6047,8 @@ def render_readme() -> str:
         "control socket, the TUI extension, the CLI, and the browser console all ship; EP-05, "
         "EP-06, EP-09, EP-10, EP-11, and EP-16 are Done.",
         "",
-        "What remains is a small set of tickets blocked on things outside the repo: T-1202 "
-        "needs real-proxy evidence and therefore blocks T-1205; T-1403 needs a live-account "
-        "session; and T-1503 and T-1504 need released upstream fixes.",
+        "What remains is a small set of tickets blocked on things outside the repo: "
+        "T-1403 needs a live-account session, and T-1503 needs a released upstream fix.",
         "",
         "## Unit contract",
         "",

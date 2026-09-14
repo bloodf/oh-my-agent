@@ -2,7 +2,7 @@
 
 | Epic | Sprint | Status | Map |
 |---|---|---|---|
-| [EP-12](../epics/EP-12-remote-exposure.md) | [SP-13](../sprints/SP-13-beyond-loopback.md) | Blocked | [asset-map](../asset-map.md) |
+| [EP-12](../epics/EP-12-remote-exposure.md) | [SP-13](../sprints/SP-13-beyond-loopback.md) | Done | [asset-map](../asset-map.md) |
 
 ## Goal
 
@@ -36,12 +36,22 @@ One page an operator reads before flipping remote mode: the threat model, the ch
 
 ## Acceptance
 
-- [ ] The runbook names every precondition T-1201 enforces, in the same words the daemon prints on stderr.
-- [ ] The threat model exists in exactly one file; README and ARCHITECTURE carry a link plus at most two sentences.
+- [x] The runbook names every precondition T-1201 enforces, in the same words the daemon prints on stderr.
+- [x] The threat model exists in exactly one file; README and ARCHITECTURE carry a link plus at most two sentences.
+
+Evidence:
+
+| Claim | Anchor |
+|---|---|
+| The checklist quotes the daemon's stderr for the non-loopback, missing-origin, and token-mode refusals, and the trust model line | [`src/daemon/runtime.ts`](../../../src/daemon/runtime.ts) |
+| The checklist quotes the unsafe audit-directory refusal | [`src/daemon/socket.ts`](../../../src/daemon/socket.ts) |
+| The threat model, checklist, and audit commands live in one file | [`docs/remote-exposure.md`](../../../docs/remote-exposure.md) |
+| README links the runbook | `README.md §How it works` |
+| ARCHITECTURE links the runbook in two sentences | `ARCHITECTURE.md §7` |
 
 ## Out of scope
 
-- Remaining blocker: T-1202 needs a dated end-to-end run against each of its three usable HTTPS recipes, not just one; T-1206 is Done and no longer blocks this runbook. This task's own acceptance already passes.
+- Multi-tenant operation, which the threat model names as out of scope.
 
 ## Depends on
 

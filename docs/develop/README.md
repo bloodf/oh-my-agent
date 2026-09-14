@@ -32,12 +32,10 @@ Contributor hub. Operator install and usage live in the [root README](../../READ
 
 ## Current tree
 
-**98 of 102 tasks Done.** Four remain Blocked:
+**112 of 114 tasks Done.** Two remain Blocked:
 
 | Task | Blocker |
 |---|---|
-| [T-1202](../delivery/tasks/T-1202-tls-termination.md) | Real-proxy evidence (tailscale serve row unverified) |
-| [T-1205](../delivery/tasks/T-1205-exposure-runbook.md) | Blocked on T-1202 |
 | [T-1403](../delivery/tasks/T-1403-first-live-session.md) | Live-account session |
 | [T-1503](../delivery/tasks/T-1503-drop-resolve-walk.md) | Released upstream fix |
 

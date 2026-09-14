@@ -31,16 +31,14 @@ Task numbers follow the epic: `EP-00` owns `T-0xx`, `EP-12` owns `T-12xx`.
 3. Read the task's Read first links, then the files, then implement against Acceptance.
 4. A task listing more than about six files is too large. Split it in the generator rather than stretching the PR.
 
-Today the tree is **98 of 102 Done**. Nothing is Ready. Four tasks are Blocked on things outside the repo:
+Today the tree is **112 of 114 Done**. Nothing is Ready. Two tasks are Blocked on things outside the repo:
 
 | Task | Why it is Blocked |
 |---|---|
-| [T-1202](../delivery/tasks/T-1202-tls-termination.md) | Per-recipe real-proxy evidence. Caddy and SSH+Caddy are verified; tailscale serve still needs two tailnet devices. |
-| [T-1205](../delivery/tasks/T-1205-exposure-runbook.md) | Depends on T-1202 |
 | [T-1403](../delivery/tasks/T-1403-first-live-session.md) | Operator must run and record a live-account session |
 | [T-1503](../delivery/tasks/T-1503-drop-resolve-walk.md) | Wait for a released Bun or pi-coding-agent fix |
 
-If you have the missing infrastructure (second tailnet device, live accounts, or the upstream release), that is the highest-leverage contribution. Otherwise: file a bug with a reproduction, or add a new task for new behavior.
+If you have the missing infrastructure (live accounts or the upstream release), that is the highest-leverage contribution. Otherwise: file a bug with a reproduction, or add a new task for new behavior.
 
 ## Adding a task
 
