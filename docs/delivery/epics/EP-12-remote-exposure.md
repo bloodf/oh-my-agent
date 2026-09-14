@@ -1,6 +1,6 @@
 # EP-12 — Beyond loopback: remote exposure with a real trust model
 
-**Status:** Blocked
+**Status:** Done
 
 *Derived from the tasks below.*
 
@@ -27,11 +27,11 @@ Every server the daemon runs binds loopback today, and that is the security mode
 
 ## Acceptance
 
-- [ ] Any non-loopback bind is refused with the reason on stderr, never a partial boot — no flag permits one; remote mode changes auth and enforcement only.
-- [ ] In remote mode, a console request or socket connection without the operator token is refused; the loopback default keeps working exactly as today.
-- [ ] Parentage enforcement is asserted in remote mode: a worker token cannot kill or inject into a peer it does not own, over a remote-mode connection.
-- [ ] Every recipe in the docs (proxy, tailscale, SSH tunnel) carries the same refusal/required-token assertions.
-- [ ] Every authenticated remote-mode connection leaves an audit log line, and `omp-agent audit` reports the active trust model and live authenticated connections.
+- [x] Any non-loopback bind is refused with the reason on stderr, never a partial boot — no flag permits one; remote mode changes auth and enforcement only.
+- [x] In remote mode, a console request or socket connection without the operator token is refused; the loopback default keeps working exactly as today.
+- [x] Parentage enforcement is asserted in remote mode: a worker token cannot kill or inject into a peer it does not own, over a remote-mode connection.
+- [x] Every recipe in the docs (proxy, tailscale, SSH tunnel) carries the same refusal/required-token assertions.
+- [x] Every authenticated remote-mode connection leaves an audit log line, and `omp-agent audit` reports the active trust model and live authenticated connections.
 
 ## Decisions
 
@@ -42,8 +42,8 @@ Every server the daemon runs binds loopback today, and that is the security mode
 | Task | Title | Status |
 |---|---|---|
 | [T-1201](../tasks/T-1201-exposure-policy.md) | Remote-mode surface and bind refusal | Done |
-| [T-1202](../tasks/T-1202-tls-termination.md) | Proxy recipes and behind-proxy correctness | Blocked |
+| [T-1202](../tasks/T-1202-tls-termination.md) | Proxy recipes and behind-proxy correctness | Done |
 | [T-1203](../tasks/T-1203-remote-console-auth.md) | Operator-token flow in the console client | Done |
 | [T-1204](../tasks/T-1204-authoritative-hierarchy.md) | Hierarchy enforcement flips in remote mode | Done |
-| [T-1205](../tasks/T-1205-exposure-runbook.md) | Threat model and operator checklist | Blocked |
+| [T-1205](../tasks/T-1205-exposure-runbook.md) | Threat model and operator checklist | Done |
 | [T-1206](../tasks/T-1206-authenticated-connection-audit.md) | Authenticated-connection audit surface | Done |

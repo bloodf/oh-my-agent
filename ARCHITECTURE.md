@@ -253,6 +253,8 @@ Three distinct layers, in decreasing strength:
 2. **Write isolation (mergeability, not security).** OMP `task.isolation.mode` gives delegated coding subagents copy-on-write workspaces and controlled merge-back. It does not restrict reads by itself.
 3. **Convention scoping (soft, bypassable).** Tool allowlists, generated worker config, and system instructions reduce accidents when `sandbox` is off. They are never described as security isolation.
 
+**Remote mode.** Every daemon listener binds loopback in every mode; `OMA_REMOTE=1` adds operator-token and proxy-secret enforcement behind an HTTPS proxy, and with the console enabled it refuses to boot without `OMA_CONSOLE_ORIGIN`. The threat model, preconditions, and proxy recipes live only in [docs/remote-exposure.md](docs/remote-exposure.md).
+
 Defaults: layer 2 + 3 on, layer 1 opt-in (it constrains tooling and needs per-OS setup). The TUI does not currently render a visual sandbox indicator. Inspect each peer's actual `sandboxed` field with `omp-agent --json agents` or `/cli --json agents` in the TUI. The human `/cli agents` listing is unshielded.
 
 ## 8. Repo layout - [Implemented]
