@@ -30,7 +30,7 @@ export const themes: WorkspaceTheme[] = [
 		name: "Aubergine",
 		chrome: {
 			...onDark,
-			rail: "#3f0e40",
+			rail: "#2b0a2c",
 			toolbar: "#350d36",
 			sidebar: "#3f0e40",
 			"sidebar-end": "#350d36",
@@ -44,7 +44,7 @@ export const themes: WorkspaceTheme[] = [
 		name: "Ochin",
 		chrome: {
 			...onDark,
-			rail: "#253341",
+			rail: "#1b2530",
 			toolbar: "#1f2b37",
 			sidebar: "#303e4d",
 			"sidebar-end": "#28343f",
@@ -57,7 +57,7 @@ export const themes: WorkspaceTheme[] = [
 		id: "hoth",
 		name: "Hoth",
 		chrome: {
-			rail: "#e9e9ee",
+			rail: "#dedee5",
 			toolbar: "#dcdce3",
 			sidebar: "#f8f8fa",
 			"sidebar-end": "#efeff3",
@@ -81,7 +81,7 @@ export const themes: WorkspaceTheme[] = [
 		name: "Monument",
 		chrome: {
 			...onDark,
-			rail: "#063e41",
+			rail: "#042e30",
 			toolbar: "#05373a",
 			sidebar: "#084e52",
 			"sidebar-end": "#063e41",
@@ -97,7 +97,7 @@ export const themes: WorkspaceTheme[] = [
 		name: "Work Hard",
 		chrome: {
 			...onDark,
-			rail: "#332731",
+			rail: "#271d25",
 			toolbar: "#2c222a",
 			sidebar: "#3e313c",
 			"sidebar-end": "#342932",
@@ -111,7 +111,7 @@ export const themes: WorkspaceTheme[] = [
 		name: "Nocturne",
 		chrome: {
 			...onDark,
-			rail: "#0f1115",
+			rail: "#0b0c0f",
 			toolbar: "#111317",
 			sidebar: "#19171d",
 			"sidebar-end": "#141217",

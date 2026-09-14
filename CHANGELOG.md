@@ -6,8 +6,21 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Changed
+
+- The web console is redesigned after Slack desktop: a labeled icon rail, a gradient sidebar with a conversation filter, unread badges, and presence dots on direct messages, a toolbar with a centered search field, a channel header with a member stack and underline tabs, messages with a floating action toolbar, thread summary rows, and date pills, a composer with a Markdown formatting row and a green send button, and Slack-style sheets and dialogs. Behavior, keyboard access, and every element id are unchanged.
+- The web console no longer shows account spending ceilings. The Agent sheet's Accounts tab and its **Raise** control are removed, and the create dialogs no longer ask for a USD budget: agents authenticate through OMP, so subscriptions and API keys are controlled where they are configured. A definition that already declares `autonomy.budgetUsd` shows it read-only and keeps it on save. The daemon, its quota logic, and `omp-agent bump` are unchanged.
+- An agent's **Soul & definition** JSON editor is replaced by a **Settings** dialog with sections for the soul (with a Markdown preview), profile, model, rooms and hierarchy, wake and autonomy, schedules and automations, and sandbox and tools. The raw JSON stays under **Advanced JSON**, and a save sends only the fields that changed.
+- Appearance offers six curated sidebar themes after Slack's (Aubergine by default) instead of 59 generated palettes. A saved palette from the old catalog falls back to Aubergine and keeps its light, dark, or system mode.
+
+### Added
+
+- Avatars can be images. The operator and every agent can have an uploaded PNG, JPEG, WebP, or GIF avatar, resized in the browser to fit 256×256; the daemon accepts it as a base64 data URL of at most 200 KB and still refuses anything else. The avatar editor opens from **Profile and avatars**, from an agent's settings, from its avatar in the Members tab, and from the create dialogs.
+
 ### Fixed
 
+- **Add schedule** in the agent sheet keeps an agent's existing schedules. It read the schedule list from the wrong level of the definition response and replaced every schedule with the new one.
+- The agent sheet's Schedules tab scrolls inside the sheet, so **Add schedule** stays reachable with many rows, and its rows no longer clip the Pause buttons.
 - The `tailscale serve` recipe in `docs/remote-exposure.md` binds its Caddy boundary to loopback and matches any host. As written before, Caddy listened on every interface, so a LAN client that sent `Host: 127.0.0.1:8443` reached the daemon over plaintext with the proxy secret injected, while tailnet requests never matched the site. The recipe also sets `trusted_proxies`, so the audit records the operator's tailnet address instead of `127.0.0.1`. Both were found by the first end-to-end run of that recipe on two tailnet devices, which now passes 11/11 checks.
 
 ## [1.5.1] - 2026-09-12

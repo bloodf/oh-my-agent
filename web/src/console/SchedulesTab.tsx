@@ -20,6 +20,9 @@ import { Label } from "@/components/ui/label";
 import type { AgentInfo } from "@/lib/types";
 import type { ConsoleCall } from "./CreateChannelDialog";
 
+/** Slack's green primary action. */
+const SEND_BUTTON = "bg-[var(--send)] text-white hover:bg-[var(--send-hover)] focus-visible:ring-[var(--send)]/40";
+
 export type ScheduleRow = { id: string; agent: string; cron: string | null; action: string; nextFireAt: number | null; enabled: boolean };
 
 function kindOf(row: ScheduleRow): string {
@@ -32,6 +35,31 @@ function nextLabel(row: ScheduleRow): string {
   if (!row.enabled) return "paused";
   if (row.nextFireAt === null) return "on event";
   return `next ${new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(row.nextFireAt))}`;
+}
+
+/** The daemon's schedules with a Pause/Resume switch each; `null` while loading. */
+export function ScheduleRows({ rows, busy, onToggle, empty = "No schedules yet. Every crew peer has a heartbeat once it starts." }: {
+  rows: ScheduleRow[] | null;
+  busy: boolean;
+  onToggle: (row: ScheduleRow) => void;
+  empty?: string;
+}) {
+  return (
+    <ul className="grid grid-cols-[minmax(0,1fr)] gap-2">
+      {rows === null && <li className="rounded-lg border border-dashed px-4 py-6 text-center text-[13px] text-muted-foreground">Loading…</li>}
+      {rows?.length === 0 && <li className="rounded-lg border border-dashed px-4 py-8 text-center text-[15px] text-muted-foreground">{empty}</li>}
+      {rows?.map((row) => (
+        <li key={row.id} className={`schedule grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border bg-card px-3 py-2.5 ${row.enabled ? "" : "opacity-80"}`} data-id={row.id} data-enabled={String(row.enabled)}>
+          <div className="min-w-0">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"><span className="truncate text-[15px] font-bold">{row.agent}</span><span className="inline-flex h-5 items-center rounded-md border border-border bg-muted px-1.5 font-mono text-xs text-foreground">{kindOf(row)}</span></div>
+            <div className="mt-0.5 truncate text-[13px] text-foreground/80" title={row.action}>{row.action}</div>
+            <div className="text-xs text-muted-foreground">{nextLabel(row)}</div>
+          </div>
+          <Button type="button" size="sm" variant="outline" className="schedule-toggle max-sm:h-11 max-sm:px-3" aria-label={`${row.enabled ? "Pause" : "Resume"} ${row.id}`} disabled={busy} onClick={() => onToggle(row)}>{row.enabled ? "Pause" : "Resume"}</Button>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export function SchedulesTab({ call, agents, onNotice }: {
@@ -61,7 +89,9 @@ export function SchedulesTab({ call, agents, onNotice }: {
     setError(""); setBusy("add");
     void call(`/api/agents/${encodeURIComponent(agent)}/definition`)
       .then((current) => {
-        const definition = current as { schedules?: { cron: string; prompt: string; room?: string }[] };
+        // The read answers `{ name, filePath, definition }`; the schedules live
+        // inside `definition`, and the PATCH replaces the whole list.
+        const definition = (current.definition ?? {}) as { schedules?: { cron: string; prompt: string; room?: string }[] };
         const schedules = [...(definition.schedules ?? []), { cron: cron.trim(), prompt: prompt.trim(), ...(room.trim() ? { room: room.trim() } : {}) }];
         return call(`/api/agents/${encodeURIComponent(agent)}`, { method: "PATCH", body: { schedules } });
       })
@@ -74,26 +104,13 @@ export function SchedulesTab({ call, agents, onNotice }: {
       .finally(() => setBusy(null));
   };
   return (
-    <div id="schedules" className="grid gap-4">
-      <ul className="space-y-1.5">
-        {rows === null && <li className="text-xs text-muted-foreground">Loading…</li>}
-        {rows?.length === 0 && <li className="text-xs text-muted-foreground">No schedules yet. Every crew peer has a heartbeat once it starts.</li>}
-        {rows?.map((row) => (
-          <li key={row.id} className="schedule flex items-center gap-3 rounded-lg border bg-card px-3 py-2" data-id={row.id} data-enabled={String(row.enabled)}>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-sm"><span className="font-medium">{row.agent}</span><span className="font-mono text-xs text-muted-foreground">{kindOf(row)}</span></div>
-              <div className="truncate text-xs text-muted-foreground" title={row.action}>{row.action}</div>
-              <div className="text-[11px] text-muted-foreground">{nextLabel(row)}</div>
-            </div>
-            <Button type="button" size="xs" variant={row.enabled ? "secondary" : "outline"} className="schedule-toggle" aria-label={`${row.enabled ? "Pause" : "Resume"} ${row.id}`} disabled={busy !== null} onClick={() => toggle(row)}>{row.enabled ? "Pause" : "Resume"}</Button>
-          </li>
-        ))}
-      </ul>
-      <fieldset className="grid gap-2 rounded-lg border p-3" disabled={busy !== null}>
-        <legend className="px-1 text-sm font-medium">Add a cron schedule</legend>
-        <div className="grid gap-2 sm:grid-cols-2">
+    <div id="schedules" className="grid grid-cols-[minmax(0,1fr)] gap-5">
+      <ScheduleRows rows={rows} busy={busy !== null} onToggle={toggle} />
+      <fieldset className="grid min-w-0 gap-3 rounded-lg border p-4" disabled={busy !== null}>
+        <legend className="px-1 text-[13px] font-bold text-muted-foreground">Add a cron schedule</legend>
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="grid gap-1.5"><Label htmlFor="schedule-agent">Agent</Label>
-            <select id="schedule-agent" className="h-9 rounded-md border border-input bg-transparent px-3 text-sm" value={draft.agent} onChange={(e) => setDraft((d) => ({ ...d, agent: e.target.value }))}>
+            <select id="schedule-agent" className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-[15px] outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40" value={draft.agent} onChange={(e) => setDraft((d) => ({ ...d, agent: e.target.value }))}>
               <option value="">Choose…</option>
               {agents.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
             </select>
@@ -102,9 +119,9 @@ export function SchedulesTab({ call, agents, onNotice }: {
           <div className="grid gap-1.5 sm:col-span-2"><Label htmlFor="schedule-prompt">Prompt</Label><Input id="schedule-prompt" placeholder="Post the daily status" value={draft.prompt} onChange={(e) => setDraft((d) => ({ ...d, prompt: e.target.value }))} /></div>
           <div className="grid gap-1.5"><Label htmlFor="schedule-room">Room <span className="font-normal text-muted-foreground">(optional)</span></Label><Input id="schedule-room" placeholder="#team" value={draft.room} onChange={(e) => setDraft((d) => ({ ...d, room: e.target.value }))} /></div>
         </div>
-        <div><Button id="schedule-add" type="button" size="sm" onClick={add}>Add schedule</Button></div>
+        <div><Button id="schedule-add" type="button" className={`h-9 max-sm:h-11 ${SEND_BUTTON}`} onClick={add}>Add schedule</Button></div>
       </fieldset>
-      <p role="alert" className="min-h-5 text-xs text-destructive">{error}</p>
+      <p role="alert" className="min-h-5 text-[13px] text-destructive">{error}</p>
     </div>
   );
 }

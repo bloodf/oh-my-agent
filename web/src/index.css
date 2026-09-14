@@ -155,7 +155,7 @@
  * per curated theme; the defaults are Aubergine so the first paint is right.
  */
 :root {
-  --ws-rail: #3f0e40;
+  --ws-rail: #2b0a2c;
   --ws-toolbar: #350d36;
   --ws-sidebar: #3f0e40;
   --ws-sidebar-end: #350d36;
@@ -177,17 +177,6 @@
   --ws-toolbar-gradient: linear-gradient(90deg, color-mix(in srgb, var(--ws-toolbar) 92%, black) 0%, var(--ws-toolbar) 50%, color-mix(in srgb, var(--ws-toolbar) 92%, black) 100%);
 }
 
-.workspace-drawer [data-slot="sheet-close"] {
-  color: var(--ws-text);
-  min-width: 44px;
-  min-height: 44px;
-  top: 2px;
-}
-
-.workspace-drawer [data-slot="sheet-close"]:hover {
-  background: var(--ws-hover-strong);
-  color: var(--ws-text);
-}
 
 
 
@@ -223,8 +212,7 @@
   }
   .workspace-rail :focus-visible,
   [aria-label="Global workspace controls"] :focus-visible,
-  nav[aria-label="Workspace"] :focus-visible,
-  .workspace-drawer [data-slot="sheet-close"]:focus-visible {
+  nav[aria-label="Workspace"] :focus-visible {
     outline-color: var(--ws-text) !important;
   }
   button,

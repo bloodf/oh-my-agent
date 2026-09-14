@@ -60,11 +60,12 @@ export type PlansViewProps = {
 
 const EMPTY_DRAFT: PlanDraft = { title: "", body: "", status: "draft" };
 const STATUS_STYLE: Record<PlanStatus, string> = {
-  draft: "border-muted-foreground/30 text-muted-foreground",
-  active: "border-blue-500/40 bg-blue-500/10 text-blue-600 dark:text-blue-300",
+  draft: "border-input bg-muted text-muted-foreground",
+  active: "border-[var(--reaction-mine-border)]/50 bg-[var(--reaction-mine-bg)] text-[var(--reaction-mine-text)]",
   completed:
-    "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
+    "border-[var(--presence-active)]/50 bg-[var(--presence-active)]/12 text-[var(--send)] dark:text-[var(--presence-active)]",
 };
+const SEND_BUTTON = "h-9 px-4 font-bold bg-[var(--send)] text-white hover:bg-[var(--send-hover)]";
 
 function errorMessage(cause: unknown) {
   return cause instanceof Error ? cause.message : String(cause);
@@ -153,7 +154,7 @@ function PlanDialog({
               <Label htmlFor="plan-status">Status</Label>
               <select
                 id="plan-status"
-                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-[15px] outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
                 value={draft.status}
                 onChange={(event) =>
                   setDraft((value) => ({
@@ -191,6 +192,7 @@ function PlanDialog({
             <Button
               type="button"
               variant="outline"
+              className="h-9 px-4 font-bold"
               disabled={busy}
               onClick={() => onOpenChange(false)}
             >
@@ -198,6 +200,7 @@ function PlanDialog({
             </Button>
             <Button
               type="submit"
+              className={SEND_BUTTON}
               disabled={busy || !draft.title.trim() || !draft.body.trim()}
             >
               {busy ? "Saving…" : plan ? "Save changes" : "Create plan"}
@@ -320,30 +323,30 @@ export function PlansView({ room, call, version }: PlansViewProps) {
 
   return (
     <section
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6"
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-4 py-5 sm:px-8 sm:py-7"
       aria-labelledby="plans-heading"
     >
-      <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 id="plans-heading" className="text-xl font-semibold">
+      <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-3">
+        <div className="min-w-40 flex-1 basis-0">
+          <h2 id="plans-heading" className="text-[22px] leading-7 font-black">
             Plans
           </h2>
-          <p className="truncate text-sm text-muted-foreground">
-            Durable work for #{room}
+          <p className="truncate text-[15px] text-muted-foreground">
+            Durable work for {room.startsWith("#") ? room : `#${room}`}
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
           <Button
             type="button"
             variant="outline"
-            size="icon"
+            size="icon-lg"
             disabled={loading}
             aria-label="Refresh plans"
             onClick={() => void refresh()}
           >
             <RefreshCw className={loading ? "animate-spin" : ""} />
           </Button>
-          <Button type="button" onClick={openCreate}>
+          <Button type="button" className={SEND_BUTTON} onClick={openCreate}>
             <Plus />
             New plan
           </Button>
@@ -351,16 +354,16 @@ export function PlansView({ room, call, version }: PlansViewProps) {
       </div>
 
       <div
-        className="mx-auto mt-5 w-full max-w-5xl space-y-3"
+        className="mt-6 grid w-full min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] items-start gap-4"
         aria-live="polite"
       >
         {loading &&
           plans.length === 0 &&
           [0, 1, 2].map((item) => (
-            <Skeleton key={item} className="h-36 w-full" />
+            <Skeleton key={item} className="h-40 w-full rounded-lg" />
           ))}
         {error && (
-          <Alert variant="destructive">
+          <Alert variant="destructive" className="col-span-full">
             <AlertTitle>Could not load plans</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
             <Button
@@ -375,23 +378,23 @@ export function PlansView({ room, call, version }: PlansViewProps) {
           </Alert>
         )}
         {!loading && !error && plans.length === 0 && (
-          <div className="rounded-xl border border-dashed p-10 text-center">
-            <p className="font-medium">No plans in this room</p>
-            <p className="mt-1 text-sm text-muted-foreground">
+          <div className="col-span-full rounded-lg border border-dashed px-6 py-14 text-center">
+            <p className="text-lg font-black">No plans in this room</p>
+            <p className="mx-auto mt-1 max-w-sm text-[15px] text-muted-foreground">
               Create the first shared plan to keep decisions and next steps
               durable.
             </p>
-            <Button type="button" className="mt-4" onClick={openCreate}>
+            <Button type="button" className={`mt-5 ${SEND_BUTTON}`} onClick={openCreate}>
               <Plus />
               Create plan
             </Button>
           </div>
         )}
         {plans.map((plan) => (
-          <Card key={plan.id}>
-            <CardHeader>
-              <CardTitle className="pr-24">{plan.title}</CardTitle>
-              <CardDescription>
+          <Card key={plan.id} className="min-w-0 gap-0 py-0 shadow-[0_1px_3px_rgb(0_0_0/6%)] transition-shadow hover:shadow-[var(--shadow-float)]">
+            <CardHeader className="border-b py-4">
+              <CardTitle className="pr-24 text-lg leading-6 font-black">{plan.title}</CardTitle>
+              <CardDescription className="text-[13px]">
                 Updated{" "}
                 {new Intl.DateTimeFormat(undefined, {
                   dateStyle: "medium",
@@ -400,7 +403,7 @@ export function PlansView({ room, call, version }: PlansViewProps) {
                 by {plan.updatedBy}
               </CardDescription>
               <CardAction className="flex items-center gap-1.5">
-                <Badge variant="outline" className={STATUS_STYLE[plan.status]}>
+                <Badge variant="outline" className={`capitalize ${STATUS_STYLE[plan.status]}`}>
                   {plan.status}
                 </Badge>
                 <Button
@@ -414,7 +417,7 @@ export function PlansView({ room, call, version }: PlansViewProps) {
                 </Button>
               </CardAction>
             </CardHeader>
-            <CardContent className="pb-5">
+            <CardContent className="max-w-prose min-w-0 py-4 text-[15px] leading-[1.46]">
               <MessageBody body={plan.body} />
             </CardContent>
           </Card>

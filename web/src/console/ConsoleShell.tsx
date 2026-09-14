@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, Folder, Menu, Plus, Square, ChevronDown, Settings2 } from "lucide-react";
+import { Bot, ChevronDown, Folder, Hash, Menu, MessageSquare, Plus, Square, UserRoundPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -55,7 +55,7 @@ import { FilePicker } from "./FilePicker";
 import { PlansView } from "./PlansView";
 import { ArtifactsView } from "./ArtifactsView";
 import { ChangesView } from "./ChangesView";
-import { WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
+import { AvatarTile, WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
 
 /** Conversation-first frame. Native chats and shared rooms have separate lifecycles. */
 export function ConsoleShell() {
@@ -89,6 +89,10 @@ export function ConsoleShell() {
   const selectedChat = chats.find((chat) => chat.id === chatId);
   const selectedRoom = c.channels.find((room) => room.id === c.currentRoom);
   const selected = chatId ?? c.currentRoom;
+  const heading = selectedChat?.title ?? c.currentRoom ?? "Your workspace";
+  const sigil = !selectedChat && /^[#@]/.test(heading) ? heading[0] : "";
+  const members = c.agents.filter((agent) => c.currentRoom !== null && agent.rooms?.includes(c.currentRoom));
+  const directory = selectedChat ? selectedChat.cwd : selectedRoom?.workspace ?? (c.currentRoom ? "Daemon working directory" : "");
   useEffect(() => {
     if (authRequired || !connected) return;
     let stale = false;
@@ -212,9 +216,12 @@ export function ConsoleShell() {
     replyCount: 0,
     reactions: [],
   }));
-  const rail = (
+  const renderRail = (onClose?: () => void) => (
     <ChannelRail
+      resizable={!onClose}
       rooms={c.channels}
+      agents={c.agents}
+      onClose={onClose}
       chats={chats}
       current={selected}
       unread={c.unread}
@@ -245,13 +252,14 @@ export function ConsoleShell() {
         onConversations={() => document.querySelector<HTMLButtonElement>("#sidebar button")?.focus()}
         onAgents={() => setAgentsOpen(true)}
         onNewChat={() => setNewChat(true)}
+        connected={c.connected}
       />
-      <div className="hidden border-r md:block">{rail}</div>
+      <div className="hidden md:block">{renderRail()}</div>
       <main id="main" hidden={c.authRequired} className="flex min-w-0 flex-1 flex-col">
         <header
           id="current-channel"
           role="banner"
-          className="channel-header flex min-h-14 items-center gap-2 border-b px-3 sm:px-5"
+          className="channel-header @container/header flex h-[49px] min-w-0 shrink-0 items-center gap-1 pr-3 pl-2 sm:pr-4 sm:pl-3"
         >
           <Button
             className="md:hidden"
@@ -262,18 +270,21 @@ export function ConsoleShell() {
           >
             <Menu />
           </Button>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-bold">
-              {selectedChat?.title ?? c.currentRoom ?? "Your workspace"}
+          <div className="flex min-w-0 flex-1 items-center gap-0.5">
+            <h1 className="flex min-w-0 items-baseline truncate px-1.5 text-[18px] leading-7 font-black tracking-[-0.01em]">
+              {sigil && <span className="mr-0.5 font-bold text-muted-foreground">{sigil}</span>}
+              <span className="truncate">{sigil ? heading.slice(1) : heading}</span>
             </h1>
-            <p className="truncate text-[11px] text-muted-foreground">
-              {selectedChat ? `Independent OMP · ${selectedChat.cwd}` : selectedRoom?.workspace ? `Working directory · ${selectedRoom.workspace}` : c.currentRoom ? "Shared channel · daemon working directory" : "Select a conversation"}
-            </p>
+            {selectedRoom?.kind === "channel" && !chatId && (
+              <Button type="button" variant="ghost" size="icon-xs" className="rounded-md text-muted-foreground hover:bg-[var(--surface-hover)]" aria-label="Edit channel workspace" title="Edit channel workspace" onClick={() => setRoomSettings(true)}>
+                <ChevronDown className="size-4" />
+              </Button>
+            )}
           </div>
           {chatId ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="max-w-[40%]">
+                <Button variant="outline" size="sm" className="max-w-[40%] min-w-0 shrink rounded-md">
                   <span className="truncate">
                     {chatState?.model?.id ?? "Choose model"}
                   </span>
@@ -302,24 +313,30 @@ export function ConsoleShell() {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <div className="flex items-center gap-1">
-            {selectedRoom?.kind === "channel" && <Button type="button" variant="ghost" size="icon-sm" aria-label="Edit channel workspace" title="Edit channel workspace" onClick={() => setRoomSettings(true)}><Settings2 /></Button>}
             <Button
               id="open-agents"
               variant="outline"
               size="sm"
+              title="Agents in this workspace"
+              className="h-7 shrink-0 gap-1.5 rounded-md pr-2 pl-1 shadow-xs"
               onClick={() => setAgentsOpen(true)}
             >
-              <Bot />
-              <span className="hidden sm:inline">Agents</span>
-              <Badge variant="secondary">{c.agents.length}</Badge>
+              {members.length > 0 ? (
+                <span aria-hidden className="hidden -space-x-1.5 @[20rem]/header:flex">
+                  {members.slice(0, 3).map((agent) => (
+                    <AvatarTile key={agent.name} author={agent.name} className="size-6 bg-muted text-[17px] text-foreground ring-2 ring-background" />
+                  ))}
+                </span>
+              ) : null}
+              <Users aria-hidden className={members.length > 0 ? "@[20rem]/header:hidden" : ""} />
+              <span className="sr-only">Agents</span>
+              <Badge variant="secondary" className="h-auto bg-transparent px-0 text-[13px] font-semibold text-foreground">{c.agents.length}</Badge>
             </Button>
-            </div>
           )}
         </header>
-        <div className="flex items-center justify-between border-b px-4 py-2 md:px-6">
-          <Tabs value={view} onValueChange={setView}>
-            <TabsList variant="line">
+        <div className="@container/tabs flex h-9 min-w-0 shrink-0 items-center gap-3 border-b pr-3 pl-2 sm:pr-4 sm:pl-3">
+          <Tabs value={view} onValueChange={setView} className="h-full min-w-0 overflow-x-auto overscroll-x-contain [scrollbar-width:none]">
+            <TabsList variant="line" className="h-full">
               <TabsTrigger value="conversation">Conversation</TabsTrigger>
               <TabsTrigger value="plans">Plans</TabsTrigger>
               <TabsTrigger value="changes" disabled={!fullControl}>
@@ -328,10 +345,12 @@ export function ConsoleShell() {
               <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
             </TabsList>
           </Tabs>
+          <span className="flex-1" />
           {chatState?.streaming && (
             <Button
-              size="sm"
+              size="xs"
               variant="outline"
+              className="rounded-md"
               onClick={() =>
                 void c
                   .call(`/api/chats/${chatId}/abort`, { method: "POST" })
@@ -341,6 +360,12 @@ export function ConsoleShell() {
               <Square />
               Stop
             </Button>
+          )}
+          {directory && (
+            <span title={directory} className="hidden h-6 max-w-[45%] min-w-0 shrink-[999] items-center gap-1.5 rounded-md bg-muted px-2 text-[12px] text-muted-foreground @[34rem]/tabs:flex">
+              <Folder aria-hidden className="size-3.5 shrink-0" />
+              <span className="truncate">{directory}</span>
+            </span>
           )}
         </div>
         <p
@@ -359,7 +384,7 @@ export function ConsoleShell() {
             {error}
           </p>
         )}
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1">
           {view === "conversation" ? (
             <>
               <div className="flex min-w-0 flex-1 flex-col">
@@ -410,7 +435,7 @@ export function ConsoleShell() {
             <ArtifactsView call={c.call} version={c.workspaceVersion} />
           ) : view === "plans" ? (
             chatId ? (
-              <div className="w-full overflow-y-auto p-6">
+              <div className="w-full min-w-0 overflow-y-auto p-4 sm:p-6">
                 <h2 className="mb-4 text-lg font-semibold">Session plan</h2>
                 {chatState?.todoPhases.length ? (
                   chatState.todoPhases.map((phase) => (
@@ -448,7 +473,7 @@ export function ConsoleShell() {
           ) : (
             <div className="flex min-w-0 flex-1 flex-col">
               {!selectedChat && (
-                <div className="flex gap-2 border-b p-3">
+                <div className="flex min-w-0 gap-2 border-b p-3">
                   <Input
                     aria-label="Repository workspace"
                     value={changesCwd}
@@ -477,12 +502,12 @@ export function ConsoleShell() {
       </main>
       </div>
       <Sheet open={mobileNav} onOpenChange={setMobileNav}>
-        <SheetContent side="left" className="workspace-drawer w-[260px] p-0">
+        <SheetContent side="left" showCloseButton={false} className="workspace-drawer w-[260px] gap-0 border-0 bg-[var(--ws-sidebar)] p-0 data-[side=left]:w-[260px] data-[side=left]:border-r-0 data-[side=left]:sm:max-w-[260px]">
           <SheetTitle className="sr-only">Conversations</SheetTitle>
           <SheetDescription className="sr-only">
             Switch rooms and chats
           </SheetDescription>
-          {mobileNav && rail}
+          {mobileNav && renderRail(() => setMobileNav(false))}
         </SheetContent>
       </Sheet>
       <AgentPanel
@@ -600,7 +625,7 @@ export function ConsoleShell() {
         </DialogContent>
       </Dialog>
       <Dialog open={search} onOpenChange={setSearch}>
-        <DialogContent className="p-0">
+        <DialogContent showCloseButton={false} className="slack-modal top-[12svh] w-[calc(100%-1rem)] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-[640px]">
           <DialogHeader className="sr-only">
             <DialogTitle>Find a conversation</DialogTitle>
             <DialogDescription>
@@ -608,64 +633,57 @@ export function ConsoleShell() {
             </DialogDescription>
           </DialogHeader>
           <Command>
-            <CommandInput placeholder="Search conversations or actions…" />
+            <CommandInput placeholder="Search conversations, agents, and actions" />
             <CommandList>
               <CommandEmpty>No matches.</CommandEmpty>
+              {c.channels.some((room) => room.kind !== "dm") && (
+                <CommandGroup heading="Channels">
+                  {c.channels.filter((room) => room.kind !== "dm").map((room) => (
+                    <CommandItem key={room.id} value={room.id} onSelect={() => { selectRoom(room.id); setSearch(false); }}>
+                      <Hash className="text-muted-foreground" />
+                      <span className="truncate">{(room.name ?? room.id).replace(/^#/, "")}</span>
+                      {room.workspace && <span className="ml-auto truncate text-[12px] text-muted-foreground group-data-selected/command-item:text-[var(--ws-active-text)]">{room.workspace}</span>}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+              {c.channels.some((room) => room.kind === "dm") && (
+                <CommandGroup heading="Direct messages">
+                  {c.channels.filter((room) => room.kind === "dm").map((room) => (
+                    <CommandItem key={room.id} value={room.id} onSelect={() => { selectRoom(room.id); setSearch(false); }}>
+                      <AvatarTile author={(room.name ?? room.id).replace(/^@/, "")} className="size-5 text-[14px]" />
+                      <span className="truncate">{(room.name ?? room.id).replace(/^@/, "")}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+              {chats.length > 0 && (
+                <CommandGroup heading="OMP chats">
+                  {chats.map((chat) => (
+                    <CommandItem key={chat.id} value={`${chat.title} ${chat.id}`} onSelect={() => { selectChat(chat.id); setSearch(false); }}>
+                      <MessageSquare className="text-muted-foreground" />
+                      <span className="truncate">{chat.title}</span>
+                      <span className="ml-auto truncate text-[12px] text-muted-foreground group-data-selected/command-item:text-[var(--ws-active-text)]">{chat.cwd}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
               <CommandGroup heading="Actions">
-                <CommandItem
-                  onSelect={() => {
-                    setSearch(false);
-                    setNewChat(true);
-                  }}
-                >
-                  New OMP chat
+                <CommandItem onSelect={() => { setSearch(false); setNewChat(true); }}>
+                  <Plus className="text-muted-foreground" />New OMP chat
                 </CommandItem>
-                <CommandItem
-                  onSelect={() => {
-                    setSearch(false);
-                    setNewRoom(true);
-                  }}
-                >
-                  Create channel
+                <CommandItem onSelect={() => { setSearch(false); setNewRoom(true); }}>
+                  <Hash className="text-muted-foreground" />Create channel
                 </CommandItem>
                 <CommandItem onSelect={() => { setSearch(false); setNewAgent(true); }}>
-                  Create agent
+                  <UserRoundPlus className="text-muted-foreground" />Create agent
                 </CommandItem>
                 <CommandItem onSelect={() => { setSearch(false); setNewBot(true); }}>
-                  Create automated bot
+                  <Bot className="text-muted-foreground" />Create automated bot
                 </CommandItem>
-                <CommandItem
-                  onSelect={() => {
-                    setSearch(false);
-                    setAgentsOpen(true);
-                  }}
-                >
-                  Manage agents
+                <CommandItem onSelect={() => { setSearch(false); setAgentsOpen(true); }}>
+                  <Users className="text-muted-foreground" />Manage agents
                 </CommandItem>
-              </CommandGroup>
-              <CommandGroup heading="Conversations">
-                {c.channels.map((room) => (
-                  <CommandItem
-                    key={room.id}
-                    onSelect={() => {
-                      selectRoom(room.id);
-                      setSearch(false);
-                    }}
-                  >
-                    {room.id}
-                  </CommandItem>
-                ))}
-                {chats.map((chat) => (
-                  <CommandItem
-                    key={chat.id}
-                    onSelect={() => {
-                      selectChat(chat.id);
-                      setSearch(false);
-                    }}
-                  >
-                    {chat.title}
-                  </CommandItem>
-                ))}
               </CommandGroup>
             </CommandList>
           </Command>

@@ -80,28 +80,28 @@ export function FilePicker({
             onChange={(e) => setPath(e.target.value)}
             placeholder="/Users/you/project"
           />
-          <Button type="submit">
+          <Button type="submit" className="h-9 shrink-0 px-4 font-bold bg-[var(--send)] text-white hover:bg-[var(--send-hover)]">
             {directoryOnly ? "Open folder" : "Use path"}
           </Button>
         </form>
         <Button
           variant="ghost"
-          className="justify-start"
+          className="-my-2 h-9 justify-start self-start px-2 text-[15px]"
           onClick={() => setPath(parent)}
           disabled={!parent || parent === path}
         >
           <ArrowUp />
           Parent folder
         </Button>
-        <ScrollArea className="h-72">
-          <div className="grid gap-1">
+        <ScrollArea className="h-72 rounded-lg border">
+          <div className="grid gap-px p-1">
             {entries
               .filter((e) => !directoryOnly || e.directory)
               .map((entry) => (
                 <Button
                   key={entry.path}
                   variant="ghost"
-                  className="justify-start font-normal"
+                  className="h-9 justify-start rounded-md px-2.5 text-[15px] font-normal hover:bg-[var(--surface-hover)] max-sm:h-11 [&_svg]:text-muted-foreground"
                   onClick={() => {
                     if (entry.directory) setPath(entry.path);
                     else {
@@ -117,7 +117,7 @@ export function FilePicker({
           </div>
         </ScrollArea>
         {error && (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-[13px] text-destructive">
             {error}
           </p>
         )}

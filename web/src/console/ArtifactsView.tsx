@@ -49,33 +49,33 @@ export function ArtifactsView({ call, version }: { call: ConsoleCall; version: n
       .finally(() => setBusy(null));
   };
   return (
-    <div id="artifacts" className="w-full overflow-y-auto p-4 md:p-6">
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">Artifacts</h2>
-          <p className="text-xs text-muted-foreground">HTML the agents opened in Lavish Editor for your review. Annotate there; feedback reaches the agent that is polling.</p>
+    <div id="artifacts" className="w-full overflow-y-auto px-4 py-5 sm:px-8 sm:py-7">
+      <div className="mx-auto mb-5 flex max-w-3xl items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-[22px] leading-7 font-black">Artifacts</h2>
+          <p className="mt-0.5 text-[15px] text-muted-foreground">HTML the agents opened in Lavish Editor for your review. Annotate there; feedback reaches the agent that is polling.</p>
         </div>
-        <Button type="button" variant="ghost" size="icon-sm" aria-label="Refresh artifacts" onClick={() => void refresh().catch((cause) => setError(String(cause)))}><RefreshCw /></Button>
+        <Button type="button" variant="ghost" size="icon-lg" className="shrink-0" aria-label="Refresh artifacts" onClick={() => void refresh().catch((cause) => setError(String(cause)))}><RefreshCw /></Button>
       </div>
-      <ul className="space-y-1.5">
-        {rows === null && <li className="text-xs text-muted-foreground">Loading…</li>}
-        {rows?.length === 0 && <li className="text-xs text-muted-foreground">No artifacts yet. Ask an agent for a plan, a comparison, or a report as a page and it appears here.</li>}
+      <ul className="mx-auto max-w-3xl overflow-hidden rounded-lg border bg-card empty:hidden">
+        {rows === null && <li className="px-4 py-6 text-center text-[13px] text-muted-foreground">Loading…</li>}
+        {rows?.length === 0 && <li className="px-6 py-14 text-center text-[15px] text-muted-foreground">No artifacts yet. Ask an agent for a plan, a comparison, or a report as a page and it appears here.</li>}
         {rows?.map((row) => (
-          <li key={row.file} className="artifact flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3 py-2" data-file={row.file}>
+          <li key={row.file} className="artifact flex flex-wrap items-center gap-3 border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-[var(--surface-hover)]" data-file={row.file}>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium" title={row.file}>{row.file.split("/").pop()}</div>
-              <div className="truncate text-xs text-muted-foreground" title={row.file}>{row.file}</div>
-              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-                <Badge variant="outline">{row.status}</Badge>
+              <div className="truncate text-[15px] font-bold" title={row.file}>{row.file.split("/").pop()}</div>
+              <div className="truncate font-mono text-xs text-muted-foreground" title={row.file}>{row.file}</div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="outline" className="gap-1.5"><span aria-hidden className={`size-2 rounded-full ${row.pendingPrompts > 0 ? "bg-[var(--presence-parked)]" : row.status === "active" || row.status === "open" ? "bg-[var(--presence-active)]" : "bg-[var(--presence-stopped)]"}`} />{row.status}</Badge>
                 {row.pendingPrompts > 0 && <span>{row.pendingPrompts} queued for the agent</span>}
                 <span>{when(row.updatedAt)}</span>
               </div>
             </div>
-            <Button type="button" size="xs" className="artifact-open" disabled={busy !== null} onClick={() => open(row)}><ExternalLink /> Open review</Button>
+            <Button type="button" variant="outline" size="sm" className="artifact-open h-8 font-bold max-sm:h-11" disabled={busy !== null} onClick={() => open(row)}><ExternalLink /> Open review</Button>
           </li>
         ))}
       </ul>
-      <p role="alert" className="mt-2 min-h-5 text-xs text-destructive">{error}</p>
+      <p role="alert" className="mx-auto mt-2 min-h-5 max-w-3xl text-[13px] text-destructive">{error}</p>
     </div>
   );
 }

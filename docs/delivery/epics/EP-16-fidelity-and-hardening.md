@@ -55,6 +55,7 @@ The two-model review (sol + m3) found the console advertises thread replies and 
 | [T-1629](../tasks/T-1629-lavish-artifacts.md) | Lavish Editor for reviewable HTML artifacts | Done |
 | [T-1630](../tasks/T-1630-console-lazy-chunks.md) | A small console bundle: lazy chunks, gzip, immutable caching | Done |
 | [T-1631](../tasks/T-1631-console-next.md) | A server-rendered console on Next.js | Done |
+| [T-1632](../tasks/T-1632-slack-console.md) | A Slack-faithful console | Done |
 | [T-1601](../tasks/T-1601-console-thread-parentage.md) | Console thread replies preserve parentage | Done |
 | [T-1602](../tasks/T-1602-reaction-removal-frames.md) | Reaction removal frames | Done |
 | [T-1603](../tasks/T-1603-attribution-enforcement.md) | Enforce attribution from connection identity | Done |

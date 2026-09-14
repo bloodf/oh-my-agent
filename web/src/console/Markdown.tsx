@@ -17,18 +17,18 @@
 import { useEffect, useId, useState, useSyncExternalStore, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { MENTION_PATTERN } from "@/lib/markdown-format";
 import { getResolvedThemeMode, subscribeTheme } from "@/lib/theme";
-
-const MENTION = /(@[a-z0-9][a-z0-9._-]*)/gi;
 
 /** Plain text with `@names` wrapped so they read as addresses. */
 function withMentions(children: ReactNode): ReactNode {
   if (typeof children === "string") {
-    const parts = children.split(MENTION);
+    const parts = children.split(MENTION_PATTERN);
     if (parts.length === 1) return children;
+    // split() with one capture group puts every match at an odd index.
     return parts.map((part, index) =>
-      MENTION.test(part) && index % 2 === 1 ? (
-        <span key={index} className="rounded bg-primary/10 px-1 font-medium text-primary">{part}</span>
+      index % 2 === 1 ? (
+        <span key={index} className="mention rounded bg-[var(--mention-bg)] px-0.5 font-medium text-[var(--mention-text)]">{part}</span>
       ) : (
         part
       ),
@@ -40,16 +40,16 @@ function withMentions(children: ReactNode): ReactNode {
 
 function CodeBlock({ language, value }: { language: string; value: string }) {
   return (
-    <div className="my-1.5 overflow-hidden rounded-lg border bg-muted/40 not-prose">
+    <div className="my-1 overflow-hidden rounded-lg border bg-muted/50 not-prose">
       {language && (
-        <div className="border-b px-3 py-1 font-mono text-[10px] text-muted-foreground">{language}</div>
+        <div className="border-b px-3 py-1 font-mono text-[11px] text-muted-foreground">{language}</div>
       )}
-      <pre className="overflow-x-auto p-3 font-mono text-xs leading-5">
-        <code>
+      <pre className="overflow-x-auto py-2 font-mono text-[12px] leading-[1.5]">
+        <code className="inline-block min-w-full">
           {value.replace(/\n$/, "").split("\n").map((line, lineIndex) => (
             <span
               key={lineIndex}
-              className={`block min-w-max ${language === "diff" && line.startsWith("+") ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300" : language === "diff" && line.startsWith("-") ? "bg-red-500/10 text-red-800 dark:text-red-300" : ""}`}
+              className={`block px-3 ${language === "diff" && line.startsWith("+") ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300" : language === "diff" && line.startsWith("-") ? "bg-red-500/10 text-red-800 dark:text-red-300" : ""}`}
             >
               {line || " "}
             </span>
@@ -98,17 +98,19 @@ function Mermaid({ source }: { source: string }) {
 }
 
 const components: Components = {
-  p: ({ children }) => <p className="my-1 leading-5">{withMentions(children)}</p>,
-  li: ({ children }) => <li className="my-0.5">{withMentions(children)}</li>,
+  p: ({ children }) => <p className="my-1 first:mt-0 last:mb-0">{withMentions(children)}</p>,
+  ul: ({ children }) => <ul className="my-1 list-disc pl-6 first:mt-0 last:mb-0">{children}</ul>,
+  ol: ({ children }) => <ol className="my-1 list-decimal pl-6 first:mt-0 last:mb-0">{children}</ol>,
+  li: ({ children }) => <li className="my-0.5 pl-0.5">{withMentions(children)}</li>,
   a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2 hover:text-primary/80">{children}</a>
+    <a href={href} target="_blank" rel="noreferrer" className="text-[var(--link)] hover:underline">{children}</a>
   ),
-  h1: ({ children }) => <h1 className="mt-2 mb-1 text-base font-semibold first:mt-0">{children}</h1>,
-  h2: ({ children }) => <h2 className="mt-2 mb-1 text-sm font-semibold first:mt-0">{children}</h2>,
-  h3: ({ children }) => <h3 className="mt-2 mb-1 text-sm font-semibold first:mt-0">{children}</h3>,
-  blockquote: ({ children }) => <blockquote className="my-1 border-l-2 border-primary/50 pl-3 text-muted-foreground">{children}</blockquote>,
+  h1: ({ children }) => <h1 className="mt-2 mb-1 text-[18px] font-black first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="mt-2 mb-1 text-[15px] font-black first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="mt-2 mb-1 text-[15px] font-bold first:mt-0">{children}</h3>,
+  blockquote: ({ children }) => <blockquote className="my-1 border-l-4 border-border pl-3">{children}</blockquote>,
   table: ({ children }) => (
-    <div className="my-1.5 overflow-x-auto not-prose"><table className="w-auto border-collapse text-xs">{children}</table></div>
+    <div className="my-1.5 overflow-x-auto not-prose"><table className="w-auto border-collapse text-[13px]">{children}</table></div>
   ),
   th: ({ children }) => <th className="border bg-muted/40 px-2 py-1 text-left font-semibold">{children}</th>,
   td: ({ children }) => <td className="border px-2 py-1 align-top">{withMentions(children)}</td>,
@@ -120,7 +122,7 @@ const components: Components = {
     // Fenced blocks arrive with a language class or a trailing newline;
     // inline code has neither.
     if (!className && !value.includes("\n")) {
-      return <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em] text-foreground">{value}</code>;
+      return <code className="rounded border bg-muted px-1 py-px font-mono text-[13px] text-[#c01343] dark:text-[#e8912d]">{value}</code>;
     }
     if (language === "mermaid") return <Mermaid source={value} />;
     return <CodeBlock language={language} value={value} />;

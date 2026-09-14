@@ -48,8 +48,6 @@ interface ToolResult {
 	isError?: boolean;
 }
 
-const REACTION_EMOJIS = ["👀", "⏳", "✅", "❌"] as const;
-type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
 type ReactionMethod = "chat_react" | "chat_unreact";
 
 const SELECTION_GUIDANCE =
@@ -57,7 +55,7 @@ const SELECTION_GUIDANCE =
 
 interface ReactionParams {
 	messageId: number;
-	emoji: ReactionEmoji;
+	emoji: string;
 }
 
 interface SpawnToolParams {
@@ -70,6 +68,23 @@ interface SpawnToolParams {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const EMOJI_MESSAGE = "emoji must be exactly one emoji, such as 👀 or 🎉";
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const PICTOGRAPHIC = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u;
+const KEYCAP = /^[0-9#*]\uFE0F?\u20E3$/u;
+
+/**
+ * One user-perceived character that is an emoji: a pictograph with any skin
+ * tone or ZWJ sequence, a flag, or a keycap. Letters, digits, and runs of
+ * several emoji are refused.
+ */
+function isSingleEmoji(value: unknown): value is string {
+	if (typeof value !== "string" || value === "") return false;
+	const segments = [...graphemes.segment(value)];
+	if (segments.length !== 1) return false;
+	return PICTOGRAPHIC.test(value) || KEYCAP.test(value);
 }
 
 function validateReactionParams(value: unknown): Validation<ReactionParams> {
@@ -87,41 +102,32 @@ function validateReactionParams(value: unknown): Validation<ReactionParams> {
 			message: "messageId must be a positive safe integer",
 		};
 	}
-	if (!REACTION_EMOJIS.includes(value.emoji as ReactionEmoji)) {
-		return {
-			ok: false,
-			field: "emoji",
-			message: `emoji must be one of ${REACTION_EMOJIS.join(", ")}`,
-		};
+	if (!isSingleEmoji(value.emoji)) {
+		return { ok: false, field: "emoji", message: EMOJI_MESSAGE };
 	}
 	return {
 		ok: true,
-		value: { messageId: value.messageId, emoji: value.emoji as ReactionEmoji },
+		value: { messageId: value.messageId, emoji: value.emoji },
 	};
 }
 
 /**
- * The shared result contract, plus this tool's own emoji allowlist.
+ * The shared result contract, plus this tool's own emoji rule.
  *
- * The daemon's reaction methods accept any non-empty emoji string; the tool
- * offers four, and a reply naming anything else is a daemon this worker does
- * not understand.
+ * The daemon's reaction methods accept any non-empty string; the tool narrows
+ * that to exactly one emoji, and a reply naming anything else is a daemon this
+ * worker does not understand.
  */
 function validateReactionResult(
 	method: ReactionMethod,
 	value: unknown,
-): Validation<{ messageId: number; emoji: ReactionEmoji }> {
+): Validation<ReactionParams> {
 	const shared = METHODS[method].validateResult(value);
 	if (!shared.ok) return shared;
-	const emoji = (shared.value as { emoji: string }).emoji;
-	if (!REACTION_EMOJIS.includes(emoji as ReactionEmoji)) {
-		return {
-			ok: false,
-			field: "emoji",
-			message: `emoji must be one of ${REACTION_EMOJIS.join(", ")}`,
-		};
+	if (!isSingleEmoji((shared.value as { emoji: unknown }).emoji)) {
+		return { ok: false, field: "emoji", message: EMOJI_MESSAGE };
 	}
-	return shared as Validation<{ messageId: number; emoji: ReactionEmoji }>;
+	return shared as Validation<ReactionParams>;
 }
 
 const toolError = (message: string): ToolResult => ({
@@ -254,7 +260,7 @@ export default function toolbeltExtension(
 		// A private copy of the whole shape required a `reacted` field the
 		// protocol never declared and ignored the `added`/`removed` ones it
 		// does, so a conforming daemon would have been refused and the worker
-		// never learned whether its reaction was new. The emoji allowlist is
+		// never learned whether its reaction was new. The single-emoji rule is
 		// genuinely local — the protocol accepts any non-empty string — so it
 		// is layered on rather than folded in.
 		return await callValidated(
@@ -315,10 +321,10 @@ export default function toolbeltExtension(
 	});
 
 	const reactionDescription =
-		"Status without chat noise. The daemon already marks every message delivered to you 👀 (seen), marks the ones addressed to you ⏳ while your turn runs, and turns that into ✅ or ❌ when it ends. Add your own only when it says more: ❌ on a message you cannot act on, ✅ early on one you finished mid-turn, 👀 on one you only checked.";
+		"Status without chat noise. The daemon already marks every message delivered to you 👀 (seen), marks the ones addressed to you ⏳ while your turn runs, and turns that into ✅ or ❌ when it ends. Add your own only when it says more, with any single emoji: ❌ on a message you cannot act on, ✅ early on one you finished mid-turn, 👀 on one you only checked, 👍 or 🎉 the way a teammate would.";
 	const reactionParameters = z.object({
 		messageId: z.number().describe("Message id"),
-		emoji: z.string().describe("One of 👀, ⏳, ✅, ❌"),
+		emoji: z.string().describe("Exactly one emoji, such as 👀, ✅, ❌, or 🎉"),
 	});
 
 	pi.registerTool({

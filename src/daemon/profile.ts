@@ -14,8 +14,9 @@
  * (opens it under the state dir).
  *
  * Failure modes: a missing or unreadable file is an empty profile. A patch
- * is validated field by field — short strings only — and refused whole on
- * the first bad field, so a browser never writes half a profile.
+ * is validated field by field — short strings, or an avatar image as a small
+ * base64 data URL — and refused whole on the first bad field, so a browser
+ * never writes half a profile.
  */
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -23,7 +24,10 @@ import { dirname } from "node:path";
 export interface Persona {
 	/** What the console shows in place of the wire author. */
 	displayName?: string;
-	/** One to four characters, an emoji or initials, drawn in the avatar. */
+	/**
+	 * One to four characters (an emoji or initials), or a
+	 * `data:image/(png|jpeg|webp|gif);base64,…` URL of at most 200 KB decoded.
+	 */
 	avatar?: string;
 }
 
@@ -36,6 +40,38 @@ export const EMPTY_PROFILE: Profile = { operator: {}, agents: {} };
 
 const MAX_NAME = 40;
 const MAX_AVATAR = 4;
+/** Decoded bytes an avatar image may hold. */
+export const MAX_AVATAR_IMAGE_BYTES = 200_000;
+const IMAGE_AVATAR = /^data:image\/(png|jpeg|webp|gif);base64,/;
+
+/**
+ * Check an avatar image data URL: an allowed mime, canonical base64, and a
+ * decoded size under the cap. The length is checked before decoding so an
+ * oversized value is refused without allocating its bytes.
+ */
+function imageAvatar(text: string, at: string): string {
+	const header = IMAGE_AVATAR.exec(text);
+	if (!header) {
+		throw new Error(
+			`${at} image must be a png, jpeg, webp, or gif base64 data URL`,
+		);
+	}
+	const data = text.slice(header[0].length);
+	if (
+		data.length === 0 ||
+		data.length % 4 !== 0 ||
+		!/^[A-Za-z0-9+/]+={0,2}$/.test(data)
+	) {
+		throw new Error(`${at} image is not valid base64`);
+	}
+	const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+	if ((data.length / 4) * 3 - padding > MAX_AVATAR_IMAGE_BYTES) {
+		throw new Error(
+			`${at} image must be at most ${MAX_AVATAR_IMAGE_BYTES / 1000} KB`,
+		);
+	}
+	return text;
+}
 
 function persona(value: unknown, at: string): Persona {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -50,6 +86,10 @@ function persona(value: unknown, at: string): Persona {
 		if (typeof entry !== "string")
 			throw new Error(`${at}.${key} must be a string`);
 		const text = entry.trim();
+		if (key === "avatar" && text.startsWith("data:")) {
+			out.avatar = imageAvatar(text, `${at}.avatar`);
+			continue;
+		}
 		const limit = key === "avatar" ? MAX_AVATAR : MAX_NAME;
 		// Graphemes, not UTF-16 units: one emoji is one character of avatar.
 		const length = [...new Intl.Segmenter().segment(text)].length;

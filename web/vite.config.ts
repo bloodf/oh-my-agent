@@ -9,6 +9,8 @@ export default defineConfig({
 		tailwindcss(),
 		{
 			name: "oma-console-html",
+			// Build only: the dev server must keep loading /src/main.tsx.
+			apply: "build",
 			transformIndexHtml(html) {
 				return html
 					.replace(

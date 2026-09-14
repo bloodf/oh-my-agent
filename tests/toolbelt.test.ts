@@ -513,7 +513,7 @@ describe("worker toolbelt", () => {
 		expect(valid.isError).toBeUndefined();
 	});
 
-	test("rejects an unknown reaction emoji returned by the daemon", async () => {
+	test("rejects a non-emoji reaction returned by the daemon", async () => {
 		const rootDir = await mkdtemp(join(tmpdir(), "oma-reaction-result-"));
 		const socketPath = join(rootDir, "daemon.sock");
 		const agentDir = join(
@@ -535,7 +535,7 @@ describe("worker toolbelt", () => {
 					result: {
 						messageId: 1,
 						actor: "reviewer",
-						emoji: "🎉",
+						emoji: "a",
 						added: true,
 					},
 				});
@@ -562,7 +562,7 @@ describe("worker toolbelt", () => {
 		expect(text(result)).toContain("emoji");
 	});
 
-	test("rejects unknown reactions locally while valid reactions reach production", async () => {
+	test("rejects anything but one emoji locally while any emoji reaches production", async () => {
 		const { tools } = await harness();
 		const sent = await invoke(tools, "chat_send", {
 			room: "#general",
@@ -571,14 +571,34 @@ describe("worker toolbelt", () => {
 		});
 		const id = messageId(sent);
 
-		const result = await invoke(tools, "chat_react", {
-			messageId: id,
-			emoji: "🎉",
-		});
-		expect(result.isError).toBe(true);
-		for (const allowed of ["👀", "⏳", "✅", "❌"]) {
-			expect(text(result)).toContain(allowed);
+		for (const refused of ["", "a", "1", "👍👍", " 🎉", ":tada:"]) {
+			const result = await invoke(tools, "chat_react", {
+				messageId: id,
+				emoji: refused,
+			});
+			expect(result.isError).toBe(true);
+			expect(text(result)).toContain("exactly one emoji");
 		}
+
+		const accepted = ["🎉", "👍🏽", "🇧🇷", "1️⃣", "👨‍👩‍👧‍👦"];
+		for (const emoji of accepted) {
+			const result = await invoke(tools, "chat_react", {
+				messageId: id,
+				emoji,
+			});
+			expect(result.isError).toBeUndefined();
+		}
+		const reacted = await invoke(tools, "chat_read", { room: "#general" });
+		expect(reacted.details).toMatchObject({
+			messages: [
+				{
+					id,
+					reactions: expect.arrayContaining(
+						accepted.map((emoji) => ({ actor: "reviewer", emoji })),
+					),
+				},
+			],
+		});
 
 		const valid = await invoke(tools, "chat_react", {
 			messageId: id,

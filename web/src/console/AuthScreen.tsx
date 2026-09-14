@@ -33,14 +33,17 @@ export function AuthScreen({ onAuthenticate, error = "" }: AuthScreenProps) {
   return (
     <section
       id="operator-auth"
-      className="flex min-h-svh items-center justify-center bg-background p-6"
+      className="flex min-h-svh flex-col items-center justify-center gap-6 bg-muted/60 px-4 py-10"
     >
-      <Card className="w-full max-w-sm" size="sm">
-        <CardHeader>
-          <CardTitle id="operator-auth-title">
+      <div aria-hidden className="grid size-12 place-items-center rounded-xl bg-[var(--ws-rail)] text-[15px] font-black tracking-tight text-white shadow-[var(--shadow-float)]">
+        OMA
+      </div>
+      <Card className="w-full max-w-[26rem] gap-5 rounded-xl border-0 px-3 py-7 shadow-[var(--shadow-modal)]">
+        <CardHeader className="text-center">
+          <CardTitle id="operator-auth-title" className="text-[28px] leading-9 font-black tracking-[-0.01em]">
             Operator authentication
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-[15px]">
             Enter the operator token to open this remote console.
           </CardDescription>
         </CardHeader>
@@ -73,6 +76,7 @@ export function AuthScreen({ onAuthenticate, error = "" }: AuthScreenProps) {
                 id="operator-token"
                 ref={inputRef}
                 type="password"
+                className="h-11"
                 autoComplete="off"
                 required
                 autoFocus
@@ -83,13 +87,13 @@ export function AuthScreen({ onAuthenticate, error = "" }: AuthScreenProps) {
                 }}
               />
             </div>
-            <Button type="submit">
+            <Button type="submit" className="h-11 text-[15px] font-bold bg-[var(--send)] text-white hover:bg-[var(--send-hover)]">
               Open console
             </Button>
             <p
               id="operator-auth-error"
               role="alert"
-              className="min-h-5 text-xs text-destructive"
+              className="-mt-2 min-h-5 text-center text-[13px] text-destructive"
             >
               {localError || error}
             </p>

@@ -12,7 +12,7 @@ The operator explicitly permits filesystem access matching OMP's OS identity acr
 
 ## Information architecture
 
-- Slack-like global search/appearance toolbar and narrow desktop app bar beside a 260px rail with separate collapsible OMP chats, Channels, and Direct messages. Creation actions remain nearby; Cmd/Ctrl+K searches destinations and actions.
+- Slack-like global search/appearance toolbar and a 64px labeled icon rail beside a 260px sidebar with separate collapsible OMP chats, Channels, and Direct messages. Creation actions remain nearby; Cmd/Ctrl+K searches destinations and actions.
 - Main conversation header: destination and effective working directory, model selector for independent chats, channel workspace editing, contextual agent actions. Conversation / Plans / Changes views preserve destination context.
 - Transcript: left-aligned authored messages, small avatars, grouped consecutive messages, readable Markdown/code, reactions, thread actions available on hover and focus.
 - Composer: full-width growing input, attachment tray, separate action row. Enter sends, Shift+Enter adds a line. Failed sends and uploads preserve draft. Device upload, local-path reference, drop, and paste remain visibly distinct.
@@ -25,7 +25,16 @@ The operator explicitly permits filesystem access matching OMP's OS identity acr
 
 ## Visual system
 
-Slack-derived application hierarchy, referenced against [sanidhyy/slack-clone](https://github.com/sanidhyy/slack-clone): palette-colored workspace bar/navigation, bright default conversation canvas, compact context header, date dividers, square identity avatars, and bordered bottom composer. Appearance offers 59 color-only palettes from [shadcn.io's public previews](https://www.shadcn.io/theme), captured on 2026-09-05 in `web/src/lib/theme-palettes.json`. Registry downloads require authentication; no downloaded component code is used. The catalog currently exposes 59 entries, not 69. Light/dark/system mode and palette are browser-local preferences; startup applies them before React rendering. Workspace identity uses each palette's light primary across both modes, while content uses the selected mode. Foregrounds are corrected only where needed for reading contrast. System sans and monospace, 14px body, 11–12px metadata, 4/8px spacing, accessible touch targets, modest radii, visible focus rings, and reduced motion stay consistent across palettes. No glass, decorative gauges, fake Slack actions, or runtime theme downloads.
+Slack desktop is the reference, cross-checked against [sanidhyy/slack-clone](https://github.com/sanidhyy/slack-clone) and [TropicolX/slack-clone](https://github.com/TropicolX/slack-clone). The frame has depth rather than flat fills:
+
+- **Workspace chrome.** A 64px icon rail with labels under each icon, a 44px toolbar with a centered translucent search field, and a 260px sidebar. Each surface is a gradient of its theme color (`.ws-rail-surface`, `.ws-toolbar-surface`, `.ws-sidebar-surface`) with a 1px translucent edge. Sidebar rows are 28px with 15px text; hover is a translucent wash, the active row is Slack blue, unread rows are bold with a badge, and direct messages show a square avatar with a presence dot for running, parked, or stopped.
+- **Conversation.** A 49px channel header with a heavy title, the member stack inside the Agents button, and underline tabs with the working directory as a chip. Messages use 36px rounded-square avatars, 15px body text, a hover wash, a floating action toolbar, reaction pills, a thread summary row, and centered date pills over a hairline.
+- **Composer.** A bordered box with a Markdown formatting row, the text area, and an action row ending in a green send button.
+- **Overlays.** Sheets and dialogs use 12px radii, a soft modal shadow, 22px heavy titles, bordered inputs with a blue focus ring, and green primary actions.
+
+Themes are curated, not generated. `web/src/lib/themes.ts` defines six sidebar themes after Slack's own (Aubergine, the default, plus Ochin, Hoth, Monument, Work Hard, and Nocturne). A theme sets only the `--ws-*` chrome variables; content surfaces come from one light and one dark token set in `web/src/index.css`, so every theme keeps their contrast guarantees: each text token clears 7:1 on every surface it is painted on, which the browser suite checks. Theme and light/dark/system mode are browser-local and applied before React renders; a stored id from the retired 59-palette catalog falls back to Aubergine and keeps its mode.
+
+System sans and monospace with no webfont, 15px body, 13px secondary text, 8px radii (6px on inputs), visible focus rings, 44px touch targets on coarse pointers, and reduced motion. No fake Slack actions: every rail icon, header control, and composer button does something real. No runtime theme downloads.
 
 ## States and verification
 
