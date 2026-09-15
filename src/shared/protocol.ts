@@ -24,7 +24,9 @@
  * Performance: type declarations only; zero runtime cost beyond the small
  * error builders.
  */
+
 import type { PeerDefinition } from "./agent-definition";
+import type { AgentState } from "./agent-state";
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -64,7 +66,7 @@ export type MethodName = (typeof METHOD_NAMES)[number];
 
 // ── Shared shapes ───────────────────────────────────────────────────────────
 
-export type AgentState = "running" | "parked" | "stopped";
+export type { AgentState } from "./agent-state";
 
 export interface AgentStatus {
 	name: string;
