@@ -71,7 +71,11 @@ Room updates use `/api/events` WebSocket frames. Frames missed while disconnecte
 
 ## Authentication and remote control
 
-Every static asset and API route requires the operator token. Loopback HTTP accepts `Authorization: Bearer <token>` or `X-Operator-Token: <token>`. `?token=` is accepted only for initial static navigation and the loopback WebSocket handshake; `/api/*` rejects query-token authentication. No cookie is set.
+Every static asset and API route requires the operator token. Loopback HTTP accepts `Authorization: Bearer <token>` or `X-Operator-Token: <token>`. `?token=` is accepted only for initial static navigation and the loopback WebSocket handshake; `/api/*` rejects query-token authentication.
+
+A static request that carries the token gets back a static cookie, `oma-static-<port>` (`HttpOnly`, `SameSite=Strict`, `Path=/`). Its value is an HMAC of the token, never the token itself, and it opens `/`, `app.js`, `style.css`, and chunks only: `/api/*` and the WebSocket ignore it. That cookie is what lets the client strip `?token=` from the address bar and still reload, and what authenticates the relative imports between chunks. Rotating the token invalidates it. Cookies ignore ports, so another local service on `127.0.0.1` can receive it; it grants nothing beyond the console's public bundle, and the port in its name keeps two daemons from overwriting each other's.
+
+A `401` from the API returns the client to token entry in both modes. On loopback, entering the token checks it with a plain read and reloads the console with `?token=`, which issues a fresh cookie.
 
 Remote mode uses the external HTTPS origin, token entry, and short-lived path-bound tickets described in [Remote console exposure](remote-exposure.md). The proxy secret authenticates forwarded request metadata; it does not replace the operator token.
 
@@ -162,7 +166,7 @@ src/console/style.css
 src/console/chunk-<name>-<hash>.js   # lazily imported modules: mermaid and its diagram packs
 ```
 
-The daemon serves exactly those shapes and nothing else under `src/console/`. Chunks are content-hashed, so they are served `Cache-Control: immutable`; every script and stylesheet is gzipped when the browser accepts it. `app.js` fetches a chunk through `window.__omaAsset`, which the daemon injects into the shell with the loopback token as a query, or in remote mode a chunk pass: one reusable, path-prefix-bound ticket that lives twelve hours, so a diagram opened late in a session still loads its renderer.
+The daemon serves exactly those shapes and nothing else under `src/console/`. Chunks are content-hashed, so they are served `Cache-Control: immutable`; every script and stylesheet is gzipped when the browser accepts it. Chunks import each other, and `app.js`, by plain relative URL, so they carry no query credential: the browser sends the static cookie. On loopback that is the token HMAC above; in remote mode it is an asset pass, one reusable ticket that lives twelve hours, so a diagram opened late in a session still loads its renderer.
 
 Use the root scripts so output lands where the daemon serves it:
 
@@ -172,7 +176,7 @@ bun run console:build
 bun run --cwd web typecheck
 ```
 
-`console:dev` starts Vite. `console:build` compiles the web project and writes the three production assets. `bun run --cwd web typecheck` is the focused web typecheck; root `bun run typecheck` also runs the daemon TypeScript check.
+`console:dev` starts Vite on `http://localhost:5173` and proxies `/api`, including the `/api/events` WebSocket, to the daemon. The target is `OMA_CONSOLE_URL` if set, otherwise the origin in `<agent-dir>/oh-my-agent/console-url` (honoring `PI_CODING_AGENT_DIR`), otherwise `http://127.0.0.1:50561`. Only the origin is used; open `http://localhost:5173/?token=<operator-token>`. The proxy presents the daemon's own origin on the WebSocket handshake, which the daemon otherwise refuses. `console:build` compiles the web project and writes the three production assets. `bun run --cwd web typecheck` is the focused web typecheck; root `bun run typecheck` also runs the daemon TypeScript check.
 
 For the component/state catalog without a daemon:
 

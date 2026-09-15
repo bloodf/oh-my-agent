@@ -576,13 +576,12 @@ async function harness(
 		);
 
 	/**
-	 * Static client files and a transparent API proxy. The browser sends its
+	 * A transparent proxy for the static client and the API. The browser sends its
 	 * token in a custom header, rewritten to Authorization here so no token
 	 * lands in a URL anywhere. Every write, including the reaction toggle,
 	 * goes to the real console API — T-605 landed the last missing route, so
 	 * nothing is simulated here any more.
 	 */
-	const staticRoot = join(import.meta.dir, "../src/console");
 	/** Browser-side socket by its upstream connection, and frames that
 	 * arrived before the pair was linked. */
 	const downstreamByUpstream = new Map<
@@ -808,33 +807,28 @@ async function harness(
 				);
 			}
 
-			const path = url.pathname === "/" ? "/index.html" : url.pathname;
 			// Chrome fetches a favicon on every fresh profile; a 404 there is
 			// noise that pollutes page-error assertions, so answer it empty.
-			if (path === "/favicon.ico") {
+			if (url.pathname === "/favicon.ico") {
 				return new Response(null, { status: 204 });
 			}
+			// Static files go through the daemon's own static gate in both modes,
+			// cookie and all, so a shell that cannot reload or a chunk that
+			// cannot import its siblings fails here the way it fails for an
+			// operator. Serving src/console from disk once hid exactly that.
+			const headers = new Headers(request.headers);
 			if (options.remoteMode) {
-				const headers = new Headers(request.headers);
 				headers.set("X-OMA-Proxy-Secret", "console-client-proxy-secret");
 				headers.set("X-Forwarded-Host", "remote.example");
 				headers.set("X-Forwarded-Proto", "https");
-				return fetch(
-					new Request(api.url + url.pathname + url.search, {
-						method: request.method,
-						headers,
-					}),
-					{ decompress: false } as RequestInit,
-				);
 			}
-			const file = Bun.file(join(staticRoot, path));
-			if (!(await file.exists())) {
-				return new Response("not found", { status: 404 });
-			}
-			const ext = path.slice(path.lastIndexOf("."));
-			return new Response(file, {
-				headers: { "content-type": MIME[ext] ?? "application/octet-stream" },
-			});
+			return fetch(
+				new Request(api.url + url.pathname + url.search, {
+					method: request.method,
+					headers,
+				}),
+				{ decompress: false } as RequestInit,
+			);
 		},
 		websocket: {
 			open: (socket) => {
@@ -2914,6 +2908,132 @@ describe("remote operator authentication", () => {
 		).toBe(true);
 		expect(errors).toEqual([]);
 	});
+});
+
+// ── Static credential ────────────────────────────────────────────────────────
+
+/** A message whose body is one small mermaid diagram. */
+const MERMAID_BODY = [
+	"```mermaid",
+	"graph LR",
+	"  A[plan] --> B[build]",
+	"```",
+].join("\n");
+
+/** Wait for the diagram in one message to be drawn as an SVG. */
+const drawnDiagram = (page: Page, id: number) =>
+	waitFor(
+		"mermaid diagram",
+		() =>
+			page
+				.$eval(
+					`#messages .message[data-id="${id}"] .body`,
+					(n) =>
+						n.querySelector('[data-diagram="mermaid"] svg')?.textContent ?? "",
+				)
+				.catch(() => ""),
+		(text) => text.includes("plan") && text.includes("build"),
+	);
+
+describe("static credential", () => {
+	browserTest(
+		"a loopback console reloads with no token in the address bar and still draws diagrams",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const posted = await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: MERMAID_BODY,
+			});
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector('#channels [role="option"]');
+			await waitFor(
+				"token removal",
+				() => Promise.resolve(page.url()),
+				(url) => !url.includes("token="),
+			);
+
+			// The reload asks for `/` with nothing but the browser's cookie, and
+			// every script, stylesheet, and chunk after it the same way.
+			const urls: string[] = [];
+			page.on("request", (request) => urls.push(request.url()));
+			await page.reload({ waitUntil: "domcontentloaded" });
+			await page.waitForSelector('#channels [role="option"]');
+			// Mermaid's core chunk statically imports sibling chunks by relative
+			// URL; a diagram drawn after the reload proves those loaded too.
+			expect(await drawnDiagram(page, posted.id)).toContain("plan");
+			expect(urls.some((url) => /\/chunk-.+\.js$/.test(url))).toBe(true);
+			expect(urls.every((url) => !url.includes(TOKEN))).toBe(true);
+			expect(page.url()).not.toContain("token=");
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"a loopback token the daemon refuses returns the console to token entry",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const { page } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector('#channels [role="option"]');
+
+			// What a restarted daemon with a rotated token looks like to an open
+			// tab: the static cookie no longer matters, the stored token is wrong.
+			await page.evaluate(
+				(key) => sessionStorage.setItem(key, "rotated-away"),
+				OPERATOR_TOKEN_KEY,
+			);
+			await page.reload({ waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#operator-auth-error:not(:empty)");
+			expect(await operatorAuthState(page)).toMatchObject({
+				visible: true,
+				appHidden: true,
+				error: "Operator token refused. Re-enter the token.",
+				stored: null,
+			});
+
+			await page.type("#operator-token", TOKEN);
+			await page.keyboard.press("Enter");
+			await page.waitForSelector('#channels [role="option"]');
+			await waitFor(
+				"token removal after re-entry",
+				() => Promise.resolve(page.url()),
+				(url) => !url.includes("token="),
+			);
+		},
+	);
+
+	browserTest(
+		"a remote console draws diagrams through its chunk pass",
+		async () => {
+			const h = await harness({ remoteMode: true });
+			await h.ensureRoom("#reviews");
+			const posted = await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: MERMAID_BODY,
+			});
+			const { page } = await openPage();
+			// The token-entry page itself answers 401 by design; nothing after
+			// it may.
+			const refused: string[] = [];
+			page.on("response", (response) => {
+				if (response.status() >= 400 && response.url() !== h.remoteConsoleUrl)
+					refused.push(`${response.status()} ${response.url()}`);
+			});
+			await page.goto(h.remoteConsoleUrl, { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#operator-token");
+			await page.type("#operator-token", TOKEN);
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#operator-auth[hidden]");
+			expect(await drawnDiagram(page, posted.id)).toContain("plan");
+			expect(page.url()).not.toContain("ticket=");
+			expect(refused).toEqual([]);
+		},
+	);
 });
 
 // ── First-class states ───────────────────────────────────────────────────────

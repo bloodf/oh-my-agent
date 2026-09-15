@@ -414,8 +414,8 @@ export function ConsoleShell() {
                   disabled={!selected}
                   supportsAttachments={fullControl}
                   onPickFiles={fullControl ? pickFiles : undefined}
-                  onUpload={fullControl ? (file, onProgress) => uploadAttachment(file, { onProgress }) : undefined}
-                  onDeleteUpload={fullControl ? deleteManagedAttachment : undefined}
+                  onUpload={fullControl ? (file, onProgress) => uploadAttachment(file, { onProgress, onUnauthorized: c.revoke }) : undefined}
+                  onDeleteUpload={fullControl ? (id) => deleteManagedAttachment(id, c.call) : undefined}
                 />
               </div>
               {!chatId && (
@@ -426,8 +426,8 @@ export function ConsoleShell() {
                   onReact={c.react}
                   onSend={(body, paths) => send(body, paths, thread)}
                   onPickFiles={fullControl ? pickFiles : undefined}
-                  onUpload={fullControl ? (file, onProgress) => uploadAttachment(file, { onProgress }) : undefined}
-                  onDeleteUpload={fullControl ? deleteManagedAttachment : undefined}
+                  onUpload={fullControl ? (file, onProgress) => uploadAttachment(file, { onProgress, onUnauthorized: c.revoke }) : undefined}
+                  onDeleteUpload={fullControl ? (id) => deleteManagedAttachment(id, c.call) : undefined}
                 />
               )}
             </>

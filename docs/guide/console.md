@@ -14,7 +14,7 @@ bun run console:build
 bun run --cwd web typecheck
 ```
 
-`console:dev` starts Vite for UI development. `console:build` replaces the three production assets above.
+`console:dev` starts Vite for UI development on `http://localhost:5173`, proxying `/api` and the live WebSocket to the running daemon (`OMA_CONSOLE_URL`, else the daemon's `console-url` file, else `http://127.0.0.1:50561`). Open it with `?token=<operator-token>`. `console:build` replaces the three production assets above.
 
 ## See every screen (no daemon)
 
@@ -91,7 +91,7 @@ Mode must be `0600`. The daemon reuses the file on every restart, so a bookmarke
 
 Loopback URLs carry `?token=`. That is required because the browser cannot set a header on the first navigation. `/api/*` refuses `?token=` so the long-lived secret does not land in API history. The client then sends `X-Operator-Token` (the server also accepts `Authorization: Bearer`).
 
-No cookie is set. A cookie on `127.0.0.1` would ride along to every other local service on that host.
+The first load sets a static cookie so a reload works after the client strips `?token=` from the address bar. It holds an HMAC of the token, not the token, and it only opens the console's own static files; the API and the WebSocket never accept it. A cookie on `127.0.0.1` rides along to every other local service on that host, which is why it is worth nothing beyond the public bundle. If the token is rotated, an open tab shows the token prompt instead of retrying.
 
 ## Environment
 

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EMPTY_PROFILE, type Profile } from "./profile";
 import { toast } from "sonner";
-import { api, AUTHENTICATION_REQUIRED, readToken } from "@/lib/api";
+import { api, AUTHENTICATION_REQUIRED } from "@/lib/api";
+import { readToken } from "@/lib/token";
 import type {
   AgentInfo,
   ConsoleStateKind,
@@ -46,6 +47,21 @@ export function useConsole() {
   useEffect(() => {
     channelsRef.current = channels;
   }, [channels]);
+  const revoke = useCallback(() => {
+    authRef.current = true;
+    liveGeneration.current += 1;
+    setAuthRequired(true);
+    setAuthError("Operator token refused. Re-enter the token.");
+    sessionStorage.removeItem("oh-my-agent.operator-token");
+    const hadSocket = socketRef.current !== null;
+    socketRef.current?.close();
+    socketRef.current = null;
+    const root = globalThis as typeof globalThis & {
+      __consoleSockets?: WebSocket[];
+    };
+    if (hadSocket || root.__consoleSockets !== undefined)
+      root.__consoleSockets = [];
+  }, []);
   const call = useCallback(
     (
       path: string,
@@ -60,24 +76,10 @@ export function useConsole() {
         ...init,
         token: auth.token,
         remoteMode: auth.remoteMode,
-        onUnauthorized: () => {
-          authRef.current = true;
-          liveGeneration.current += 1;
-          setAuthRequired(true);
-          setAuthError("Operator token refused. Re-enter the token.");
-          sessionStorage.removeItem("oh-my-agent.operator-token");
-          const hadSocket = socketRef.current !== null;
-          socketRef.current?.close();
-          socketRef.current = null;
-          const root = globalThis as typeof globalThis & {
-            __consoleSockets?: WebSocket[];
-          };
-          if (hadSocket || root.__consoleSockets !== undefined)
-            root.__consoleSockets = [];
-        },
+        onUnauthorized: revoke,
       });
     },
-    [auth],
+    [auth, revoke],
   );
   const showNotice = useCallback((text: string) => {
     setNotice(text);
@@ -297,7 +299,13 @@ export function useConsole() {
         if (auth.remoteMode) {
           const result = await call("/api/ws-ticket", { method: "POST" });
           url.searchParams.set("ticket", String(result.ticket));
-        } else url.searchParams.set("token", auth.token);
+        } else {
+          // A loopback handshake refused for a rotated token only closes the
+          // socket, which says nothing about why. Before a retry, ask the API,
+          // whose 401 turns into the token prompt instead of endless retries.
+          if (attempt > 0) await call("/api/channels");
+          url.searchParams.set("token", auth.token);
+        }
         if (!active()) return;
         const ws = new WebSocket(url);
         socketRef.current = ws;
@@ -396,14 +404,25 @@ export function useConsole() {
   const authenticate = async (token: string) => {
     setAuthError("");
     try {
-      const response = await fetch("/api/session", {
-        method: "POST",
-        headers: { "X-Operator-Token": token },
-      });
+      // Loopback has no session route: check the token on a plain read, then
+      // reload with it so the daemon issues a static cookie for this token.
+      const response = await fetch(
+        auth.remoteMode ? "/api/session" : "/api/channels",
+        {
+          method: auth.remoteMode ? "POST" : "GET",
+          headers: { "X-Operator-Token": token },
+        },
+      );
       if (!response.ok)
         throw new Error("Operator token refused. Re-enter the token.");
-      const payload = await response.json();
       sessionStorage.setItem("oh-my-agent.operator-token", token);
+      if (!auth.remoteMode) {
+        location.replace(`/?token=${encodeURIComponent(token)}`);
+        return;
+      }
+      const payload = (await response.json()) as { ticket?: unknown };
+      if (typeof payload.ticket !== "string" || !payload.ticket)
+        throw new Error("Authentication unavailable.");
       location.replace(`/?ticket=${encodeURIComponent(payload.ticket)}`);
     } catch (error) {
       const failure =
@@ -443,6 +462,7 @@ export function useConsole() {
     authError,
     authenticate,
     call,
+    revoke,
     showNotice,
     refreshAgents,
     refreshChannels,
