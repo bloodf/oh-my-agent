@@ -19,7 +19,7 @@ export const DOCS = {
 };
 
 // package.json "version" / CHANGELOG.md top entry.
-export const VERSION = "1.6.0";
+export const VERSION = "1.6.1";
 export const INSTALL = "omp install @bloodf/oh-my-agent";
 
 // docs/guide/cli.md, the "### <verb>" headings under "## Verbs": 18 verbs.
