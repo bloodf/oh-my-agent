@@ -27,6 +27,10 @@ Refreshing a conflicted plan loads the server copy so a second save cannot overw
 - `web/src/console/DefinitionDialog.tsx`
 - `web/src/console/definition/identity-sections.tsx`
 - `web/src/console/Composer.tsx`
+- `web/src/console/AgentPanel.tsx`
+- `web/src/console/WorkspaceToolbar.tsx`
+- `web/src/console/ChannelRail.tsx`
+- `web/src/console/Message.tsx`
 - `web/src/console/Storybook.tsx`
 - `web/src/App.tsx`
 - `storybook/console/serve.ts`
@@ -51,6 +55,10 @@ Refreshing a conflicted plan loads the server copy so a second save cannot overw
 | [`web/src/console/DefinitionDialog.tsx`](../../../web/src/console/DefinitionDialog.tsx) | Edited | Partial saves reported; policy sections locked remotely without full control. |
 | [`web/src/console/definition/identity-sections.tsx`](../../../web/src/console/definition/identity-sections.tsx) | Edited | Tools and spawn rights locked remotely without full control. |
 | [`web/src/console/Composer.tsx`](../../../web/src/console/Composer.tsx) | Edited | Read-only while sending, so focus and typed text survive. |
+| [`web/src/console/AgentPanel.tsx`](../../../web/src/console/AgentPanel.tsx) | Edited | Instruction field has an id. |
+| [`web/src/console/WorkspaceToolbar.tsx`](../../../web/src/console/WorkspaceToolbar.tsx) | Edited | Search name starts with its visible text. |
+| [`web/src/console/ChannelRail.tsx`](../../../web/src/console/ChannelRail.tsx) | Edited | Workspace menu name starts with its visible text. |
+| [`web/src/console/Message.tsx`](../../../web/src/console/Message.tsx) | Edited | Reaction pill names start with their visible text. |
 | [`web/src/console/Storybook.tsx`](../../../web/src/console/Storybook.tsx) | Edited | Shares tabs with the shell. |
 | [`web/src/App.tsx`](../../../web/src/App.tsx) | Edited | Storybook loaded lazily. |
 | [`storybook/console/serve.ts`](../../../storybook/console/serve.ts) | Edited | Serves lazy chunks. |

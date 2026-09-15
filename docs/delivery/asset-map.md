@@ -212,11 +212,11 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `web/bun.lock` | yes | [T-1627](tasks/T-1627-console-markdown-mermaid.md) | — |
 | `web/package.json` | yes | [T-1627](tasks/T-1627-console-markdown-mermaid.md), [T-1632](tasks/T-1632-slack-console.md) | — |
 | `web/src/App.tsx` | yes | [T-1805](tasks/T-1805-console-view-fixes.md) | — |
-| `web/src/console/AgentPanel.tsx` | yes | [T-1628](tasks/T-1628-console-schedules-profile.md), [T-1632](tasks/T-1632-slack-console.md) | — |
+| `web/src/console/AgentPanel.tsx` | yes | [T-1628](tasks/T-1628-console-schedules-profile.md), [T-1632](tasks/T-1632-slack-console.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
 | `web/src/console/ArtifactsView.tsx` | yes | [T-1629](tasks/T-1629-lavish-artifacts.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
 | `web/src/console/AuthScreen.tsx` | yes | [T-1801](tasks/T-1801-console-static-auth.md) | — |
 | `web/src/console/ChangesView.tsx` | yes | [T-1632](tasks/T-1632-slack-console.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
-| `web/src/console/ChannelRail.tsx` | yes | [T-1632](tasks/T-1632-slack-console.md) | — |
+| `web/src/console/ChannelRail.tsx` | yes | [T-1632](tasks/T-1632-slack-console.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
 | `web/src/console/Composer.tsx` | yes | [T-1632](tasks/T-1632-slack-console.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
 | `web/src/console/ConsoleShell.tsx` | yes | [T-1628](tasks/T-1628-console-schedules-profile.md), [T-1629](tasks/T-1629-lavish-artifacts.md), [T-1632](tasks/T-1632-slack-console.md), [T-1801](tasks/T-1801-console-static-auth.md), [T-1802](tasks/T-1802-console-newest-messages.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
 | `web/src/console/CreateAgentDialog.tsx` | yes | [T-1620](tasks/T-1620-default-staff-team.md), [T-1622](tasks/T-1622-presets-and-first-mate.md), [T-1632](tasks/T-1632-slack-console.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
@@ -224,7 +224,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `web/src/console/EmojiPicker.tsx` | yes | [T-1632](tasks/T-1632-slack-console.md) | — |
 | `web/src/console/ErrorBoundary.tsx` | yes | [T-1805](tasks/T-1805-console-view-fixes.md) | — |
 | `web/src/console/Markdown.tsx` | yes | [T-1627](tasks/T-1627-console-markdown-mermaid.md), [T-1632](tasks/T-1632-slack-console.md) | — |
-| `web/src/console/Message.tsx` | yes | [T-1627](tasks/T-1627-console-markdown-mermaid.md), [T-1628](tasks/T-1628-console-schedules-profile.md), [T-1632](tasks/T-1632-slack-console.md) | — |
+| `web/src/console/Message.tsx` | yes | [T-1627](tasks/T-1627-console-markdown-mermaid.md), [T-1628](tasks/T-1628-console-schedules-profile.md), [T-1632](tasks/T-1632-slack-console.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
 | `web/src/console/PlansView.tsx` | yes | [T-1632](tasks/T-1632-slack-console.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
 | `web/src/console/ProfileDialog.tsx` | yes | [T-1628](tasks/T-1628-console-schedules-profile.md), [T-1632](tasks/T-1632-slack-console.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
 | `web/src/console/SchedulesTab.tsx` | yes | [T-1628](tasks/T-1628-console-schedules-profile.md), [T-1632](tasks/T-1632-slack-console.md) | — |
@@ -233,7 +233,7 @@ Every module the delivery tree names, the task that owns it, and the tasks that 
 | `web/src/console/ThreadPanel.tsx` | yes | [T-1632](tasks/T-1632-slack-console.md) | — |
 | `web/src/console/Transcript.tsx` | yes | [T-1632](tasks/T-1632-slack-console.md), [T-1802](tasks/T-1802-console-newest-messages.md) | — |
 | `web/src/console/ViewTabs.tsx` | yes | [T-1805](tasks/T-1805-console-view-fixes.md) | — |
-| `web/src/console/WorkspaceToolbar.tsx` | yes | [T-1628](tasks/T-1628-console-schedules-profile.md), [T-1632](tasks/T-1632-slack-console.md) | — |
+| `web/src/console/WorkspaceToolbar.tsx` | yes | [T-1628](tasks/T-1628-console-schedules-profile.md), [T-1632](tasks/T-1632-slack-console.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
 | `web/src/console/definition/AvatarEditor.tsx` | yes | [T-1632](tasks/T-1632-slack-console.md) | — |
 | `web/src/console/definition/fields.tsx` | yes | [T-1632](tasks/T-1632-slack-console.md) | — |
 | `web/src/console/definition/identity-sections.tsx` | yes | [T-1632](tasks/T-1632-slack-console.md), [T-1805](tasks/T-1805-console-view-fixes.md) | — |
