@@ -195,7 +195,7 @@ export function DefinitionDialog({ open, onOpenChange, name, call, onRefresh, on
             ))}
           </nav>
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7" aria-label={current?.label}>
+            <div role="region" className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7" aria-label={current?.label}>
               {locked && LOCKED.includes(section) && (
                 <p id="definition-remote" className="mb-4 rounded-md border bg-muted px-3 py-2 text-[13px] text-muted-foreground">
                   Full control is disabled for this remote connection. Only the description, model, thinking level, and rooms can be changed here.
