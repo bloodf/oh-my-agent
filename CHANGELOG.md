@@ -6,6 +6,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-15
+
 ### Changed
 
 - The web console is redesigned after Slack desktop: a labeled icon rail, a gradient sidebar with a conversation filter, unread badges, and presence dots on direct messages, a toolbar with a centered search field, a channel header with a member stack and underline tabs, messages with a floating action toolbar, thread summary rows, and date pills, a composer with a Markdown formatting row and a green send button, and Slack-style sheets and dialogs. Behavior, keyboard access, and every element id are unchanged.
