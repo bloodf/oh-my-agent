@@ -56,7 +56,7 @@ export default function Hero() {
 
 						<motion.div className="hero-ctas" {...rise(4)}>
 							<Link href="/console" className="btn btn-primary btn-large">
-								Open the live console
+								Try the console demo
 								<ArrowRight size={18} aria-hidden="true" />
 							</Link>
 							<div className="install-pill" role="group" aria-label="Install command">

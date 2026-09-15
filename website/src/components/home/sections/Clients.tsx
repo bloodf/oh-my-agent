@@ -1,7 +1,7 @@
 import { Globe, SquareTerminal, TerminalSquare } from "lucide-react";
 import ThreeStage from "../threeui/ThreeStage";
 import { CountUp, Reveal, SectionHeader } from "../ui/primitives";
-import { CLI_VERBS, CONSOLE_PALETTES } from "../data";
+import { CLI_VERBS, CONSOLE_THEMES } from "../data";
 
 // README.md "How it works" and docs/guide/concepts.md "Surfaces".
 const CLIENTS = [
@@ -56,12 +56,12 @@ export default function Clients() {
 						<span className="stat-label">verbs in the omp-agent shell CLI</span>
 					</Reveal>
 					<Reveal className="stat" delay={0.08}>
-						<CountUp to={CONSOLE_PALETTES} className="stat-value" />
-						<span className="stat-label">console color palettes, light and dark</span>
+						<CountUp to={CONSOLE_THEMES} className="stat-value" />
+						<span className="stat-label">console workspace themes, light and dark</span>
 					</Reveal>
 				</div>
 
-				<div className="marquee" aria-label={`CLI verbs: ${CLI_VERBS.join(", ")}`}>
+				<div className="marquee" role="img" aria-label={`CLI verbs: ${CLI_VERBS.join(", ")}`}>
 					<ul className="marquee-track" aria-hidden="true">
 						{verbs.map((verb, i) => (
 							<li key={`${verb}-${i}`}>

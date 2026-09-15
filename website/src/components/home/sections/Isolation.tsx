@@ -58,7 +58,7 @@ export default function Isolation() {
 									</h3>
 									<p>{layer.body}</p>
 								</div>
-								<div className="layer-strength" aria-label={`Relative strength: layer ${i + 1} of 3`}>
+								<div className="layer-strength" role="img" aria-label={`Relative strength: layer ${i + 1} of 3`}>
 									<span style={{ width: `${layer.strength}%` }} />
 								</div>
 							</Reveal>

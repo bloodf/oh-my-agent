@@ -68,7 +68,7 @@
 .footer { padding-block: 64px 48px; border-top: 1px solid var(--line); background: var(--bg-2); }
 .footer-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr)); gap: 32px; }
 .footer-brand p { max-width: 320px; margin: 14px 0 10px; color: var(--muted); font-size: 0.92rem; }
-.footer-col h3 { margin: 0 0 12px; font-size: 0.8rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); font-weight: 560; }
+.footer-col h2 { margin: 0 0 12px; font-size: 0.8rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); font-weight: 560; }
 .footer-col ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .footer-col a { color: var(--muted); font-size: 0.93rem; transition: color 0.2s; }
 .footer-col a:hover { color: var(--accent); }

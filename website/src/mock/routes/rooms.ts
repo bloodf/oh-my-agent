@@ -21,13 +21,32 @@ function knownRoom(id: string): RoomInfo {
 	return getState().channels.find((room) => room.id === id) ?? fail(404, "not_found", `Unknown channel: ${id}`);
 }
 
+// src/rooms/plans.ts: every refusal is 400 with the code as its message,
+// except a stale revision, which src/daemon/web-routes.ts answers 409.
 const STATUSES: PlanStatus[] = ["draft", "active", "completed"];
+const MAX_TITLE_LENGTH = 200;
+const MAX_BODY_LENGTH = 1_048_576;
+const planError = (code: "INVALID_PLAN" | "ROOM_NOT_FOUND" | "PLAN_NOT_FOUND" | "PLAN_REVISION_CONFLICT"): never =>
+	fail(code === "PLAN_REVISION_CONFLICT" ? 409 : 400, code, code);
 
-function planText(value: unknown, field: string, max: number): string {
-	if (typeof value !== "string" || value.trim().length === 0) fail(400, "PLAN_INVALID", `${field} is required`);
-	if ((value as string).length > max) fail(400, "PLAN_INVALID", `${field} exceeds ${max} characters`);
-	return (value as string).trim();
+/** Non-blank and short, stored as sent (the daemon does not trim). */
+function planTitle(value: unknown): string {
+	if (typeof value !== "string" || value.trim().length === 0 || value.length > MAX_TITLE_LENGTH) planError("INVALID_PLAN");
+	return value as string;
 }
+
+/** Any string up to the cap; an empty body is a valid plan. */
+function planBody(value: unknown): string {
+	if (typeof value !== "string" || value.length > MAX_BODY_LENGTH) planError("INVALID_PLAN");
+	return value as string;
+}
+
+function planRoom(id: string): void {
+	if (!getState().channels.some((room) => room.id === id)) planError("ROOM_NOT_FOUND");
+}
+
+/** The daemon parses plan bodies itself and answers a missing one as a workspace error. */
+const planPayload = (ctx: { body: Record<string, unknown> | undefined }) => ctx.body ?? fail(400, "workspace_error", "JSON body is required");
 
 export const roomRoutes: Route[] = [
 	route("GET", /^\/api\/channels$/, () => ok({ channels: getState().channels })),
@@ -37,13 +56,15 @@ export const roomRoutes: Route[] = [
 		const id = typeof body.id === "string" ? body.id.trim() : "";
 		if (!id) fail(400, "invalid_request", "Channel id is required");
 		const workspace = workspaceFrom(body.workspace);
-		let room = ensureRoom(id);
+		const existed = getState().channels.some((r) => r.id === id);
+		let room = ensureRoom(id, false);
 		if (workspace !== undefined) {
 			room = { ...room, workspace };
 			const next = room;
 			update((s) => ({ ...s, channels: s.channels.map((r) => (r.id === id ? next : r)) }));
-			publish({ type: "channel", channel: room });
 		}
+		// One frame, and only for a room the console has not seen yet.
+		if (!existed) publish({ type: "channel", channel: room });
 		return ok({ channel: room }, 201);
 	}),
 
@@ -63,14 +84,23 @@ export const roomRoutes: Route[] = [
 	route("GET", /^\/api\/channels\/([^/]+)\/messages$/, (ctx) => {
 		const id = decode(ctx.params[0]);
 		knownRoom(id);
-		const rawAfter = ctx.url.searchParams.get("afterId");
+		const cursor = (name: string) => {
+			const raw = ctx.url.searchParams.get(name);
+			if (raw === null) return undefined;
+			const value = Number(raw);
+			if (!Number.isInteger(value) || value < 0) fail(400, "invalid_request", `${name} must be an integer`);
+			return value;
+		};
+		const afterId = cursor("afterId");
+		const before = cursor("before");
 		const rawLimit = ctx.url.searchParams.get("limit");
-		const afterId = rawAfter === null ? 0 : Number(rawAfter);
-		if (!Number.isInteger(afterId) || afterId < 0) fail(400, "invalid_request", "afterId must be an integer");
 		const limit = rawLimit === null ? 500 : Number(rawLimit);
 		if (!Number.isInteger(limit) || limit < 1 || limit > 500) fail(400, "invalid_request", "limit must be 1..500");
-		const after = roomMessages(id).filter((m) => m.id > afterId);
-		return ok({ messages: rawAfter === null ? after.slice(-limit) : after.slice(0, limit) });
+		const page = roomMessages(id).filter((m) => (afterId === undefined || m.id > afterId) && (before === undefined || m.id < before));
+		// `afterId` pages forward from a cursor, oldest first. Without it the
+		// answer is the newest `limit` messages (older than `before`, if given),
+		// still in ascending order.
+		return ok({ messages: afterId === undefined ? page.slice(-limit) : page.slice(0, limit) });
 	}),
 
 	route("POST", /^\/api\/channels\/([^/]+)\/messages$/, (ctx) => {
@@ -102,19 +132,23 @@ export const roomRoutes: Route[] = [
 
 	route("GET", /^\/api\/channels\/([^/]+)\/plans$/, (ctx) => {
 		const room = decode(ctx.params[0]);
+		planRoom(room);
 		const plans = getState().plans.filter((plan) => plan.room === room).sort((a, b) => b.updatedAt - a.updatedAt);
 		return ok({ plans });
 	}),
 
 	route("POST", /^\/api\/channels\/([^/]+)\/plans$/, (ctx) => {
 		const room = decode(ctx.params[0]);
-		const body = requireBody(ctx);
+		const body = planPayload(ctx);
+		const title = planTitle(body.title);
+		const text = planBody(body.body);
+		planRoom(room);
 		const now = Date.now();
 		const plan: RoomPlan = {
 			id: `plan-${now.toString(36)}`,
 			room,
-			title: planText(body.title, "title", 200),
-			body: planText(body.body, "body", 100_000),
+			title,
+			body: text,
 			status: "draft",
 			revision: 1,
 			author: HUMAN,
@@ -130,14 +164,20 @@ export const roomRoutes: Route[] = [
 	route("PATCH", /^\/api\/channels\/([^/]+)\/plans\/([^/]+)$/, (ctx) => {
 		const room = decode(ctx.params[0]);
 		const id = decode(ctx.params[1]);
-		const body = requireBody(ctx);
-		const existing = getState().plans.find((plan) => plan.id === id && plan.room === room) ?? fail(404, "PLAN_NOT_FOUND", "PLAN_NOT_FOUND");
-		if (body.expectedRevision !== existing.revision) fail(409, "PLAN_REVISION_CONFLICT", "PLAN_REVISION_CONFLICT");
-		if (body.status !== undefined && !STATUSES.includes(body.status as PlanStatus)) fail(400, "PLAN_INVALID", "status must be draft, active, or completed");
+		const body = planPayload(ctx);
+		const revision = body.expectedRevision;
+		if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) planError("INVALID_PLAN");
+		if (body.title === undefined && body.body === undefined && body.status === undefined) planError("INVALID_PLAN");
+		const title = body.title === undefined ? undefined : planTitle(body.title);
+		const text = body.body === undefined ? undefined : planBody(body.body);
+		if (body.status !== undefined && !STATUSES.includes(body.status as PlanStatus)) planError("INVALID_PLAN");
+		planRoom(room);
+		const existing = getState().plans.find((plan) => plan.id === id && plan.room === room) ?? planError("PLAN_NOT_FOUND");
+		if (revision !== existing.revision) planError("PLAN_REVISION_CONFLICT");
 		const plan: RoomPlan = {
 			...existing,
-			...(body.title === undefined ? {} : { title: planText(body.title, "title", 200) }),
-			...(body.body === undefined ? {} : { body: planText(body.body, "body", 100_000) }),
+			...(title === undefined ? {} : { title }),
+			...(text === undefined ? {} : { body: text }),
 			...(body.status === undefined ? {} : { status: body.status as PlanStatus }),
 			revision: existing.revision + 1,
 			updatedBy: HUMAN,

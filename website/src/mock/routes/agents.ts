@@ -1,4 +1,5 @@
-/** Agent lifecycle, definitions, membership, accounts, and schedules. */
+/** Agent lifecycle, definitions, membership, and schedules. */
+import { later } from "../activity";
 import { publish } from "../bus";
 import { isCron } from "../cron";
 import { schedulesFor } from "../fixtures/agents";
@@ -12,6 +13,16 @@ const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
 function findAgent(name: string): AgentRecord {
 	return getState().agents.find((agent) => agent.name === name) ?? fail(404, "not_found", `Unknown agent: ${name}`);
+}
+
+/**
+ * An agent the daemon has a worker record for. A definition that has never
+ * started has no account (the daemon lists it with `account: ""`), and the
+ * daemon answers operations on it 404 like an unknown name.
+ */
+function findPeer(name: string): AgentRecord {
+	const agent = findAgent(name);
+	return agent.account === "" ? fail(404, "not_found", `Unknown agent: ${name}`) : agent;
 }
 
 function toInfo(agent: AgentRecord): AgentInfo & { model?: string } {
@@ -136,20 +147,17 @@ export const agentRoutes: Route[] = [
 		const room = (agent.definition.rooms ?? []).find((r) => r.startsWith("#")) ?? agent.definition.rooms?.[0];
 		if (room) {
 			const waiting = getState().messages.filter((m) => m.room === room && (m.mentions ?? []).includes(name)).length;
-			setTimeout(() => {
-				try {
-					postMessage(room, name, waiting ? `Online. Reading ${waiting} message${waiting === 1 ? "" : "s"} that waited for me in ${room}.` : `Online in ${room}.`, null);
-				} catch {
-					// Room removed by a reset before the greeting.
-				}
-			}, 1_500);
+			// Tracked with the other simulated turns, so a reset cancels it.
+			later(1_500, () => {
+				postMessage(room, name, waiting ? `Online. Reading ${waiting} message${waiting === 1 ? "" : "s"} that waited for me in ${room}.` : `Online in ${room}.`, null);
+			});
 		}
 		return ok({ agent: toInfo(findAgent(name)) });
 	}),
 
 	route("POST", /^\/api\/agents\/([^/]+)\/kill$/, (ctx) => {
 		const name = decode(ctx.params[0]);
-		findAgent(name);
+		findPeer(name);
 		const body = requireBody(ctx);
 		if (body.keepChildren !== undefined && typeof body.keepChildren !== "boolean") fail(400, "invalid_request", "keepChildren must be a boolean when present");
 		const keepChildren = body.keepChildren === true;
@@ -168,48 +176,34 @@ export const agentRoutes: Route[] = [
 			schedules: s.schedules.filter((row) => !(stopped.has(row.agent) && row.id.endsWith(":heartbeat"))),
 		}));
 		for (const agent of stopped) publish({ type: "agent", agent, state: "stopped" });
-		return ok({ name, state: "stopped", cascaded: !keepChildren });
+		return ok({ name, state: "stopped", keptChildren: keepChildren, cascaded: !keepChildren });
 	}),
 
 	route("POST", /^\/api\/agents\/([^/]+)\/inject$/, (ctx) => {
 		const name = decode(ctx.params[0]);
-		const agent = findAgent(name);
+		const agent = findPeer(name);
 		const body = requireBody(ctx);
 		const message = typeof body.message === "string" ? body.message.trim() : "";
 		if (!message) fail(400, "invalid_request", "A message is required");
-		const queued = agent.state !== "running";
+		// src/daemon/operations.ts: running takes the prompt now, parked gets it
+		// posted to its first room for the next wake, stopped is refused.
+		if (agent.state === "stopped") fail(400, "invalid_request", `Agent ${name} is stopped`);
+		const queued = agent.state === "parked";
+		if (queued) {
+			const room = agent.definition.rooms?.[0] ?? fail(400, "invalid_request", `Agent ${name} subscribes to no room for queued injection`);
+			ensureRoom(room);
+			postMessage(room, "@you", message, null);
+		}
 		update(withAgent(name, (a) => log(a, `${queued ? "queued" : "injected"} steering from @you: ${message}`)));
 		return ok({ name, queued });
 	}),
 
 	route("GET", /^\/api\/agents\/([^/]+)\/logs$/, (ctx) => {
 		const name = decode(ctx.params[0]);
-		const agent = findAgent(name);
+		const agent = findPeer(name);
 		const raw = ctx.url.searchParams.get("lines");
 		if (raw !== null && (!/^\d+$/.test(raw) || Number(raw) === 0)) fail(400, "invalid_request", "lines must be a positive integer");
 		return ok({ name, lines: agent.logs.slice(-(raw === null ? 50 : Number(raw))) });
-	}),
-
-	route("POST", /^\/api\/accounts\/([^/]+)\/bump$/, (ctx) => {
-		const id = decode(ctx.params[0]);
-		const body = requireBody(ctx);
-		const budgetUsd = body.budgetUsd;
-		if (typeof budgetUsd !== "number" || !Number.isFinite(budgetUsd) || budgetUsd <= 0) fail(400, "invalid_request", "budgetUsd must be a positive number");
-		const account = getState().accounts.find((a) => a.id === id) ?? fail(400, "invalid_request", `Unknown account: ${id}`);
-		if (account.kind !== "metered") fail(400, "invalid_request", `Account ${id} is a subscription account and has no USD ceiling`);
-		const ceiling = budgetUsd as number;
-		if (ceiling <= account.spentUsd) fail(400, "invalid_request", `budgetUsd must exceed current spend ($${account.spentUsd.toFixed(2)})`);
-		const resumed = getState().agents.filter((a) => a.account === id && a.state === "parked").map((a) => a.name);
-		update((s) => ({
-			...s,
-			accounts: s.accounts.map((a) => (a.id === id ? { ...a, budgetUsd: ceiling, state: a.spentUsd / ceiling >= 0.8 ? "warned" : "ok" } : a)),
-			agents: s.agents.map((a) => (resumed.includes(a.name) ? log({ ...a, state: "running" }, `resumed: ${id} ceiling raised to $${ceiling}`) : a)),
-		}));
-		publish({ type: "budget", account: id, state: "bumped", budgetUsd: ceiling });
-		for (const agent of resumed) publish({ type: "agent", agent, state: "running" });
-		if (resumed.length && getState().channels.some((c) => c.id === "#ops-bots"))
-			postMessage("#ops-bots", "ledger-bot", `✅ \`${id}\` ceiling raised to $${ceiling.toFixed(2)} by @you. Resumed: **${resumed.join(", ")}**.`, null);
-		return ok({ account: id, budgetUsd: ceiling, resumed });
 	}),
 
 	route("POST", /^\/api\/agents\/([^/]+)\/rooms$/, (ctx) => {

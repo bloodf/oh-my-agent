@@ -30,12 +30,13 @@ export function roomMessages(room: string): RoomMessage[] {
 	return all.map((m) => toWire(m, all));
 }
 
-export function ensureRoom(id: string): RoomInfo {
+/** `announce: false` leaves the `channel` frame to a caller that is still shaping the room. */
+export function ensureRoom(id: string, announce = true): RoomInfo {
 	const existing = getState().channels.find((room) => room.id === id);
 	if (existing) return existing;
 	const room: RoomInfo = { id, kind: id.startsWith("@") ? "dm" : "channel", name: id };
 	update((state) => ({ ...state, channels: [...state.channels, room] }));
-	publish({ type: "channel", channel: room });
+	if (announce) publish({ type: "channel", channel: room });
 	return room;
 }
 

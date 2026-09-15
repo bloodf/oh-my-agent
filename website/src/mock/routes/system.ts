@@ -7,6 +7,19 @@ import type { Persona, Profile } from "../types";
 
 const MAX_NAME = 40;
 const MAX_AVATAR = 4;
+/** Decoded bytes an avatar image may hold, as in src/daemon/profile.ts. */
+const MAX_AVATAR_IMAGE_BYTES = 200_000;
+const IMAGE_AVATAR = /^data:image\/(png|jpeg|webp|gif);base64,/;
+
+function imageAvatar(text: string, at: string): string {
+	const header = IMAGE_AVATAR.exec(text);
+	if (!header) throw new Error(`${at} image must be a png, jpeg, webp, or gif base64 data URL`);
+	const data = text.slice(header[0].length);
+	if (data.length === 0 || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) throw new Error(`${at} image is not valid base64`);
+	const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+	if ((data.length / 4) * 3 - padding > MAX_AVATAR_IMAGE_BYTES) throw new Error(`${at} image must be at most ${MAX_AVATAR_IMAGE_BYTES / 1000} KB`);
+	return text;
+}
 
 function persona(value: unknown, at: string): Persona {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${at} must be an object`);
@@ -16,9 +29,14 @@ function persona(value: unknown, at: string): Persona {
 		if (entry === undefined || entry === null || entry === "") continue;
 		if (typeof entry !== "string") throw new Error(`${at}.${key} must be a string`);
 		const text = entry.trim();
+		if (key === "avatar" && text.startsWith("data:")) {
+			out.avatar = imageAvatar(text, `${at}.avatar`);
+			continue;
+		}
 		const limit = key === "avatar" ? MAX_AVATAR : MAX_NAME;
 		const length = [...new Intl.Segmenter().segment(text)].length;
 		if (length === 0 || length > limit) throw new Error(`${at}.${key} must be 1 to ${limit} characters`);
+		if (/[\n\r\t]/.test(text)) throw new Error(`${at}.${key} must be one line`);
 		out[key] = text;
 	}
 	return out;

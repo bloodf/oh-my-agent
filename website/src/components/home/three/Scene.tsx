@@ -125,7 +125,12 @@ function useVisible(heroId: string) {
 	return visible;
 }
 
-export default function Scene({ heroId, still = false, onReady }: { heroId: string; still?: boolean; onReady?: () => void }) {
+export default function Scene({
+	heroId,
+	still = false,
+	onReady,
+	onLost,
+}: { heroId: string; still?: boolean; onReady?: () => void; onLost?: () => void }) {
 	const visible = useVisible(heroId);
 	const uniforms = useMemo<Uniforms>(
 		() => ({
@@ -145,7 +150,10 @@ export default function Scene({ heroId, still = false, onReady }: { heroId: stri
 			frameloop={still ? "demand" : visible ? "always" : "never"}
 			gl={{ antialias: true, powerPreference: "high-performance", alpha: false, stencil: false }}
 			camera={{ fov: 42, position: [0, 0, 9.5], near: 0.1, far: 60 }}
-			onCreated={() => onReady?.()}
+			onCreated={({ gl }) => {
+				gl.domElement.addEventListener("webglcontextlost", () => onLost?.(), { once: true });
+				onReady?.();
+			}}
 			aria-hidden="true"
 		>
 			<Night uniforms={uniforms} />
