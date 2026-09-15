@@ -443,6 +443,104 @@ describe("RoomStore.listMessages", () => {
 	});
 });
 
+describe("RoomStore.listMessages newest pages", () => {
+	test("newest returns the last rows, and beforeId pages back from them", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "general", kind: "channel" });
+				const ids: number[] = [];
+				for (let i = 0; i < 5; i += 1) {
+					ids.push(
+						(await store.post({ room: "general", author: "a", body: `${i}` }))
+							.id,
+					);
+				}
+
+				const newest = await store.listMessages("general", {
+					newest: true,
+					limit: 2,
+				});
+				expect(newest.map((m) => m.id)).toEqual(ids.slice(3));
+				const older = await store.listMessages("general", {
+					beforeId: ids[3],
+					limit: 2,
+				});
+				expect(older.map((m) => m.id)).toEqual(ids.slice(1, 3));
+				const first = await store.listMessages("general", {
+					beforeId: ids[1],
+					limit: 2,
+				});
+				expect(first.map((m) => m.id)).toEqual([ids[0]]);
+				await expect(
+					store.listMessages("general", { beforeId: -1 }),
+				).rejects.toThrow("INVALID_PAGE");
+			} finally {
+				await store.close();
+			}
+		});
+	});
+
+	test("a newest page carries the older thread roots of its replies", async () => {
+		await withTempDb(async (path) => {
+			const store = await RoomStore.open(path);
+			try {
+				await store.createRoom({ id: "general", kind: "channel" });
+				const root = await store.post({
+					room: "general",
+					author: "a",
+					body: "root",
+				});
+				const between = await store.post({
+					room: "general",
+					author: "a",
+					body: "between",
+				});
+				const child = await store.post({
+					room: "general",
+					author: "b",
+					body: "child",
+					parentId: root.id,
+				});
+				const grandchild = await store.post({
+					room: "general",
+					author: "c",
+					body: "grandchild",
+					parentId: child.id,
+				});
+
+				const page = await store.listMessages("general", {
+					newest: true,
+					limit: 1,
+				});
+				expect(page.map((m) => m.id)).toEqual([root.id, grandchild.id]);
+				expect(page[0]).toMatchObject({ threadRootId: null, replyCount: 1 });
+				expect(page[1]).toMatchObject({ threadRootId: root.id });
+				expect(page.some((m) => m.id === between.id)).toBe(false);
+
+				// A root already inside the page is not repeated.
+				const whole = await store.listMessages("general", {
+					newest: true,
+					limit: 4,
+				});
+				expect(whole.map((m) => m.id)).toEqual([
+					root.id,
+					between.id,
+					child.id,
+					grandchild.id,
+				]);
+				// The default forward read never adds rows.
+				const forward = await store.listMessages("general", {
+					afterId: child.id,
+				});
+				expect(forward.map((m) => m.id)).toEqual([grandchild.id]);
+			} finally {
+				await store.close();
+			}
+		});
+	});
+});
+
 // ── RoomStore.subscribe ────────────────────────────────────────────────────────
 
 describe("RoomStore.subscribe", () => {

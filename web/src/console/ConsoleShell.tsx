@@ -60,7 +60,7 @@ import { AvatarTile, WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceTo
 /** Conversation-first frame. Native chats and shared rooms have separate lifecycles. */
 export function ConsoleShell() {
   const c = useConsole();
-  const { call, authRequired, connected, workspaceVersion } = c;
+  const { call, authRequired, connected } = c;
   const [chats, setChats] = useState<WebChatInfo[]>([]);
   const [chatId, setChatId] = useState<string | null>(null);
   const [chatState, setChatState] = useState<WebChatState | null>(null);
@@ -110,20 +110,16 @@ export function ConsoleShell() {
       stale = true;
     };
   }, [call, authRequired, connected]);
+  const chatVersion = chatId ? (c.chatVersions[chatId] ?? 0) : 0;
+  const chatRef = useRef(chatId);
+  const chatLoads = useRef({ started: 0, applied: 0 });
   useEffect(() => {
+    chatRef.current = chatId;
     if (!chatId) return;
     let stale = false;
-    void Promise.all([
-      call(`/api/chats/${chatId}/state`),
-      call(`/api/chats/${chatId}/messages`),
-      call(`/api/chats/${chatId}/models`),
-    ])
-      .then(([state, messages, catalog]) => {
-        if (stale) return;
-        setChatState(state.state as WebChatState);
-        setChatMessages(messages.messages as WebChatMessage[]);
-        setModels(catalog.models as WebChatModel[]);
-        setError("");
+    void call(`/api/chats/${chatId}/models`)
+      .then((catalog) => {
+        if (!stale) setModels(catalog.models as WebChatModel[]);
       })
       .catch((e) => {
         if (!stale) setError(String(e));
@@ -131,7 +127,29 @@ export function ConsoleShell() {
     return () => {
       stale = true;
     };
-  }, [chatId, call, workspaceVersion]);
+  }, [chatId, call]);
+  useEffect(() => {
+    if (!chatId) return;
+    // Not cancelled by the next version: while OMP streams, each load would
+    // otherwise be dropped by the one after it. The newest started load wins.
+    const serial = ++chatLoads.current.started;
+    const current = () =>
+      chatRef.current === chatId && serial > chatLoads.current.applied;
+    void Promise.all([
+      call(`/api/chats/${chatId}/state`),
+      call(`/api/chats/${chatId}/messages`),
+    ])
+      .then(([state, messages]) => {
+        if (!current()) return;
+        chatLoads.current.applied = serial;
+        setChatState(state.state as WebChatState);
+        setChatMessages(messages.messages as WebChatMessage[]);
+        setError("");
+      })
+      .catch((e) => {
+        if (current()) setError(String(e));
+      });
+  }, [chatId, call, chatVersion]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -407,6 +425,8 @@ export function ConsoleShell() {
                   }}
                   onReact={c.react}
                   onRetry={c.retry}
+                  onLoadOlder={chatId || !c.hasOlder ? undefined : c.loadOlder}
+                  loadingOlder={c.loadingOlder}
                 />
                 <Composer
                   roomKey={selected ?? "empty"}

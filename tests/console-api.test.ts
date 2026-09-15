@@ -1409,6 +1409,36 @@ describe("messages", () => {
 		expect(body.messages[0]?.body).toBe("Two.");
 	});
 
+	test("messages page backward from the newest with newest and beforeId", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const posted = [];
+		for (const body of ["One.", "Two.", "Three.", "Four."]) {
+			posted.push(
+				await h.rooms.post({ room: "#reviews", author: "@you", body }),
+			);
+		}
+		const bodies = async (query: string) => {
+			const res = await h.call(`/api/channels/%23reviews/messages?${query}`);
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as { messages: { body: string }[] };
+			return body.messages.map((message) => message.body);
+		};
+
+		expect(await bodies("newest=1&limit=2")).toEqual(["Three.", "Four."]);
+		expect(await bodies(`beforeId=${posted[2]?.id}&limit=2`)).toEqual([
+			"One.",
+			"Two.",
+		]);
+		// Without either, the page still starts at the oldest message.
+		expect(await bodies("limit=2")).toEqual(["One.", "Two."]);
+
+		for (const query of ["beforeId=-1", "beforeId=x", "newest=true"]) {
+			const res = await h.call(`/api/channels/%23reviews/messages?${query}`);
+			expect(res.status).toBe(400);
+		}
+	});
+
 	test("reading an unknown channel is a 404", async () => {
 		const h = await harness();
 

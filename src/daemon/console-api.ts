@@ -1918,15 +1918,28 @@ export async function startConsoleApi(
 			}
 
 			if (request.method === "GET") {
-				const rawAfter = url.searchParams.get("afterId");
 				const rawLimit = url.searchParams.get("limit");
-				const opts: { afterId?: number; limit?: number } = {};
-				if (rawAfter !== null) {
-					const afterId = Number(rawAfter);
-					if (!Number.isInteger(afterId) || afterId < 0) {
-						return fail(400, "invalid_request", "afterId must be an integer");
+				const opts: {
+					afterId?: number;
+					beforeId?: number;
+					limit?: number;
+					newest?: boolean;
+				} = {};
+				for (const name of ["afterId", "beforeId"] as const) {
+					const raw = url.searchParams.get(name);
+					if (raw === null) continue;
+					const cursor = Number(raw);
+					if (!Number.isInteger(cursor) || cursor < 0) {
+						return fail(400, "invalid_request", `${name} must be an integer`);
 					}
-					opts.afterId = afterId;
+					opts[name] = cursor;
+				}
+				const rawNewest = url.searchParams.get("newest");
+				if (rawNewest !== null) {
+					if (rawNewest !== "1") {
+						return fail(400, "invalid_request", "newest must be 1");
+					}
+					opts.newest = true;
 				}
 				if (rawLimit !== null) {
 					const limit = Number(rawLimit);
