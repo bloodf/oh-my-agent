@@ -203,8 +203,8 @@ export function DefinitionDialog({ open, onOpenChange, name, call, onRefresh, on
               )}
               <div hidden={section !== "soul"} className="flex h-full min-h-[22rem] flex-col"><SoulSection {...policyProps} /></div>
               {name && section === "profile" && <ProfileSection {...props} name={name} persona={persona} onPersona={setPersona} />}
-              {section === "model" && <ModelSection {...props} catalog={catalog} />}
-              {section === "rooms" && <RoomsSection {...props} channels={channels} agentNames={agents.map((agent) => agent.name).filter((entry) => entry !== name)} fullControl={fullControl} call={call} />}
+              {section === "model" && <ModelSection {...props} catalog={catalog} locked={locked} />}
+              {section === "rooms" && <RoomsSection {...props} channels={channels} agentNames={agents.map((agent) => agent.name).filter((entry) => entry !== name)} fullControl={fullControl} call={call} locked={locked} />}
               {section === "wake" && <WakeSection {...policyProps} budgetUsd={budgetUsd} />}
               {name && section === "schedules" && <SchedulesSection {...policyProps} name={name} call={call} />}
               {section === "sandbox" && <SandboxSection {...policyProps} />}
