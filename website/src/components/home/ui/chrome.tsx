@@ -96,7 +96,7 @@ export function Nav() {
 						<GitHubMark size={18} />
 					</a>
 					<Link className="btn btn-small btn-primary" href="/console">
-						Live demo
+						Try the demo
 					</Link>
 				</div>
 			</nav>

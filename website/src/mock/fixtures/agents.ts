@@ -4,7 +4,7 @@
  * dialog reads (presets, models).
  */
 import { nextFire } from "../cron";
-import type { AccountRecord, AgentRecord, ModelChoice, Preset, Profile, ScheduleRow } from "../types";
+import type { AgentRecord, ModelChoice, Preset, Profile, ScheduleRow } from "../types";
 import { PROJECT, UI_PROJECT } from "./workspace";
 
 const MINUTE = 60_000;
@@ -116,7 +116,8 @@ export function seedAgents(now: number): AgentRecord[] {
 		{
 			name: "scribe",
 			state: "stopped",
-			account: "",
+			// It has run before, so the daemon still holds its worker record.
+			account: "durindoor",
 			definition: {
 				name: "scribe",
 				description: "Docs writer. Turns merged changes into release notes and guides.",
@@ -160,7 +161,8 @@ export function seedAgents(now: number): AgentRecord[] {
 		{
 			name: "pixel",
 			state: "stopped",
-			account: "",
+			// It has run before, so the daemon still holds its worker record.
+			account: "durindoor",
 			definition: {
 				name: "pixel",
 				description: "Designer. Produces UI mockups as HTML artifacts for review.",
@@ -176,14 +178,6 @@ export function seedAgents(now: number): AgentRecord[] {
 				[2700, "stopped by @you"],
 			]),
 		},
-	];
-}
-
-export function seedAccounts(): AccountRecord[] {
-	return [
-		{ id: "durindoor", kind: "subscription", spentUsd: 0, state: "warned" },
-		{ id: "openai", kind: "metered", budgetUsd: 25, spentUsd: 20.04, state: "warned" },
-		{ id: "anthropic", kind: "metered", budgetUsd: 40, spentUsd: 40, state: "parked" },
 	];
 }
 

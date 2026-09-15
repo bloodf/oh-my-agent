@@ -240,7 +240,8 @@
 	font-size: 0.88rem;
 }
 
-.btn-primary {
+/* Scoped like `.oma-home a`, which would otherwise win and paint light text on the light fill. */
+.oma-home .btn-primary {
 	background: var(--accent-fill);
 	color: var(--accent-ink);
 	box-shadow: 0 10px 30px -12px rgb(125 211 252 / 0.6);

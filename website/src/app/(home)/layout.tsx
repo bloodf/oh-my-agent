@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
 import "lenis/dist/lenis.css";
@@ -15,6 +16,8 @@ const geist = localFont({
 	variable: "--font-geist",
 	display: "swap",
 });
+
+export const metadata: Metadata = { alternates: { canonical: "/" } };
 
 // Runs before paint: a stored choice wins, otherwise the system preference.
 const THEME_SCRIPT = `try{var t=localStorage.getItem("oma-home-theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.omaTheme=t}catch(e){document.documentElement.dataset.omaTheme="dark"}`;

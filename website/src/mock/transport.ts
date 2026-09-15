@@ -227,12 +227,27 @@ function installXhr(): void {
 }
 
 let installed = false;
+const originals = { fetch: undefined as typeof fetch | undefined, WebSocket: undefined as typeof WebSocket | undefined, XMLHttpRequest: undefined as typeof XMLHttpRequest | undefined };
 
-/** Patch the browser seams once, before the console mounts. */
-export function installDemoTransport(): void {
-	if (installed || typeof window === "undefined") return;
-	installed = true;
-	installFetch();
-	installWebSocket();
-	installXhr();
+function uninstallDemoTransport(): void {
+	if (!installed) return;
+	installed = false;
+	if (originals.fetch) globalThis.fetch = originals.fetch;
+	if (originals.WebSocket) globalThis.WebSocket = originals.WebSocket;
+	if (originals.XMLHttpRequest) globalThis.XMLHttpRequest = originals.XMLHttpRequest;
+}
+
+/** Patch the browser seams once, before the console mounts; the result undoes it. */
+export function installDemoTransport(): () => void {
+	if (typeof window === "undefined") return () => {};
+	if (!installed) {
+		installed = true;
+		originals.fetch = globalThis.fetch;
+		originals.WebSocket = globalThis.WebSocket;
+		originals.XMLHttpRequest = globalThis.XMLHttpRequest;
+		installFetch();
+		installWebSocket();
+		installXhr();
+	}
+	return uninstallDemoTransport;
 }

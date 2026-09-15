@@ -1,3 +1,5 @@
+import { themes } from "@/lib/themes";
+
 // Every fact on the homepage comes from the repository. The source file is noted
 // beside each value so a future edit can re-check it.
 
@@ -20,7 +22,7 @@ export const DOCS = {
 export const VERSION = "1.5.1";
 export const INSTALL = "omp install @bloodf/oh-my-agent";
 
-// docs/guide/cli.md, the "### <verb>" headings under "## Verbs": 17 verbs.
+// docs/guide/cli.md, the "### <verb>" headings under "## Verbs": 18 verbs.
 export const CLI_VERBS = [
 	"setup",
 	"status",
@@ -28,6 +30,7 @@ export const CLI_VERBS = [
 	"agents",
 	"agent create",
 	"presets",
+	"models",
 	"agent show",
 	"agent edit",
 	"spawn",
@@ -58,8 +61,8 @@ export const PRESETS = [
 	"data-analyst",
 ] as const;
 
-// web/DESIGN.md: "Appearance offers 59 color-only palettes".
-export const CONSOLE_PALETTES = 59;
+// web/src/lib/themes.ts: the curated workspace themes, counted at build time.
+export const CONSOLE_THEMES = themes.length;
 
 // docs/remote-exposure.md: tickets have a 30-second TTL; the audit caps live connections at 32.
 export const TICKET_TTL_SECONDS = 30;

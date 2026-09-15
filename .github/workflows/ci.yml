@@ -37,14 +37,27 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --cwd web --frozen-lockfile
 
-      - name: Install server-rendered console dependencies
-        run: bun install --cwd web-next --frozen-lockfile
+      - name: Install website dependencies
+        run: bun install --cwd website --frozen-lockfile
 
       - name: Install headless Chrome for the console suite
         run: bunx @puppeteer/browsers install chrome-headless-shell --path "$HOME/.cache/puppeteer"
 
       - name: Typecheck
         run: bun run typecheck
+
+      - name: Lint the console source
+        run: bun run --cwd web lint
+
+      - name: Website typecheck
+        run: bun run --cwd website typecheck
+
+      - name: Website build
+        run: bun run --cwd website build
+
+      - name: Console demo mock smoke
+        working-directory: website
+        run: bun scripts/mock-smoke.mjs
 
       - name: Generated console is current
         run: |

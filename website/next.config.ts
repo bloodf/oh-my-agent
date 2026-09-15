@@ -12,21 +12,14 @@ const nextConfig: NextConfig = {
 	experimental: { externalDir: true },
 	outputFileTracingRoot: repoRoot,
 	images: { unoptimized: true },
-	turbopack: {
-		root: repoRoot,
-		resolveAlias: {
-			"@": join(repoRoot, "web", "src"),
-			"@site": join(siteRoot, "src"),
-			// @designcodeio/threeui pins three@0.128 as "three128"; share the app's three.
-			three128: "three",
-		},
-	},
+	// Builds run on webpack (`--webpack`), which is where resolution is pinned.
 	webpack: (config) => {
 		config.resolve.modules = [join(siteRoot, "node_modules"), "node_modules"];
 		config.resolve.alias = {
 			...config.resolve.alias,
 			"@": join(repoRoot, "web", "src"),
 			"@site": join(siteRoot, "src"),
+			// @designcodeio/threeui pins three@0.128 as "three128"; share the app's three.
 			three128: join(siteRoot, "node_modules", "three"),
 		};
 		return config;
