@@ -1,13 +1,21 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ConsoleShell } from "./console/ConsoleShell";
-import { Storybook } from "./console/Storybook";
+
+// The storybook and its fixtures are a separate chunk, fetched only when the
+// storybook server marks the page; the production console never loads them.
+const Storybook = lazy(() =>
+  import("./console/Storybook").then((module) => ({ default: module.Storybook })),
+);
 
 export default function App() {
   return (
     <TooltipProvider>
       {document.documentElement.dataset.storybook === "true" ? (
-        <Storybook />
+        <Suspense fallback={null}>
+          <Storybook />
+        </Suspense>
       ) : (
         <ConsoleShell />
       )}

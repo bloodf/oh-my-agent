@@ -4812,3 +4812,779 @@ describe("repaint stability", () => {
 		},
 	);
 });
+
+// ── Workspace views ──────────────────────────────────────────────────────────
+
+/**
+ * The console API composed with the web workspace services the daemon adds
+ * (plans, git changes, chats, attachments) and a Lavish state dir under the
+ * test's temp dir. The page loads straight from the API on loopback, as the
+ * daemon serves it. Chats are a stub: no test here may start a real OMP
+ * session, so `create` refuses and the listed chat answers fixtures.
+ */
+async function workspaceHarness() {
+	const { RoomPlans } = await import("../src/rooms/plans");
+	const { WebAttachments } = await import("../src/daemon/web-attachments");
+	const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-console-views-"));
+	cleanups.push(async function cleanupViewsDir() {
+		await rm(dir, { recursive: true, force: true });
+	});
+	const rooms: RoomStore = await Store.open(join(dir, "rooms.db"));
+	cleanups.push(async function cleanupViewsRooms() {
+		await rooms.close();
+	});
+	const plans = await RoomPlans.open(rooms.path);
+	cleanups.push(async function cleanupViewsPlans() {
+		await plans.close();
+	});
+	const scheduler = new Scheduler({
+		now: () => Date.now(),
+		setTimer: () => 0,
+		clearTimer: () => {},
+	});
+	const supervisor = new Supervisor({
+		rooms,
+		scheduler,
+		now: () => Date.now(),
+	});
+	const peers = new Map<string, PeerRecord>();
+	const roots: PeerStoreRoots = {
+		user: join(dir, "user", "agents"),
+		project: join(dir, "project", "agents"),
+	};
+	await mkdir(roots.user, { recursive: true });
+	await mkdir(roots.project, { recursive: true });
+	const peerStore = createPeerStore(roots);
+	const knownRooms = new Map<string, RoomInfo>();
+	const ensureRoom = async (id: string): Promise<void> => {
+		if (knownRooms.has(id)) return;
+		const kind = id.startsWith("@") ? "dm" : "channel";
+		await rooms.createRoom({ id, kind });
+		knownRooms.set(id, { id, kind, name: id });
+	};
+	const chat = {
+		id: "stub-chat",
+		title: "Stub chat",
+		cwd: dir,
+		createdAt: Date.now(),
+		updatedAt: Date.now(),
+	};
+	const chatCreates: string[] = [];
+	const chats = {
+		storageDir: join(dir, "chats"),
+		list: async () => [chat],
+		create: async (input: { cwd: string }) => {
+			chatCreates.push(input.cwd);
+			throw new Error(`Workspace folder does not exist: ${input.cwd}`);
+		},
+		state: async () => ({
+			...chat,
+			running: true,
+			streaming: false,
+			compacting: false,
+			sessionId: "stub-session",
+			messageCount: 2,
+			queuedMessageCount: 0,
+			// A session file without todo state: the Plans tab must not throw.
+			todoPhases: undefined,
+		}),
+		// One malformed message (numeric content, non-numeric timestamp) beside
+		// a well-formed one: the transcript must draw both, not blank.
+		messages: async () => [
+			{ role: "user", content: 42, timestamp: "yesterday" },
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "Hello from the stub chat." }],
+				timestamp: Date.now(),
+			},
+		],
+		models: async () => [],
+		setModel: async () => ({ provider: "none", id: "none" }),
+		prompt: async () => {
+			throw new Error("stub chats never prompt");
+		},
+		abort: async () => {},
+		closeChat: async () => {},
+		close: async () => {},
+	} as unknown as NonNullable<
+		Parameters<typeof startConsoleApi>[0]["web"]
+	>["chats"];
+	const lavishDir = join(dir, "lavish");
+	await mkdir(lavishDir, { recursive: true });
+	const api = await startConsoleApi({
+		rooms,
+		supervisor,
+		peers,
+		peerStore,
+		knownRooms,
+		ensureRoom,
+		operations: createOperations({
+			rooms,
+			supervisor,
+			peers,
+			bumpAccount: async () => [],
+		}),
+		token: TOKEN,
+		profile: openProfileStore(join(dir, "console-profile.json")),
+		lavishStateDir: lavishDir,
+		openArtifact: async (file) => ({
+			file,
+			url: "about:blank",
+			status: "open",
+			pendingPrompts: 0,
+			updatedAt: "",
+		}),
+		pollIntervalMs: 25,
+		web: {
+			chats,
+			plans,
+			attachments: new WebAttachments(join(dir, "clipboard")),
+			remoteFullControl: false,
+		},
+	});
+	cleanups.push(async function cleanupViewsApi() {
+		await api.close();
+	});
+	const origin = String(api.url).replace(/\/$/, "");
+	return {
+		dir,
+		rooms,
+		plans,
+		peerStore,
+		ensureRoom,
+		chatCreates,
+		lavishDir,
+		origin,
+		consoleUrl: (room: string) =>
+			`${origin}/?token=${TOKEN}&room=${encodeURIComponent(room)}`,
+		/** An authenticated write made behind the browser's back. */
+		apiCall: (path: string, init: { method: string; body: unknown }) =>
+			fetch(`${origin}${path}`, {
+				method: init.method,
+				headers: {
+					Authorization: `Bearer ${TOKEN}`,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify(init.body),
+			}),
+	};
+}
+
+/**
+ * Click the first element matching `selector` whose text contains `text`,
+ * with a real pointer click: Radix tabs switch on pointer down, which a
+ * scripted `element.click()` never sends.
+ */
+async function clickText(
+	page: Page,
+	selector: string,
+	text: string,
+): Promise<void> {
+	const deadline = Date.now() + 10_000;
+	for (;;) {
+		for (const handle of await page.$$(selector)) {
+			const label = await handle
+				.evaluate((node) => node.textContent ?? "")
+				.catch(() => "");
+			if (!label.includes(text)) continue;
+			try {
+				await handle.click();
+				return;
+			} catch {
+				// Detached or covered by a repaint; look again.
+			}
+		}
+		if (Date.now() > deadline)
+			throw new Error(
+				`No clickable ${selector} with text ${JSON.stringify(text)}`,
+			);
+		const tick = Promise.withResolvers<void>();
+		setTimeout(tick.resolve, 20);
+		await tick.promise;
+	}
+}
+
+/** Replace a React-controlled field's value the way typing would. */
+async function fillInPage(
+	page: Page,
+	selector: string,
+	value: string,
+): Promise<void> {
+	await page.waitForSelector(selector, { timeout: 10_000 });
+	await page.evaluate(
+		(s, v) => {
+			const field = document.querySelector(s) as unknown as {
+				value: string;
+				dispatchEvent(event: unknown): boolean;
+				constructor: { prototype: object };
+			};
+			const setter = Object.getOwnPropertyDescriptor(
+				field.constructor.prototype,
+				"value",
+			)?.set;
+			setter?.call(field, v);
+			field.dispatchEvent(
+				new (
+					globalThis as unknown as {
+						Event: new (type: string, init: object) => unknown;
+					}
+				).Event("input", { bubbles: true }),
+			);
+		},
+		selector,
+		value,
+	);
+}
+
+const fieldValue = (page: Page, selector: string): Promise<string> =>
+	page
+		.$eval(selector, (node) => (node as unknown as { value: string }).value)
+		.catch(() => "");
+
+const pageText = (page: Page, selector = "body"): Promise<string> =>
+	page.$eval(selector, (node) => node.textContent ?? "").catch(() => "");
+
+describe("plans view", () => {
+	browserTest(
+		"a stale tab's conflicting save never overwrites the other tab's edit",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#plans");
+
+			const a = await openPage();
+			await a.page.goto(h.consoleUrl("#plans"), {
+				waitUntil: "domcontentloaded",
+			});
+			await clickText(a.page, 'main [role="tab"]', "Plans");
+			await clickText(a.page, "section button", "New plan");
+			await fillInPage(a.page, "#plan-title", "Release");
+			await fillInPage(a.page, "#plan-body", "Original body.");
+			await clickText(
+				a.page,
+				'[role="dialog"] button[type="submit"]',
+				"Create plan",
+			);
+			await waitFor(
+				"plan created",
+				() => Promise.resolve(h.plans.list("#plans")),
+				(list) => list.length === 1,
+			);
+
+			const b = await openPage();
+			await b.page.goto(h.consoleUrl("#plans"), {
+				waitUntil: "domcontentloaded",
+			});
+			await clickText(b.page, 'main [role="tab"]', "Plans");
+			// Both tabs open the editor on the same revision.
+			for (const { page } of [a, b]) {
+				await page.waitForSelector('[aria-label="Edit Release"]', {
+					timeout: 10_000,
+				});
+				await clickInPage(page, '[aria-label="Edit Release"]');
+				await page.waitForSelector("#plan-body", { timeout: 10_000 });
+			}
+
+			await fillInPage(a.page, "#plan-body", "Edited by tab A.");
+			await clickText(
+				a.page,
+				'[role="dialog"] button[type="submit"]',
+				"Save changes",
+			);
+			await waitFor(
+				"tab A saved",
+				() => Promise.resolve(h.plans.list("#plans")[0]?.body),
+				(body) => body === "Edited by tab A.",
+			);
+
+			await fillInPage(b.page, "#plan-body", "Edited by stale tab B.");
+			await clickText(
+				b.page,
+				'[role="dialog"] button[type="submit"]',
+				"Save changes",
+			);
+			await waitFor(
+				"conflict shown",
+				() => pageText(b.page, '[role="dialog"]'),
+				(text) => text.includes("This plan changed"),
+			);
+			expect(h.plans.list("#plans")[0]?.body).toBe("Edited by tab A.");
+
+			await clickText(b.page, '[role="dialog"] button', "Refresh latest plan");
+			// The form now holds the other writer's text; the stale draft is
+			// kept read-only beside it, never as what Save would send.
+			await waitFor(
+				"latest plan loaded into the form",
+				() => fieldValue(b.page, "#plan-body"),
+				(body) => body === "Edited by tab A.",
+			);
+			expect(await fieldValue(b.page, "#plan-unsaved")).toContain(
+				"Edited by stale tab B.",
+			);
+
+			await clickText(
+				b.page,
+				'[role="dialog"] button[type="submit"]',
+				"Save changes",
+			);
+			await b.page.waitForSelector("#plan-body", {
+				hidden: true,
+				timeout: 10_000,
+			});
+			const [saved] = h.plans.list("#plans");
+			expect(saved?.body).toBe("Edited by tab A.");
+			expect(saved?.revision).toBe(3);
+			expect(unexpectedPageErrors(a.errors)).toEqual([]);
+			// The one 409 is the conflict this test provoked.
+			expect(
+				unexpectedPageErrors(b.errors).filter((e) => !e.includes("409")),
+			).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"a plan removed before the conflict refresh disables saving instead of creating a duplicate",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#plans");
+			const plan = h.plans.create({
+				room: "#plans",
+				title: "Doomed",
+				body: "Body.",
+				author: "@you",
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#plans"), {
+				waitUntil: "domcontentloaded",
+			});
+			await clickText(page, 'main [role="tab"]', "Plans");
+			await clickInPage(page, '[aria-label="Edit Doomed"]');
+			await fillInPage(page, "#plan-body", "My edit.");
+
+			// Another writer saves, so this save conflicts...
+			h.plans.update({
+				id: plan.id,
+				room: "#plans",
+				expectedRevision: plan.revision,
+				author: "@you",
+				body: "Theirs.",
+			});
+			await clickText(
+				page,
+				'[role="dialog"] button[type="submit"]',
+				"Save changes",
+			);
+			await waitFor(
+				"conflict shown",
+				() => pageText(page, '[role="dialog"]'),
+				(text) => text.includes("This plan changed"),
+			);
+			// ...and the plan disappears before the refresh.
+			const { Database } = await import("bun:sqlite");
+			const db = new Database(h.rooms.path);
+			try {
+				db.run("DELETE FROM room_plans WHERE id = ?", [plan.id]);
+			} finally {
+				db.close();
+			}
+
+			await clickText(page, '[role="dialog"] button', "Refresh latest plan");
+			await waitFor(
+				"vanished plan reported",
+				() => pageText(page, '[role="dialog"]'),
+				(text) => text.includes("This plan no longer exists"),
+			);
+			expect(await pageText(page, '[role="dialog"] h2')).toContain("Edit plan");
+			const disabled = await page.$eval(
+				'[role="dialog"] button[type="submit"]',
+				(node) => node.getAttribute("disabled") !== null,
+			);
+			expect(disabled).toBe(true);
+			expect(h.plans.list("#plans")).toEqual([]);
+			expect(
+				unexpectedPageErrors(errors).filter((e) => !e.includes("409")),
+			).toEqual([]);
+		},
+	);
+});
+
+describe("changes view", () => {
+	browserTest(
+		"a typed repository path lists changes and a diff, debounced, and stays in its room",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#code");
+			await h.ensureRoom("#elsewhere");
+			const repo = join(h.dir, "repo");
+			await mkdir(repo, { recursive: true });
+			const git = (...args: string[]) => {
+				const run = Bun.spawnSync(["git", ...args], {
+					cwd: repo,
+					env: {
+						PATH: process.env.PATH ?? "",
+						HOME: h.dir,
+						GIT_CONFIG_NOSYSTEM: "1",
+						GIT_AUTHOR_NAME: "Test",
+						GIT_AUTHOR_EMAIL: "test@example.invalid",
+						GIT_COMMITTER_NAME: "Test",
+						GIT_COMMITTER_EMAIL: "test@example.invalid",
+					},
+				});
+				if (run.exitCode !== 0) throw new Error(run.stderr.toString());
+			};
+			git("init", "-q");
+			await writeFile(join(repo, "file.txt"), "one\n");
+			git("add", "file.txt");
+			git("commit", "-q", "-m", "init");
+			await writeFile(join(repo, "file.txt"), "one\ntwo\n");
+			await writeFile(join(repo, "new.txt"), "fresh\n");
+
+			const { page, errors } = await openPage();
+			const changeReads: string[] = [];
+			page.on("request", (request) => {
+				if (request.url().includes("/api/workspace/changes"))
+					changeReads.push(request.url());
+			});
+			await page.goto(h.consoleUrl("#code"), { waitUntil: "domcontentloaded" });
+			await clickText(page, 'main [role="tab"]:not([disabled])', "Changes");
+			await page.waitForSelector('[aria-label="Repository workspace"]', {
+				timeout: 10_000,
+			});
+			await page.type('[aria-label="Repository workspace"]', repo);
+
+			await waitFor(
+				"changed files listed",
+				() => pageText(page, "#main"),
+				(text) => text.includes("2 changed files") && text.includes("new.txt"),
+				10_000,
+			);
+			await waitFor(
+				"working diff",
+				() => pageText(page, "#main pre"),
+				(text) => text.includes("+two"),
+			);
+			// One inspection for the whole path, not one per keystroke.
+			expect(changeReads.length).toBe(1);
+			expect(await pageText(page, "#main")).not.toContain(
+				"Could not load workspace changes",
+			);
+
+			// The typed path belongs to #code; #elsewhere has no workspace.
+			await clickText(page, "#sidebar button, #channels .channel", "elsewhere");
+			await clickText(page, 'main [role="tab"]:not([disabled])', "Changes");
+			await waitFor(
+				"other room has no typed path",
+				() => pageText(page, "#main"),
+				(text) =>
+					text.includes(
+						"Choose a working directory to inspect its real Git changes.",
+					),
+			);
+			expect(
+				await fieldValue(page, '[aria-label="Repository workspace"]'),
+			).toBe("");
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+});
+
+describe("artifacts view", () => {
+	browserTest(
+		"shows the empty state, then draws an unparseable timestamp as text",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#art");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#art"), { waitUntil: "domcontentloaded" });
+			await clickText(page, 'main [role="tab"]', "Artifacts");
+			await waitFor(
+				"empty artifacts",
+				() => pageText(page, "#artifacts"),
+				(text) => text.includes("No artifacts yet."),
+			);
+
+			await writeFile(
+				join(h.lavishDir, "state.json"),
+				JSON.stringify({
+					sessions: {
+						one: {
+							file: "/tmp/review/report.html",
+							url: "http://127.0.0.1:1/s/one",
+							status: "open",
+							updated_at: "not-a-date",
+						},
+					},
+				}),
+			);
+			await clickInPage(page, '[aria-label="Refresh artifacts"]');
+			await waitFor(
+				"artifact row",
+				() => pageText(page, "#artifacts"),
+				(text) => text.includes("report.html") && text.includes("not-a-date"),
+			);
+			expect(await page.$("[data-error-boundary]")).toBeNull();
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+});
+
+describe("omp chat panel", () => {
+	browserTest(
+		"a refused chat shows its error in the dialog, and a malformed transcript still draws",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#chat");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#chat"), { waitUntil: "domcontentloaded" });
+			await clickInPage(page, '[aria-label="New OMP chat"]');
+			await fillInPage(page, "#chat-workspace", "/no/such/workspace");
+			await clickText(
+				page,
+				'[role="dialog"] button[type="submit"]',
+				"Start chat",
+			);
+			await waitFor(
+				"chat error",
+				() => pageText(page, '[role="dialog"] [role="alert"]'),
+				(text) => text.includes("Workspace folder does not exist"),
+			);
+			// The daemon's message, without a JavaScript "Error: " prefix.
+			expect(
+				await pageText(page, '[role="dialog"] [role="alert"]'),
+			).not.toContain("Error:");
+			expect(h.chatCreates).toEqual(["/no/such/workspace"]);
+			await page.keyboard.press("Escape");
+			await page.waitForSelector("#chat-workspace", {
+				hidden: true,
+				timeout: 10_000,
+			});
+
+			await clickText(page, "#sidebar button", "Stub chat");
+			await waitFor(
+				"stub chat transcript",
+				() => transcriptText(page),
+				(text) =>
+					text.includes("Hello from the stub chat.") && text.includes("42"),
+			);
+			await clickText(page, 'main [role="tab"]', "Plans");
+			await waitFor(
+				"session plan placeholder",
+				() => pageText(page, "#main"),
+				(text) => text.includes("OMP's plan will appear here"),
+			);
+			expect(await page.$("[data-error-boundary]")).toBeNull();
+			// The refused create is the one 400 this test provoked.
+			expect(
+				unexpectedPageErrors(errors).filter((e) => !e.includes("400")),
+			).toEqual([]);
+		},
+	);
+});
+
+describe("review fixes", () => {
+	browserTest(
+		"the create agent dialog names the blank required fields instead of doing nothing",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#reviews");
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#reviews"), {
+				waitUntil: "domcontentloaded",
+			});
+			await page.click("#open-new-agent");
+			await page.waitForSelector("#new-agent-name");
+			expect(
+				await pageText(page, 'label[for="new-agent-description"]'),
+			).toContain("(required)");
+			await page.type("#new-agent-name", "halfdone");
+			await page.click("#new-agent-create");
+			await page.waitForSelector("#new-agent-description-error", {
+				timeout: 5_000,
+			});
+			expect(await pageText(page, "#new-agent-description-error")).toBe(
+				"Enter a description.",
+			);
+			expect(await pageText(page, "#new-agent-body-error")).toBe(
+				"Enter a soul or system prompt.",
+			);
+			expect(await page.$("#new-agent-name-error")).toBeNull();
+			const focused = await page.evaluate(
+				() => document.activeElement?.id ?? "",
+			);
+			expect(focused).toBe("new-agent-description");
+			expect((await h.peerStore.list()).definitions).toEqual([]);
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"cancelling the channel workspace picker sends nothing",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#reviews");
+			const { page, errors } = await openPage();
+			const patches: string[] = [];
+			page.on("request", (request) => {
+				if (request.method() === "PATCH") patches.push(request.url());
+			});
+			await page.goto(h.consoleUrl("#reviews"), {
+				waitUntil: "domcontentloaded",
+			});
+			await clickInPage(page, '[aria-label="Edit channel workspace"]');
+			await clickText(page, '[role="dialog"] button', "Choose");
+			await page.waitForSelector('[aria-label="Absolute path"]', {
+				timeout: 10_000,
+			});
+			// Cancel through the picker's own close button: a pointer click
+			// lands on the picker whichever element holds keyboard focus.
+			await clickInPage(
+				page,
+				'[role="dialog"]:has([aria-label="Absolute path"]) [data-slot="dialog-close"]',
+			);
+			await page.waitForSelector('[aria-label="Absolute path"]', {
+				hidden: true,
+				timeout: 10_000,
+			});
+			// The picker closing resolves the pick; a PATCH would follow at once.
+			await waitFor(
+				"channel settings dialog back",
+				() => pageText(page, '[role="dialog"]'),
+				(text) => text.includes("working directory"),
+			);
+			await page.evaluate(
+				() =>
+					new Promise((resolve) =>
+						(
+							globalThis as unknown as {
+								requestAnimationFrame(cb: () => void): void;
+							}
+						).requestAnimationFrame(() => resolve(null)),
+					),
+			);
+			expect(patches).toEqual([]);
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"a profile broadcast while the profile dialog is open keeps unsaved edits",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#reviews");
+			await h.rooms.post({ room: "#reviews", author: "someone", body: "Hi." });
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#reviews"), {
+				waitUntil: "domcontentloaded",
+			});
+			await waitFor(
+				"transcript",
+				() => transcriptText(page),
+				(text) => text.includes("Hi."),
+				10_000,
+			);
+			await page.click("#open-profile");
+			await page.waitForSelector("#profile-operator-name", { visible: true });
+			await page.type("#profile-operator-name", "Unsaved name");
+
+			const response = await h.apiCall("/api/profile", {
+				method: "PUT",
+				body: { agents: { someone: { displayName: "Else" } } },
+			});
+			expect(response.status).toBe(200);
+			// The page has seen the broadcast once the transcript draws the new name.
+			await waitFor(
+				"profile broadcast applied",
+				() =>
+					page
+						.$eval('#messages .message .author[data-author="someone"]', (n) =>
+							(n.textContent ?? "").trim(),
+						)
+						.catch(() => ""),
+				(name) => name === "Else",
+			);
+			expect(await fieldValue(page, "#profile-operator-name")).toBe(
+				"Unsaved name",
+			);
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"the stopped-agent notice belongs to that DM, not to the next room",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#reviews");
+			await h.peerStore.write({
+				name: "sleeper",
+				description: "Stopped agent.",
+				spawns: "*",
+				body: "Wait.",
+			});
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#reviews"), {
+				waitUntil: "domcontentloaded",
+			});
+			await openAgentTab(page, "Members");
+			await clickText(
+				page,
+				'#agents .agent[data-name="sleeper"] button',
+				"Message",
+			);
+			const notice =
+				"This agent is stopped. Messages wait here until it starts.";
+			await waitFor(
+				"stopped notice in the DM",
+				() => pageText(page, "#notice"),
+				(text) => text.includes(notice),
+				10_000,
+			);
+			await waitForAgentSheet(page, false);
+			await clickText(page, "#channels .channel", "reviews");
+			await waitFor(
+				"back in #reviews",
+				() => pageText(page, "#current-channel h1"),
+				(text) => text.includes("reviews"),
+			);
+			await waitFor(
+				"notice gone in another room",
+				() => pageText(page, "#notice"),
+				(text) => !text.includes(notice),
+			);
+			await waitFor(
+				"toast dismissed",
+				() => pageText(page, "[data-sonner-toaster]"),
+				(text) => !text.includes(notice),
+			);
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"the composer keeps focus after a send, so the next words land",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#composer-input");
+			await page.type("#composer-input", "First message.");
+			await page.keyboard.press("Enter");
+			await waitFor(
+				"first message sent",
+				() => transcriptText(page),
+				(text) => text.includes("First message."),
+			);
+			await waitFor(
+				"composer idle",
+				() => fieldValue(page, "#composer-input"),
+				(value) => value === "",
+			);
+			// No re-focus: typing continues where the operator already was.
+			await page.keyboard.type("Second thought");
+			expect(await fieldValue(page, "#composer-input")).toBe("Second thought");
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+});

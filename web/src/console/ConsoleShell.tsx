@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Bot, ChevronDown, Folder, Hash, Menu, MessageSquare, Plus, Square, UserRoundPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +12,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Command,
   CommandInput,
@@ -56,6 +56,38 @@ import { PlansView } from "./PlansView";
 import { ArtifactsView } from "./ArtifactsView";
 import { ChangesView } from "./ChangesView";
 import { AvatarTile, WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
+import { ErrorBoundary } from "./ErrorBoundary";
+import { ViewTabs } from "./ViewTabs";
+import { errorText } from "./errors";
+
+/** Typing pauses this long before the Changes view inspects a typed path. */
+const CHANGES_CWD_DEBOUNCE_MS = 400;
+const STOPPED_DM_TOAST = "stopped-dm";
+
+/** A value that belongs to one room; read in any other room it is empty. */
+type RoomScoped = { room: string | null; value: string };
+
+/** Chat content as text, whatever shape a session file left it in. */
+function chatText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return content == null ? "" : JSON.stringify(content);
+  return content
+    .map((part: { type?: unknown; text?: unknown; thinking?: unknown; name?: unknown } | null) => {
+      if (!part || typeof part !== "object") return "";
+      if (typeof part.text === "string") return part.text;
+      if (typeof part.thinking === "string") return part.thinking;
+      return part.type === "toolCall" ? `Using ${typeof part.name === "string" ? part.name : "tool"}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+const VIEW_LABEL: Record<string, string> = {
+  conversation: "The conversation",
+  plans: "Plans",
+  changes: "Changes",
+  artifacts: "Artifacts",
+};
 
 /** Conversation-first frame. Native chats and shared rooms have separate lifecycles. */
 export function ConsoleShell() {
@@ -79,7 +111,13 @@ export function ConsoleShell() {
   const [mobileNav, setMobileNav] = useState(false);
   const [thread, setThread] = useState<number | null>(null);
   const [chatCwd, setChatCwd] = useState("");
-  const [changesCwd, setChangesCwd] = useState("");
+  // Typed per room (C-12): a path typed in one room never overrides another
+  // room's workspace. The input updates on every keystroke; the Changes view
+  // only sees the path once typing pauses.
+  const [changesInput, setChangesInput] = useState<RoomScoped>({ room: null, value: "" });
+  const [changesCwd, setChangesCwd] = useState<RoomScoped>({ room: null, value: "" });
+  const [roomSettingsError, setRoomSettingsError] = useState("");
+  const [stoppedDm, setStoppedDm] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
@@ -93,6 +131,9 @@ export function ConsoleShell() {
   const sigil = !selectedChat && /^[#@]/.test(heading) ? heading[0] : "";
   const members = c.agents.filter((agent) => c.currentRoom !== null && agent.rooms?.includes(c.currentRoom));
   const directory = selectedChat ? selectedChat.cwd : selectedRoom?.workspace ?? (c.currentRoom ? "Daemon working directory" : "");
+  const typedChangesInput = changesInput.room === c.currentRoom ? changesInput.value : "";
+  const typedChangesCwd = changesCwd.room === c.currentRoom ? changesCwd.value : "";
+  const chatPath = (suffix: string) => `/api/chats/${encodeURIComponent(chatId ?? "")}/${suffix}`;
   useEffect(() => {
     if (authRequired || !connected) return;
     let stale = false;
@@ -142,9 +183,15 @@ export function ConsoleShell() {
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => setChangesCwd(changesInput), CHANGES_CWD_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [changesInput]);
   const selectRoom = (id: string) => {
     setChatId(null);
     setThread(null);
+    setError("");
+    toast.dismiss(STOPPED_DM_TOAST);
     setView("conversation");
     setMobileNav(false);
     c.selectRoom(id);
@@ -153,10 +200,18 @@ export function ConsoleShell() {
     setChatId(id);
     setChatState(null);
     setChatMessages([]);
+    setModels([]);
+    setError("");
     setThread(null);
+    toast.dismiss(STOPPED_DM_TOAST);
     setView("conversation");
     setMobileNav(false);
   };
+  const setRoomWorkspace = (workspace: string | null) =>
+    c
+      .call(`/api/channels/${encodeURIComponent(c.currentRoom ?? "")}`, { method: "PATCH", body: { workspace } })
+      .then(() => c.refreshChannels())
+      .catch((e) => setRoomSettingsError(errorText(e)));
   const pickFiles = () =>
     new Promise<string[]>((resolve) => {
       pickResolve.current = resolve;
@@ -173,7 +228,7 @@ export function ConsoleShell() {
     parentId: number | null = null,
   ) => {
     if (chatId) {
-      await c.call(`/api/chats/${chatId}/prompt`, {
+      await c.call(chatPath("prompt"), {
         method: "POST",
         body: { message: body, paths },
       });
@@ -196,21 +251,8 @@ export function ConsoleShell() {
         : message.role === "assistant"
           ? "OMP"
           : "system",
-    body:
-      typeof message.content === "string"
-        ? message.content
-        : message.content
-            .map(
-              (part) =>
-                part.text ??
-                part.thinking ??
-                (part.type === "toolCall"
-                  ? `Using ${part.name ?? "tool"}`
-                  : ""),
-            )
-            .filter(Boolean)
-            .join("\n"),
-    createdAt: message.timestamp ?? 0,
+    body: chatText(message.content),
+    createdAt: Number.isFinite(message.timestamp) ? (message.timestamp as number) : 0,
     parentId: null,
     threadRootId: null,
     replyCount: 0,
@@ -297,14 +339,14 @@ export function ConsoleShell() {
                     key={`${model.provider}/${model.id}`}
                     onSelect={() => {
                       void c
-                        .call(`/api/chats/${chatId}/model`, {
+                        .call(chatPath("model"), {
                           method: "POST",
                           body: { provider: model.provider, modelId: model.id },
                         })
                         .then(() =>
                           setChatState((s) => (s ? { ...s, model } : s)),
                         )
-                        .catch((e) => setError(String(e)));
+                        .catch((e) => setError(errorText(e)));
                     }}
                   >
                     {model.provider} / {model.id}
@@ -334,18 +376,7 @@ export function ConsoleShell() {
             </Button>
           )}
         </header>
-        <div className="@container/tabs flex h-9 min-w-0 shrink-0 items-center gap-3 border-b pr-3 pl-2 sm:pr-4 sm:pl-3">
-          <Tabs value={view} onValueChange={setView} className="h-full min-w-0 overflow-x-auto overscroll-x-contain [scrollbar-width:none]">
-            <TabsList variant="line" className="h-full">
-              <TabsTrigger value="conversation">Conversation</TabsTrigger>
-              <TabsTrigger value="plans">Plans</TabsTrigger>
-              <TabsTrigger value="changes" disabled={!fullControl}>
-                Changes
-              </TabsTrigger>
-              <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <span className="flex-1" />
+        <ViewTabs view={view} onViewChange={setView} changesDisabled={!fullControl} directory={directory}>
           {chatState?.streaming && (
             <Button
               size="xs"
@@ -353,31 +384,27 @@ export function ConsoleShell() {
               className="rounded-md"
               onClick={() =>
                 void c
-                  .call(`/api/chats/${chatId}/abort`, { method: "POST" })
-                  .catch((e) => setError(String(e)))
+                  .call(chatPath("abort"), { method: "POST" })
+                  .catch((e) => setError(errorText(e)))
               }
             >
               <Square />
               Stop
             </Button>
           )}
-          {directory && (
-            <span title={directory} className="hidden h-6 max-w-[45%] min-w-0 shrink-[999] items-center gap-1.5 rounded-md bg-muted px-2 text-[12px] text-muted-foreground @[34rem]/tabs:flex">
-              <Folder aria-hidden className="size-3.5 shrink-0" />
-              <span className="truncate">{directory}</span>
-            </span>
-          )}
-        </div>
+        </ViewTabs>
         <p
           id="notice"
           role="status"
           className={
-            c.notice
+            c.notice || (stoppedDm !== null && stoppedDm === c.currentRoom && !chatId)
               ? "border-b px-6 py-2 text-xs text-muted-foreground"
               : "sr-only"
           }
         >
-          {c.notice}
+          {stoppedDm !== null && stoppedDm === c.currentRoom && !chatId
+            ? "This agent is stopped. Messages wait here until it starts."
+            : c.notice}
         </p>
         {error && (
           <p role="alert" className="px-6 py-2 text-sm text-destructive">
@@ -385,6 +412,7 @@ export function ConsoleShell() {
           </p>
         )}
         <div className="flex min-h-0 min-w-0 flex-1">
+          <ErrorBoundary label={VIEW_LABEL[view] ?? "This view"} resetKey={`${view}:${selected ?? ""}`}>
           {view === "conversation" ? (
             <>
               <div className="flex min-w-0 flex-1 flex-col">
@@ -437,7 +465,7 @@ export function ConsoleShell() {
             chatId ? (
               <div className="w-full min-w-0 overflow-y-auto p-4 sm:p-6">
                 <h2 className="mb-4 text-lg font-semibold">Session plan</h2>
-                {chatState?.todoPhases.length ? (
+                {Array.isArray(chatState?.todoPhases) && chatState.todoPhases.length ? (
                   chatState.todoPhases.map((phase) => (
                     <section
                       key={phase.name}
@@ -476,21 +504,27 @@ export function ConsoleShell() {
                 <div className="flex min-w-0 gap-2 border-b p-3">
                   <Input
                     aria-label="Repository workspace"
-                    value={changesCwd}
-                    onChange={(e) => setChangesCwd(e.target.value)}
+                    value={typedChangesInput}
+                    onChange={(e) => setChangesInput({ room: c.currentRoom, value: e.target.value })}
                     placeholder="Absolute workspace path"
                   />
                   <Button
                     variant="outline"
-                    onClick={() => void pickWorkspace(changesCwd).then(setChangesCwd)}
+                    onClick={() =>
+                      void pickWorkspace(typedChangesInput).then((path) => {
+                        const next = { room: c.currentRoom, value: path };
+                        setChangesInput(next);
+                        setChangesCwd(next);
+                      })
+                    }
                   >
                     <Folder />
                     Browse
                   </Button>
                 </div>
               )}
-              {selectedChat?.cwd || changesCwd || selectedRoom?.workspace ? (
-                <ChangesView cwd={selectedChat?.cwd ?? (changesCwd || selectedRoom?.workspace || "")} call={c.call} />
+              {selectedChat?.cwd || typedChangesCwd || selectedRoom?.workspace ? (
+                <ChangesView cwd={selectedChat?.cwd ?? (typedChangesCwd || selectedRoom?.workspace || "")} call={c.call} />
               ) : (
                 <p className="p-6 text-sm text-muted-foreground">
                   Choose a working directory to inspect its real Git changes.
@@ -498,6 +532,7 @@ export function ConsoleShell() {
               )}
             </div>
           )}
+          </ErrorBoundary>
         </div>
       </main>
       </div>
@@ -530,14 +565,26 @@ export function ConsoleShell() {
           await Promise.all([c.refreshChannels(), c.refreshAgents()]);
           selectRoom(room);
           setAgentsOpen(false);
-          if (stopped) c.showNotice("This agent is stopped. Messages wait here until it starts.");
+          // Scoped to this DM: the banner shows only while this room is open,
+          // and the toast is dismissed on the next room or chat switch.
+          setStoppedDm(stopped ? room : null);
+          if (stopped) toast.message("This agent is stopped. Messages wait here until it starts.", { id: STOPPED_DM_TOAST });
         }}
       />
-      <Dialog open={roomSettings} onOpenChange={setRoomSettings}>
+      <Dialog open={roomSettings} onOpenChange={(open) => { setRoomSettings(open); setRoomSettingsError(""); }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>{c.currentRoom} working directory</DialogTitle><DialogDescription>Channel context for agents without an explicit workspace. This is metadata, not a sandbox boundary.</DialogDescription></DialogHeader>
-          <div className="flex gap-2"><Input readOnly value={selectedRoom?.workspace ?? ""} placeholder="Daemon working directory" aria-label="Channel working directory" /><Button type="button" variant="outline" onClick={() => void pickWorkspace(selectedRoom?.workspace ?? "").then((workspace) => c.call(`/api/channels/${encodeURIComponent(c.currentRoom ?? "")}`, { method: "PATCH", body: { workspace } }).then(() => c.refreshChannels()))}><Folder />Choose</Button></div>
-          {selectedRoom?.workspace && <Button type="button" variant="ghost" onClick={() => void c.call(`/api/channels/${encodeURIComponent(c.currentRoom ?? "")}`, { method: "PATCH", body: { workspace: null } }).then(() => c.refreshChannels())}>Use daemon working directory</Button>}
+          <div className="flex gap-2"><Input readOnly value={selectedRoom?.workspace ?? ""} placeholder="Daemon working directory" aria-label="Channel working directory" /><Button type="button" variant="outline" onClick={() => {
+            setRoomSettingsError("");
+            const current = selectedRoom?.workspace ?? "";
+            void pickWorkspace(current).then((workspace) => {
+              // A cancelled picker answers the value it opened with: nothing to save.
+              if (!workspace || workspace === current) return;
+              return setRoomWorkspace(workspace);
+            });
+          }}><Folder />Choose</Button></div>
+          {selectedRoom?.workspace && <Button type="button" variant="ghost" onClick={() => { setRoomSettingsError(""); void setRoomWorkspace(null); }}>Use daemon working directory</Button>}
+          {roomSettingsError && <p role="alert" className="text-[13px] text-destructive">{roomSettingsError}</p>}
         </DialogContent>
       </Dialog>
       <CreateChannelDialog
@@ -550,8 +597,8 @@ export function ConsoleShell() {
         }}
         onPickWorkspace={pickWorkspace}
       />
-      <CreateAgentDialog key={`agent:${newAgent}`} open={newAgent} onOpenChange={setNewAgent} call={c.call} initialKind="agent" onPickWorkspace={pickWorkspace} onCreated={() => { void c.refreshAgents(); }} />
-      <CreateAgentDialog key={`bot:${newBot}`} open={newBot} onOpenChange={setNewBot} call={c.call} initialKind="bot" onPickWorkspace={pickWorkspace} onCreated={() => { void c.refreshAgents(); }} />
+      <CreateAgentDialog key={`agent:${newAgent}`} open={newAgent} onOpenChange={setNewAgent} call={c.call} initialKind="agent" fullControl={fullControl} onPickWorkspace={pickWorkspace} onCreated={() => { void c.refreshAgents(); }} />
+      <CreateAgentDialog key={`bot:${newBot}`} open={newBot} onOpenChange={setNewBot} call={c.call} initialKind="bot" fullControl={fullControl} onPickWorkspace={pickWorkspace} onCreated={() => { void c.refreshAgents(); }} />
       <Dialog open={newChat} onOpenChange={setNewChat}>
         <DialogContent>
           <DialogHeader>
@@ -578,7 +625,7 @@ export function ConsoleShell() {
                   selectChat(chat.id);
                   setNewChat(false);
                 })
-                .catch((e) => setError(String(e)))
+                .catch((e) => setError(errorText(e)))
                 .finally(() => setCreating(false));
             }}
           >
@@ -689,6 +736,7 @@ export function ConsoleShell() {
           </Command>
         </DialogContent>
       </Dialog>
+      <ErrorBoundary label="File picker" resetKey={`${picker?.kind}:${picker?.initial}`}>
       <FilePicker key={`${picker?.kind}:${picker?.initial}`} open={picker !== null}
       onOpenChange={(open) => {
         if (!open) {
@@ -712,6 +760,7 @@ export function ConsoleShell() {
         }
         setPicker(null);
       }} />
+      </ErrorBoundary>
     </div>
     </ProfileContext.Provider>
   );

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bot, ChevronDown, Folder, Menu, Users } from "lucide-react";
+import { Bot, ChevronDown, Menu, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import type { AttachmentUpload } from "@/lib/attachments";
 import type {
@@ -22,6 +21,8 @@ import { ThreadPanel } from "./ThreadPanel";
 import { Transcript } from "./Transcript";
 import { AvatarTile, WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
 import { EMPTY_PROFILE, ProfileContext, type Profile } from "./profile";
+import { type ConsoleView, ViewTabs } from "./ViewTabs";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 const PROFILE: Profile = { ...EMPTY_PROFILE, operator: { displayName: "Heitor", avatar: "🧭" }, agents: { researcher: { avatar: "🔬" } } };
 
@@ -170,6 +171,8 @@ function useFixtureCall(): ConsoleCall {
         cwd: "/workspace/oh-my-agent",
         root: "/workspace/oh-my-agent",
         branch: "ui/story-catalog",
+        // Shows the notice a daemon adds when it cut the status output off.
+        truncated: true,
         files: [
           {
             path: "src/workspace.ts",
@@ -249,11 +252,11 @@ function StoryFrame({
   messages?: RoomMessage[];
   threadOpen?: boolean;
   connected?: boolean;
-  initialView?: "conversation" | "plans" | "changes" | "artifacts";
+  initialView?: ConsoleView;
 }) {
   const [room, setRoom] = useState("#research");
   const [thread, setThread] = useState(threadOpen ? 101 : null);
-  const [view, setView] = useState(initialView);
+  const [view, setView] = useState<ConsoleView>(initialView);
   const [mobileNav, setMobileNav] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [channelOpen, setChannelOpen] = useState(false);
@@ -300,18 +303,7 @@ function StoryFrame({
               <span className="text-[13px] font-semibold">{AGENTS.length}</span>
             </Button>
           </header>
-          <div className="@container/tabs flex h-9 min-w-0 shrink-0 items-center gap-3 border-b pr-3 pl-2 sm:pr-4 sm:pl-3">
-            <Tabs value={view} onValueChange={(next) => setView(next as typeof view)} className="h-full min-w-0 overflow-x-auto overscroll-x-contain [scrollbar-width:none]">
-              <TabsList variant="line" className="h-full">
-                <TabsTrigger value="conversation">Conversation</TabsTrigger>
-                <TabsTrigger value="plans">Plans</TabsTrigger>
-                <TabsTrigger value="changes">Changes</TabsTrigger>
-                <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <span className="flex-1" />
-            <span title={current?.workspace} className="hidden h-6 max-w-[45%] min-w-0 shrink-[999] items-center gap-1.5 rounded-md bg-muted px-2 text-[12px] text-muted-foreground @[34rem]/tabs:flex"><Folder aria-hidden className="size-3.5 shrink-0" /><span className="truncate">{current?.workspace ?? "Daemon working directory"}</span></span>
-          </div>
+          <ViewTabs view={view} onViewChange={setView} directory={current?.workspace ?? "Daemon working directory"} />
           <div className="flex min-h-0 min-w-0 flex-1">
             {view === "conversation" ? <>
               <div className="flex min-w-0 flex-1 flex-col">
@@ -332,6 +324,43 @@ function StoryFrame({
       <CreateAgentDialog open={botOpen} onOpenChange={setBotOpen} call={call} onCreated={noop} initialKind="bot" onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")} />
     </div>
     </ProfileContext.Provider>
+  );
+}
+
+/** Throws on the render after its button is pressed; remounting starts it whole again. */
+function Breakable({ children }: { children: React.ReactNode }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) throw new Error("Story render error: a malformed value reached this view.");
+  return (
+    <>
+      <div className="flex justify-end px-4 pt-4">
+        <Button id="story-break" type="button" variant="outline" onClick={() => setBroken(true)}>
+          Simulate a render error
+        </Button>
+      </div>
+      {children}
+    </>
+  );
+}
+
+function RenderErrorStory() {
+  const fixture = useFixtureCall();
+  // An artifact whose timestamp Intl cannot format: it must render as text.
+  const call = useCallback<ConsoleCall>(
+    async (path, init) =>
+      path === "/api/artifacts" && !init?.method
+        ? { artifacts: [{ file: "/workspace/oh-my-agent/plans/broken-date.html", url: "http://127.0.0.1:4387/s/bad", status: "open", pendingPrompts: 0, updatedAt: "not-a-date" }] }
+        : fixture(path, init),
+    [fixture],
+  );
+  return (
+    <ComponentStage title="Error boundary">
+      <ErrorBoundary label="Artifacts">
+        <Breakable>
+          <ArtifactsView call={call} version={0} />
+        </Breakable>
+      </ErrorBoundary>
+    </ComponentStage>
   );
 }
 
@@ -451,6 +480,7 @@ export function Storybook() {
   if (story === "page-plans") return <StoryFrame initialView="plans" />;
   if (story === "page-changes") return <StoryFrame initialView="changes" />;
   if (story === "page-artifacts") return <StoryFrame initialView="artifacts" />;
+  if (story === "state-render-error") return <RenderErrorStory />;
   if (story === "comp-agents") return <AgentStory />;
   if (story === "comp-ops") return <AgentStory initialTab="operations" />;
   if (story === "comp-new-channel") return <DialogStory />;
