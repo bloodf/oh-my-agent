@@ -6,6 +6,10 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+### Fixed
+
+- The website deploys again. Vercel's `bunx bun@1.4.2` install began exiting before it ran, so the site now installs with the Bun that Vercel provides. The demo mock no longer imports a module that needs OMP packages, which broke the website typecheck on Vercel, and a CI job now builds the website with only `website/` and `web/` installed, as Vercel does.
+
 ## [1.6.0] - 2026-09-15
 
 ### Changed
