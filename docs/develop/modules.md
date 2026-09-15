@@ -140,8 +140,9 @@ Transport-free types and parsing.
 | [`extension.test.ts`](../../tests/extension.test.ts) | Slash commands, widget, manager, editing, degradations. |
 | [`ensure-daemon.test.ts`](../../tests/ensure-daemon.test.ts) | Session-start auto-start: no-op when up, spawn when down, injected seam. |
 | [`console-api.test.ts`](../../tests/console-api.test.ts) | HTTP/WS API: channels, messages, attribution, ops, membership. |
+| [`console-api-client.test.ts`](../../tests/console-api-client.test.ts) | The console's `api()` helper: error codes, statuses, and non-JSON or empty bodies. |
 | [`console-client.test.ts`](../../tests/console-client.test.ts) | Browser flows: render, post, threads, a11y, unread, remote auth. |
-| [`console-storybook.test.ts`](../../tests/console-storybook.test.ts) | Storybook catalog coverage and workshop server. |
+| [`console-storybook.test.ts`](../../tests/console-storybook.test.ts) | Renders every Storybook story in Chrome and fails on page or console errors. |
 | [`socket-identity.test.ts`](../../tests/socket-identity.test.ts) | Bearer identity, attribution overwrite, worker scope, remote mode. |
 | [`remote-exposure.test.ts`](../../tests/remote-exposure.test.ts) | Bind refusal, forwarded headers, origin, tickets, audit. |
 | [`usage-meter.test.ts`](../../tests/usage-meter.test.ts) | Broker usage polling drives warn/park. |
@@ -160,6 +161,7 @@ Transport-free types and parsing.
 | [`setup-report.test.ts`](../../tests/setup-report.test.ts) | Setup checklist lines and readiness against a stand-in client. |
 | [`web-attachments.test.ts`](../../tests/web-attachments.test.ts) | Temporary web attachments: storage, size and count limits, expiry, deletion; web route method checks. |
 | [`web-files.test.ts`](../../tests/web-files.test.ts) | Directory listing cap and ordering, and attachment path references. |
+| [`website-mock-parity.test.ts`](../../tests/website-mock-parity.test.ts) | The website demo mock covers every daemon console route and frame type. |
 | [`web-chats-lifecycle.test.ts`](../../tests/web-chats-lifecycle.test.ts) | Web chat storage directory, close cleanup, and process-group stop. |
 | [`web-workspace-security.test.ts`](../../tests/web-workspace-security.test.ts) | Remote full-control boundary for workspace routes and agent definition edits, and web chat liveness. |
 | [`workspace-changes.test.ts`](../../tests/workspace-changes.test.ts) | Git status and diffs for a selected worktree, including hostile repositories. |
@@ -176,3 +178,4 @@ Transport-free types and parsing.
 | [`fixtures/fake-broker.ts`](../../tests/fixtures/fake-broker.ts) | In-process loopback broker stand-in. |
 | [`fixtures/hermetic-env.ts`](../../tests/fixtures/hermetic-env.ts) | Child env with config-root selectors stripped. |
 | [`fixtures/control-client.ts`](../../tests/fixtures/control-client.ts) | Authenticated daemon-socket client (ADR-008 seam). |
+| [`fixtures/chrome.ts`](../../tests/fixtures/chrome.ts) | Headless Chrome launcher shared by the browser suites. |

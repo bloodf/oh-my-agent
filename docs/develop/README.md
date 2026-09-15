@@ -33,7 +33,7 @@ Contributor hub. Operator install and usage live in the [root README](../../READ
 
 ## Current tree
 
-**113 of 115 tasks Done.** Two remain Blocked:
+**118 of 120 tasks Done.** Two remain Blocked:
 
 | Task | Blocker |
 |---|---|

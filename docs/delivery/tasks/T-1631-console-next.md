@@ -51,36 +51,36 @@ A Next.js app renders the console on the server: pages fetch the daemon with the
 
 | Path | Role | Note |
 |---|---|---|
-| [`web-next/package.json`](../../../web-next/package.json) | New | next, react, react-markdown, remark-gfm, mermaid; dev, build, start on 4388, typecheck. |
-| [`web-next/bun.lock`](../../../web-next/bun.lock) | New | Locked. |
-| [`web-next/next.config.ts`](../../../web-next/next.config.ts) | New | Strict mode, no powered-by header, the app as its own workspace root. |
-| [`web-next/tsconfig.json`](../../../web-next/tsconfig.json) | New | Next's defaults. |
-| [`web-next/postcss.config.mjs`](../../../web-next/postcss.config.mjs) | New | Tailwind v4. |
-| [`web-next/README.md`](../../../web-next/README.md) | New | How to run it and where it finds the daemon. |
-| [`web-next/src/lib/daemon.ts`](../../../web-next/src/lib/daemon.ts) | New | Resolves the daemon from console-url or OMA_CONSOLE_URL; server-only fetch with the token. |
-| [`web-next/src/lib/types.ts`](../../../web-next/src/lib/types.ts) | New | Wire shapes and personaFor. |
-| [`web-next/src/app/globals.css`](../../../web-next/src/app/globals.css) | New | Tailwind and the dark base. |
-| [`web-next/src/app/layout.tsx`](../../../web-next/src/app/layout.tsx) | New | The rail: rooms from the daemon, agents, artifacts. |
-| [`web-next/src/app/page.tsx`](../../../web-next/src/app/page.tsx) | New | Redirects to the first room. |
-| [`web-next/src/app/error.tsx`](../../../web-next/src/app/error.tsx) | New | A daemon refusal in place of the page, with retry. |
-| [`web-next/src/app/rooms/[id]/page.tsx`](../../../web-next/src/app/rooms/[id]/page.tsx) | New | The transcript, server-rendered: personas, Markdown, reactions, composer, live refresh. |
-| [`web-next/src/app/rooms/[id]/plans/page.tsx`](../../../web-next/src/app/rooms/[id]/plans/page.tsx) | New | Plans, server-rendered. |
-| [`web-next/src/app/agents/page.tsx`](../../../web-next/src/app/agents/page.tsx) | New | Agents with start and stop; schedules with pause and resume. |
-| [`web-next/src/app/artifacts/page.tsx`](../../../web-next/src/app/artifacts/page.tsx) | New | Lavish sessions with Open review. |
-| [`web-next/src/app/api/[...path]/route.ts`](../../../web-next/src/app/api/[...path]/route.ts) | New | The proxy: every /api/* forwarded with the token added server-side. |
-| [`web-next/src/app/api/live/route.ts`](../../../web-next/src/app/api/live/route.ts) | New | The daemon's WebSocket relayed as server-sent events. |
-| [`web-next/src/components/Markdown.tsx`](../../../web-next/src/components/Markdown.tsx) | New | GFM on the server; a mermaid fence becomes the one client island. |
-| [`web-next/src/components/Mermaid.tsx`](../../../web-next/src/components/Mermaid.tsx) | New | The island: mermaid imported on first sight. |
-| [`web-next/src/components/Live.tsx`](../../../web-next/src/components/Live.tsx) | New | EventSource on this origin; a relevant frame refreshes the server tree. |
-| [`web-next/src/components/Composer.tsx`](../../../web-next/src/components/Composer.tsx) | New | Post as @you through the proxy. |
-| [`web-next/src/components/Reactions.tsx`](../../../web-next/src/components/Reactions.tsx) | New | Toggle the operator's reaction through the proxy. |
-| [`web-next/src/components/Action.tsx`](../../../web-next/src/components/Action.tsx) | New | One proxied call and a refresh: start, stop, pause, resume, open review. |
+| `web-next/package.json` (to be created) | New | next, react, react-markdown, remark-gfm, mermaid; dev, build, start on 4388, typecheck. |
+| `web-next/bun.lock` (to be created) | New | Locked. |
+| `web-next/next.config.ts` (to be created) | New | Strict mode, no powered-by header, the app as its own workspace root. |
+| `web-next/tsconfig.json` (to be created) | New | Next's defaults. |
+| `web-next/postcss.config.mjs` (to be created) | New | Tailwind v4. |
+| `web-next/README.md` (to be created) | New | How to run it and where it finds the daemon. |
+| `web-next/src/lib/daemon.ts` (to be created) | New | Resolves the daemon from console-url or OMA_CONSOLE_URL; server-only fetch with the token. |
+| `web-next/src/lib/types.ts` (to be created) | New | Wire shapes and personaFor. |
+| `web-next/src/app/globals.css` (to be created) | New | Tailwind and the dark base. |
+| `web-next/src/app/layout.tsx` (to be created) | New | The rail: rooms from the daemon, agents, artifacts. |
+| `web-next/src/app/page.tsx` (to be created) | New | Redirects to the first room. |
+| `web-next/src/app/error.tsx` (to be created) | New | A daemon refusal in place of the page, with retry. |
+| `web-next/src/app/rooms/[id]/page.tsx` (to be created) | New | The transcript, server-rendered: personas, Markdown, reactions, composer, live refresh. |
+| `web-next/src/app/rooms/[id]/plans/page.tsx` (to be created) | New | Plans, server-rendered. |
+| `web-next/src/app/agents/page.tsx` (to be created) | New | Agents with start and stop; schedules with pause and resume. |
+| `web-next/src/app/artifacts/page.tsx` (to be created) | New | Lavish sessions with Open review. |
+| `web-next/src/app/api/[...path]/route.ts` (to be created) | New | The proxy: every /api/* forwarded with the token added server-side. |
+| `web-next/src/app/api/live/route.ts` (to be created) | New | The daemon's WebSocket relayed as server-sent events. |
+| `web-next/src/components/Markdown.tsx` (to be created) | New | GFM on the server; a mermaid fence becomes the one client island. |
+| `web-next/src/components/Mermaid.tsx` (to be created) | New | The island: mermaid imported on first sight. |
+| `web-next/src/components/Live.tsx` (to be created) | New | EventSource on this origin; a relevant frame refreshes the server tree. |
+| `web-next/src/components/Composer.tsx` (to be created) | New | Post as @you through the proxy. |
+| `web-next/src/components/Reactions.tsx` (to be created) | New | Toggle the operator's reaction through the proxy. |
+| `web-next/src/components/Action.tsx` (to be created) | New | One proxied call and a refresh: start, stop, pause, resume, open review. |
 | [`package.json`](../../../package.json) | Edited | console:next:* scripts; typecheck covers web-next; test:fast skips the slow suite. |
 | [`tsconfig.json`](../../../tsconfig.json) | Edited | web-next excluded from the root program. |
 | [`biome.json`](../../../biome.json) | Edited | Next's build output ignored. |
 | [`.gitignore`](../../../.gitignore) | Edited | web-next/.next. |
 | [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) | Edited | Installs web-next's dependencies. |
-| [`tests/console-next.test.ts`](../../../tests/console-next.test.ts) | New | Builds and starts Next against a real daemon: Markdown as HTML, no token in the page, no mermaid without a diagram, the proxy, the live stream. |
+| `tests/console-next.test.ts` (to be created) | New | Builds and starts Next against a real daemon: Markdown as HTML, no token in the page, no mermaid without a diagram, the proxy, the live stream. |
 
 ## Steps
 
@@ -97,7 +97,7 @@ Evidence:
 
 | Claim | Anchor |
 |---|---|
-| Next against a real daemon | [`tests/console-next.test.ts`](../../../tests/console-next.test.ts) |
+| Next against a real daemon, removed by T-1804 | `04f359c` |
 
 ## Out of scope
 
