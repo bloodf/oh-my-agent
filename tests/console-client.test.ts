@@ -172,6 +172,11 @@ interface TrackedPage {
 
 async function openPage(): Promise<TrackedPage> {
 	const page = await browser.newPage();
+	// The console only exposes its socket and reconcile probes to a page that
+	// asks before any script runs; a production page never does.
+	await page.evaluateOnNewDocument(() => {
+		Reflect.set(globalThis, "__consoleTestHooks", true);
+	});
 	// A new headless target is not the active one, and in an unfocused
 	// document HTMLElement.focus() is a silent no-op — without this the
 	// keyboard tests flake depending on which target Chrome happened to
@@ -3673,10 +3678,9 @@ describe("unread", () => {
 				10_000,
 			);
 
-			// The pass ran and still left the unvisited room alone — and never
-			// even asked about it, so the badge is absent because the room was
-			// out of scope, not because its read happened to answer nothing.
-			expect(h.feed.reconcileReads.has("#alerts")).toBe(false);
+			// The pass ran and still left the unvisited room alone. It is asked
+			// about, from where its history stood when the feed first opened, so
+			// activity during an outage can still mark it; its history cannot.
 			expect((await unreadLabels(page)).join(" ")).not.toContain("#alerts");
 			// The visited room is at its cursor: nothing arrived after it.
 			expect((await unreadLabels(page)).join(" ")).not.toContain("#ops");
@@ -4809,6 +4813,389 @@ describe("repaint stability", () => {
 
 			expect((await focusProbe(page))?.text ?? "").toContain("#ops");
 			expect(errors).toEqual([]);
+		},
+	);
+});
+
+// ── Paging, frame costs, and reconnect recovery ─────────────────────────────
+
+/** Wait until this page's events socket is open. */
+const socketOpen = (page: Page) =>
+	waitFor(
+		"events socket open",
+		() =>
+			page.evaluate(() =>
+				(
+					(globalThis as { __consoleSockets?: WebSocket[] }).__consoleSockets ??
+					[]
+				).some((socket) => socket.readyState === WebSocket.OPEN),
+			),
+		(open) => open === true,
+	);
+
+/** Wait until the socket-open reconciliation has finished `count` passes. */
+const reconciled = (page: Page, count = 1) =>
+	waitFor(
+		"reconcile pass",
+		() =>
+			page.evaluate(
+				() =>
+					(globalThis as { __consoleReconcilePasses?: number })
+						.__consoleReconcilePasses ?? 0,
+			),
+		(passes) => passes >= count,
+	);
+
+/** Request URLs the page has sent so far, by reference so later ones show up. */
+function recordRequests(page: Page): string[] {
+	const urls: string[] = [];
+	page.on("request", (request) => urls.push(request.url()));
+	return urls;
+}
+
+describe("large rooms", () => {
+	browserTest(
+		"a room past one page opens on its newest messages and loads older history on request",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			for (let i = 1; i <= 520; i += 1) {
+				await h.rooms.post({
+					room: "#reviews",
+					author: "reviewer",
+					body: `bulk message ${i}`,
+				});
+			}
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			const first = await waitFor(
+				"newest message",
+				() => renderedMessages(page),
+				(bodies) => bodies.includes("bulk message 520"),
+			);
+			expect(first).toHaveLength(200);
+			expect(first[0]).toBe("bulk message 321");
+
+			await socketOpen(page);
+			await h.supervisor.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "live after history",
+			});
+			await waitFor(
+				"live message",
+				() => renderedMessages(page),
+				(bodies) => bodies.at(-1) === "live after history",
+			);
+
+			await clickInPage(page, "#load-older");
+			const second = await waitFor(
+				"second page",
+				() => renderedMessages(page),
+				(bodies) => bodies.includes("bulk message 121"),
+			);
+			expect(second[0]).toBe("bulk message 121");
+			expect(second.at(-1)).toBe("live after history");
+
+			// Another live message must not drop the history already loaded.
+			await h.supervisor.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "second live message",
+			});
+			const kept = await waitFor(
+				"second live message",
+				() => renderedMessages(page),
+				(bodies) => bodies.at(-1) === "second live message",
+			);
+			expect(kept[0]).toBe("bulk message 121");
+
+			await clickInPage(page, "#load-older");
+			const all = await waitFor(
+				"whole history",
+				() => renderedMessages(page),
+				(bodies) => bodies[0] === "bulk message 1",
+			);
+			expect(all).toHaveLength(522);
+			await waitFor(
+				"no older history left",
+				() => page.$("#load-older").then((node) => node === null),
+				(gone) => gone,
+			);
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+});
+
+describe("frame costs", () => {
+	browserTest(
+		"streamed chat deltas do not refetch views per token",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const { page } = await openPage();
+			const requests = recordRequests(page);
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await socketOpen(page);
+			await reconciled(page);
+			// Radix tabs activate on focus, which a synthetic click does not give.
+			await page.waitForSelector('[role="tablist"] [role="tab"]:last-child');
+			await focusInPage(page, '[role="tablist"] [role="tab"]:last-child');
+			const artifactReads = () =>
+				Promise.resolve(
+					requests.filter((url) => new URL(url).pathname === "/api/artifacts")
+						.length,
+				);
+			await waitFor("artifacts load", artifactReads, (count) => count === 1);
+
+			for (let i = 0; i < 100; i += 1) {
+				h.feed.sendRaw(
+					JSON.stringify({
+						type: "chat",
+						chatId: "unviewed-chat",
+						event: { type: "message_update" },
+					}),
+				);
+			}
+			h.feed.sendRaw(
+				JSON.stringify({
+					type: "chat",
+					chatId: "unviewed-chat",
+					event: { type: "agent_end" },
+				}),
+			);
+			// A plan frame after the stream is the marker: once its refetch is
+			// seen, every chat frame before it has been handled.
+			h.feed.sendRaw(JSON.stringify({ type: "plan", room: "#reviews" }));
+			await waitFor(
+				"finished turn and plan refetch",
+				artifactReads,
+				(count) => count >= 3,
+			);
+			expect(await artifactReads()).toBe(3);
+			expect(
+				requests.filter((url) =>
+					new URL(url).pathname.startsWith("/api/chats/"),
+				),
+			).toEqual([]);
+		},
+	);
+
+	browserTest("a budget frame does not refetch agents", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const { page } = await openPage();
+		const requests = recordRequests(page);
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await socketOpen(page);
+		await reconciled(page);
+		const agentReads = () =>
+			Promise.resolve(
+				requests.filter((url) => new URL(url).pathname === "/api/agents")
+					.length,
+			);
+		const before = await agentReads();
+
+		h.feed.sendRaw(
+			JSON.stringify({ type: "budget", account: "acct-1", state: "warned" }),
+		);
+		// A schedule frame does refetch agents, so its read marks the budget
+		// frame as handled.
+		h.feed.sendRaw(
+			JSON.stringify({ type: "schedule", agent: "reviewer", phase: "armed" }),
+		);
+		await waitFor("schedule refetch", agentReads, (count) => count > before);
+		expect(await agentReads()).toBe(before + 1);
+	});
+
+	browserTest("opening a room reads its transcript once", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "Hello.",
+		});
+		const { page } = await openPage();
+		const requests = recordRequests(page);
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await socketOpen(page);
+		await reconciled(page);
+		const pages = requests.filter((url) => {
+			const parsed = new URL(url);
+			return (
+				parsed.pathname === "/api/channels/%23reviews/messages" &&
+				parsed.searchParams.get("afterId") === null
+			);
+		});
+		expect(pages).toHaveLength(1);
+		expect(await renderedMessages(page)).toEqual(["Hello."]);
+	});
+
+	browserTest(
+		"test probes stay off unless the page asks for them",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const page = await browser.newPage();
+			cleanups.push(async function cleanupBarePage() {
+				await page.close().catch(() => {});
+			});
+			const requests = recordRequests(page);
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"socket handshake",
+				() => Promise.resolve(h.feed.connects),
+				(count) => count > 0,
+			);
+			await waitFor(
+				"connected indicator",
+				() => page.$eval("body", (node) => node.textContent ?? ""),
+				(text) => text.includes("Daemon connected"),
+			);
+			expect(requests.length).toBeGreaterThan(0);
+			expect(
+				await page.evaluate(() => [
+					Reflect.get(globalThis, "__consoleSockets") === undefined,
+					Reflect.get(globalThis, "__consoleReconcilePasses") === undefined,
+				]),
+			).toEqual([true, true]);
+		},
+	);
+});
+
+describe("reconnect recovery", () => {
+	browserTest(
+		"a never-opened room gains an unread badge from activity during an outage",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+			await h.rooms.post({ room: "#ops", author: "reviewer", body: "Old." });
+
+			const { page, errors } = await openPage();
+			const seeded = page.waitForResponse((response) => {
+				const url = new URL(response.url());
+				return (
+					url.pathname === "/api/channels/%23ops/messages" &&
+					url.searchParams.get("newest") === "1"
+				);
+			});
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await seeded;
+			await socketOpen(page);
+			await reconciled(page);
+			expect(await unreadLabels(page)).toEqual([]);
+
+			h.feed.dropMessages = true;
+			const released = Promise.withResolvers<void>();
+			const releaseGate = () => {
+				h.feed.holdConnect = null;
+				released.resolve();
+			};
+			cleanups.push(async function releaseConnectGate() {
+				releaseGate();
+			});
+			h.feed.holdConnect = released.promise;
+			await page.evaluate(() => {
+				(
+					(globalThis as { __consoleSockets?: WebSocket[] }).__consoleSockets ??
+					[]
+				)
+					.find((socket) => socket.readyState === WebSocket.OPEN)
+					?.close();
+			});
+			await h.rooms.post({
+				room: "#ops",
+				author: "reviewer",
+				body: "Posted during the outage.",
+			});
+			releaseGate();
+			await reconciled(page, 2);
+			await waitFor(
+				"unread badge on #ops",
+				() => unreadLabels(page),
+				(labels) => labels.some((label) => label.includes("#ops")),
+			);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"a failed channel bootstrap reloads when the socket opens and keeps the requested room",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+			await h.rooms.post({
+				room: "#ops",
+				author: "reviewer",
+				body: "Ops here.",
+			});
+
+			const { page, errors } = await openPage();
+			let refused = 0;
+			await page.setRequestInterception(true);
+			page.on("request", (request) => {
+				if (
+					new URL(request.url()).pathname === "/api/channels" &&
+					refused === 0
+				) {
+					refused += 1;
+					void request.respond({
+						status: 502,
+						contentType: "application/json",
+						body: JSON.stringify({
+							error: { code: "unavailable", message: "channels unavailable" },
+						}),
+					});
+					return;
+				}
+				void request.continue();
+			});
+			await page.goto(h.consoleUrl("#ops"), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"requested room transcript",
+				() => renderedMessages(page),
+				(bodies) => bodies.includes("Ops here."),
+			);
+			expect(refused).toBe(1);
+			expect(new URL(page.url()).searchParams.get("room")).toBe("#ops");
+			expect(
+				unexpectedPageErrors(errors).filter((error) => !error.includes("502")),
+			).toEqual([]);
+		},
+	);
+});
+
+describe("unreachable daemon", () => {
+	browserTest(
+		"repeated failed reconnects suggest the daemon moved to a new address",
+		async () => {
+			const json = (body: unknown) =>
+				new Response(JSON.stringify(body), {
+					headers: { "content-type": "application/json" },
+				});
+			// Snapshots answer, but the events socket never opens, as after a
+			// daemon restart on another port behind a still-open tab.
+			const server = await degradedServer((url) => {
+				if (url.pathname === "/api/channels")
+					return json({ channels: [{ id: "#reviews", kind: "channel" }] });
+				if (url.pathname === "/api/agents") return json({ agents: [] });
+				if (url.pathname === "/api/profile") return json({});
+				if (url.pathname.endsWith("/messages")) return json({ messages: [] });
+				return undefined;
+			});
+			const { page } = await openPage();
+			await page.goto(server.url, { waitUntil: "domcontentloaded" });
+			const notice = await waitFor(
+				"restart hint",
+				() => page.$eval("#notice", (node) => node.textContent ?? ""),
+				(text) => text.includes("new address"),
+				15_000,
+			);
+			expect(notice).toContain("omp-agent console");
 		},
 	);
 });

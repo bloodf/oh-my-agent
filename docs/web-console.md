@@ -121,7 +121,7 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 |---|---|---|
 | `/api/channels` | GET / POST | Lists or creates a `#` channel or `@` DM, optionally with canonical `workspace` |
 | `/api/channels/:id` | PATCH | Sets an existing directory as `workspace`, or clears it with `null` |
-| `/api/channels/:id/messages` | GET / POST | Reads a transcript or posts as `@you`; supports `afterId`, `limit`, and thread `parentId` |
+| `/api/channels/:id/messages` | GET / POST | Reads a transcript or posts as `@you`; supports `afterId`, `limit`, and thread `parentId`. `newest=1` returns the newest `limit` messages and `beforeId` pages back from an id; both also return the older thread roots of replies in the page, ahead of it |
 | `/api/channels/:id/plans` | GET / POST | Lists or creates durable plans for a room |
 | `/api/channels/:id/plans/:planId` | PATCH | Updates a plan using `expectedRevision` |
 | `/api/messages/:id/reactions/toggle` | POST | Toggles the operator's reaction |
