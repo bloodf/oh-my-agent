@@ -7,7 +7,7 @@ import { ensureLive } from "./activity";
 import { subscribe } from "./bus";
 import { DEMO_TOKEN } from "./demoToken";
 import { handleApi, hasOperatorToken } from "./router";
-import { recordUpload } from "./routes/workspace";
+import { MAX_UPLOAD_BYTES, recordUpload } from "./routes/workspace";
 
 const LATENCY_MS = [35, 110] as const;
 const delay = () => new Promise((resolve) => setTimeout(resolve, LATENCY_MS[0] + Math.random() * (LATENCY_MS[1] - LATENCY_MS[0])));
@@ -194,6 +194,9 @@ function installXhr(): void {
 						if (!hasOperatorToken(demo.headers)) {
 							demo.status = 401;
 							demo.response = JSON.stringify({ error: { code: "unauthorized", message: "Operator token refused" } });
+						} else if (total > MAX_UPLOAD_BYTES) {
+							demo.status = 413;
+							demo.response = JSON.stringify({ error: { code: "payload_too_large", message: "Attachment exceeds 25 MiB" } });
 						} else if (!name) {
 							demo.status = 400;
 							demo.response = JSON.stringify({ error: { code: "workspace_error", message: "Attachment name is required" } });

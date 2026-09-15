@@ -92,15 +92,27 @@ export const roomRoutes: Route[] = [
 			return value;
 		};
 		const afterId = cursor("afterId");
-		const before = cursor("before");
+		const beforeId = cursor("beforeId");
+		const newest = ctx.url.searchParams.get("newest") === "1";
 		const rawLimit = ctx.url.searchParams.get("limit");
 		const limit = rawLimit === null ? 500 : Number(rawLimit);
 		if (!Number.isInteger(limit) || limit < 1 || limit > 500) fail(400, "invalid_request", "limit must be 1..500");
-		const page = roomMessages(id).filter((m) => (afterId === undefined || m.id > afterId) && (before === undefined || m.id < before));
-		// `afterId` pages forward from a cursor, oldest first. Without it the
-		// answer is the newest `limit` messages (older than `before`, if given),
-		// still in ascending order.
-		return ok({ messages: afterId === undefined ? page.slice(-limit) : page.slice(0, limit) });
+		// As the daemon pages: `afterId` and plain `limit` take the oldest N
+		// (after the cursor); `beforeId` takes the N just before that id and
+		// `newest=1` the latest N. Always ascending.
+		const all = roomMessages(id);
+		const page =
+			afterId !== undefined
+				? all.filter((m) => m.id > afterId).slice(0, limit)
+				: beforeId !== undefined
+					? all.filter((m) => m.id < beforeId).slice(-limit)
+					: newest
+						? all.slice(-limit)
+						: all.slice(0, limit);
+		// A reply whose thread root is older than the page brings that root along, first.
+		const onPage = new Set(page.map((m) => m.id));
+		const roots = all.filter((m) => !onPage.has(m.id) && page.some((reply) => reply.threadRootId === m.id));
+		return ok({ messages: [...roots, ...page] });
 	}),
 
 	route("POST", /^\/api\/channels\/([^/]+)\/messages$/, (ctx) => {
