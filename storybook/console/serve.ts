@@ -51,6 +51,11 @@ export function startStorybook(port = 0): ReturnType<typeof Bun.serve> {
 		hostname: "127.0.0.1",
 		async fetch(request) {
 			const url = new URL(request.url);
+			// Browsers ask for a favicon on their own schedule; an empty answer
+			// keeps that request from showing up as a console error in a story.
+			if (url.pathname === "/favicon.ico") {
+				return new Response(null, { status: 204 });
+			}
 			const route =
 				ROUTES[url.pathname] ??
 				(CHUNK_FILE.test(url.pathname)
