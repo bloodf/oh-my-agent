@@ -190,6 +190,9 @@ describe("workspace changes", () => {
 				await commitAll(root);
 
 				const nested = join(root, "nested");
+				// A clone keeps no identity of its own; CI has no global one.
+				await git(nested, "config", "user.name", "Workspace Test");
+				await git(nested, "config", "user.email", "workspace@example.test");
 				// Move the submodule commit so its gitlink shows as changed.
 				await writeFile(join(nested, "inner.txt"), "inner second\n");
 				await commitAll(nested);
