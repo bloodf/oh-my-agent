@@ -36,6 +36,7 @@ import { PACKAGE_VERSION } from "../shared/version";
 import { cliCommand, consoleCommand } from "./cli";
 import type { DaemonClient, ExtensionIO } from "./commands";
 import {
+	editCommand,
 	injectCommand,
 	killCommand,
 	logsCommand,
@@ -176,8 +177,17 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 		},
 	});
 
+	pi.registerCommand("edit", {
+		description: "Edit a peer's definition or choose its model: /edit <name>.",
+		handler: async (args, ctx) => {
+			await editCommand(client, ioFrom(ctx.ui), args);
+			await refreshWidget(client, ioFrom(ctx.ui));
+		},
+	});
+
 	pi.registerCommand("kill", {
-		description: "Kill an oh-my-agent worker (asks for confirmation).",
+		description:
+			"Kill an oh-my-agent worker (asks for confirmation): /kill <name> [--keep-children].",
 		handler: async (args, ctx) => {
 			await killCommand(client, ioFrom(ctx.ui), args);
 			await refreshWidget(client, ioFrom(ctx.ui));
@@ -233,7 +243,8 @@ const ohMyAgentExtension = (pi: ExtensionAPI): void => {
 	});
 
 	pi.registerCommand("logs", {
-		description: "Show a worker's buffered output: /logs <name> [line-count].",
+		description:
+			"Show a worker's buffered output, or the daemon's: /logs <name|daemon> [line-count].",
 		handler: async (args, ctx) => {
 			await logsCommand(client, ioFrom(ctx.ui), args);
 		},

@@ -55,7 +55,7 @@ Channels persist an optional canonical working directory. On Start, an agent's e
 
 Existing files on the daemon's machine are attached as absolute paths. The daemon-backed file picker and path entry browse the machine and pass those paths to OMP; files are read in place, not uploaded or copied into the workspace.
 
-Browser-selected, dropped, and pasted files of any type stream into private OS temporary storage. The upload endpoint does not buffer the full file or impose an arbitrary total file-size cap; disk space, browser, and proxy limits still apply. The UI exposes progress and cancellation. Cancelled/failed transfers remove partial bytes; explicit removal of an unsent attachment deletes only its managed copy. A prompt accepts at most 20 file paths.
+Browser-selected, dropped, and pasted files of any type stream into private OS temporary storage. The upload endpoint does not buffer the full file. Each file is capped at 25 MiB, enforced while it streams: the first byte past the cap aborts the transfer, removes the partial file, and answers `413 payload_too_large`. At most 4 uploads stream at once and at most 40 are held (finished or in flight) until deleted or expired; past either limit the request answers `429 too_many_attachments`. Browser and proxy limits still apply. The UI exposes progress and cancellation. Cancelled/failed transfers remove partial bytes; explicit removal of an unsent attachment deletes only its managed copy. A prompt accepts at most 20 file paths.
 
 Uploads expire after 24 hours, with cleanup at daemon startup and hourly; room messages can outlive the uploaded files they reference. Independent chat metadata and native session JSONL also live in OS temporary storage and can disappear under OS cleanup. Existing original-file references are never deleted by retention. Agent definitions, room/DM history, reactions, membership, workspace assignments, and plans remain durable.
 
@@ -84,9 +84,10 @@ Remote access increases impact because an authenticated operator can control age
 - `/api/chats*`
 - `/api/workspace/*`
 - `/api/attachments*`
-- `/api/agents/:name/start` and agent/channel mutations that set a workspace
+- `/api/agents/:name/start` and channel mutations that set a workspace
+- `POST /api/agents` and `PATCH /api/agents/:name` for any field other than `name`, `description`, `model`, `thinkingLevel`, and `rooms`
 
-`GET /api/capabilities` reports whether full control is available to that request. Rooms, DMs, plans, and existing agent controls remain under the remote operator trust model without this extra flag. There is no browser shell-command endpoint; Git inspection invokes fixed read-only commands with bounded output.
+`GET /api/capabilities` reports whether full control is available to that request. Rooms, DMs, plans, membership, and the kill, inject, and logs controls for existing agents remain under the remote operator trust model without this extra flag. Without it, a remote definition edit may change only the description, model, thinking level, and rooms; every other field is agent policy (sandbox, tools, MCP servers, skills, body, spawn permissions, wake rules, heartbeat, autonomy, schedules, automations, workspace, and the remaining runtime options) and is refused with `403 remote_control_disabled` before anything is written. Creating an agent requires a body, so remote creation also needs full control. The control socket is a local Unix socket and is not reachable remotely. There is no browser shell-command endpoint; Git inspection invokes fixed read-only commands with bounded output.
 
 ## HTTP API
 
@@ -116,7 +117,7 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 | `/api/workspace/files?path=` | GET | Lists up to 1,000 entries in an absolute directory for the daemon picker |
 | `/api/workspace/changes?cwd=` | GET | Reads repository context and Git status |
 | `/api/workspace/diff?cwd=&path=&staged=` | GET | Reads a bounded diff for a reported changed path |
-| `/api/attachments` | GET / POST | Lists managed uploads or streams a raw body into private temporary storage; POST uses percent-encoded `X-Attachment-Name` and `Content-Type`, returns `{id,name,type,size,path}` |
+| `/api/attachments` | GET / POST | Lists managed uploads or streams a raw body into private temporary storage; POST uses percent-encoded `X-Attachment-Name` and `Content-Type`, returns `{id,name,type,size,path}`; `413` past 25 MiB, `429` past 4 concurrent or 40 held uploads |
 | `/api/attachments/:id` | DELETE | Deletes a managed upload by opaque ID; never accepts an original file path |
 
 ### Rooms, DMs, plans, and agents
@@ -129,9 +130,9 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 | `/api/channels/:id/plans` | GET / POST | Lists or creates durable plans for a room |
 | `/api/channels/:id/plans/:planId` | PATCH | Updates a plan using `expectedRevision` |
 | `/api/messages/:id/reactions/toggle` | POST | Toggles the operator's reaction |
-| `/api/agents` | GET / POST | Lists registered and defined agents, or creates a validated definition |
+| `/api/agents` | GET / POST | Lists registered and defined agents, or creates a validated definition; remote creation requires full control |
 | `/api/agents/:name/definition` | GET | Reads the editable definition wire shape |
-| `/api/agents/:name` | PATCH | Validates and edits the definition; the agent name is immutable |
+| `/api/agents/:name` | PATCH | Validates and edits the definition; the agent name is immutable; remote requests without full control may change only `description`, `model`, `thinkingLevel`, and `rooms` |
 | `/api/agents/:name/start` | POST | Explicitly starts a stopped definition with resolved workspace and declared schedules; requires full control |
 | `/api/agents/:name/rooms[/:room]` | POST / DELETE | Adds or removes durable, live-applied membership |
 | `/api/agents/:name/kill` | POST | Stops an agent, cascading by default unless `keepChildren` is true |

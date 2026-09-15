@@ -2,6 +2,8 @@ import { opendir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 
+const MAX_LISTED_ENTRIES = 1000;
+
 /** Privileged operator-only browsing. Paths are not a worker capability grant. */
 export async function listWebFiles(path: string) {
 	const selected = path || homedir();
@@ -10,12 +12,11 @@ export async function listWebFiles(path: string) {
 	const canonical = await realpath(selected);
 	const directory = await opendir(canonical);
 	const entries: { name: string; path: string; directory: boolean }[] = [];
-	let truncated = false;
+	// The whole directory is read before the cap, so folders sort first and
+	// the entries kept are the first by name rather than whichever the
+	// filesystem yielded first. A directory of millions of entries is read in
+	// full; a bounded heap would fix that if it ever matters.
 	for await (const entry of directory) {
-		if (entries.length === 1000) {
-			truncated = true;
-			break;
-		}
 		const full = join(canonical, entry.name);
 		const info = entry.isSymbolicLink()
 			? await stat(full).catch(() => null)
@@ -31,7 +32,12 @@ export async function listWebFiles(path: string) {
 		(a, b) =>
 			Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name),
 	);
-	return { path: canonical, parent: dirname(canonical), entries, truncated };
+	return {
+		path: canonical,
+		parent: dirname(canonical),
+		entries: entries.slice(0, MAX_LISTED_ENTRIES),
+		truncated: entries.length > MAX_LISTED_ENTRIES,
+	};
 }
 
 export async function attachmentReferences(value: unknown) {

@@ -1,7 +1,7 @@
 import type { RoomPlans } from "../rooms/plans";
 import { RoomPlanError } from "../rooms/plans";
 import type { WebChats } from "../shared/web-workspace";
-import type { WebAttachments } from "./web-attachments";
+import { AttachmentLimitError, type WebAttachments } from "./web-attachments";
 import { attachmentReferences, listWebFiles } from "./web-files";
 import { inspectWorkspace, readWorkspaceDiff } from "./workspace-changes";
 
@@ -77,6 +77,15 @@ export async function handleWebRoute(
 			const id = planMatch[2];
 			if (request.method === "GET" && !id)
 				return json(200, { plans: services.plans.list(room) });
+			// The method is settled before the body is read: a GET on one plan
+			// or a DELETE is a 405, not a 400 about a body nobody asked for.
+			if (request.method !== (id ? "PATCH" : "POST"))
+				return json(405, {
+					error: {
+						code: "method_not_allowed",
+						message: `${request.method} not allowed`,
+					},
+				});
 			const body = (await readJson(request)) as Record<string, unknown>;
 			if (request.method === "POST" && !id) {
 				const plan = services.plans.create({
@@ -251,6 +260,10 @@ export async function handleWebRoute(
 		// Oversized bodies answer 413 here exactly as on the console's own
 		// routes; the same limit used to be 400 on one surface and 413 on the
 		// other for the identical condition.
+		if (error instanceof AttachmentLimitError)
+			return json(error.status, {
+				error: { code: error.code, message: error.message },
+			});
 		if (error instanceof Error && error.message === "JSON body exceeds 1 MiB")
 			return json(413, {
 				error: { code: "payload_too_large", message: error.message },

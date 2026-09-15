@@ -18,12 +18,14 @@ never JSON.
 
 That block is the USAGE header. A parse error prints it plus the Verbs list and exits 2.
 
-`omp-agent` with **no arguments** is `omp-agent daemon`, not usage. It starts the daemon.
+`omp-agent` with **no arguments** prints usage and exits 2. Start the daemon with `omp-agent daemon`.
 
 | Flag | Meaning |
 |---|---|
 | `--json` | Print the protocol result as JSON on stdout. Must appear before the verb. |
 | `--` | End flag parsing. Everything after is payload. |
+
+Any other flag before the verb, such as a mistyped `--jsn`, is a usage error: it prints `unknown flag: <flag>` and the usage, and exits 2 without running the verb.
 
 `--json` never applies to errors. Failures are always plain text on stderr.
 
@@ -113,6 +115,14 @@ omp-agent agent create <name> --preset <preset>
 Copy a shipped role under a new name. The preset's fields travel unchanged apart from `name`. An unknown preset is refused with the list of known ones. Never spawns.
 
 Human: `<name>	created	from <preset>`.
+
+### models
+
+```sh
+omp-agent models
+```
+
+The models the daemon can route to, one per line: `provider/id	name`, with `	(default)` on OMP's default model. If OMP's default is not routable by the daemon, a last line names it and says to add it to `models.yml` or the credential broker, or to pick one from the list. `--json` prints `{ models, default, defaultRoutable }`.
 
 ### presets
 
@@ -262,7 +272,8 @@ Inside `omp`, after the extension loads:
 | `/setup` | `omp-agent setup`; the TUI also offers the fixes |
 | `/cli agents` | `omp-agent agents` |
 | `/spawn <name>` | `omp-agent spawn <name>` |
-| `/kill <name>` | `omp-agent kill <name>` |
+| `/kill <name> [--keep-children]` | `omp-agent kill <name> [--keep-children]` |
+| `/edit <name>` | `omp-agent agent edit <name> <file\|->`; the TUI asks whether to edit the definition document or pick a model |
 | `/rooms read <room>` | `omp-agent rooms read <room>` |
 | `/rooms post <room> <message>` | `omp-agent rooms post <room> <message>` |
 | `/rooms create <room>` | `omp-agent rooms create <room>` |
@@ -273,8 +284,9 @@ Inside `omp`, after the extension loads:
 | `/schedule` | `omp-agent schedule` |
 | `/schedule <id> on\|off` | `omp-agent schedule <id> on\|off` |
 | `/logs <name> [n]` | `omp-agent logs <name> [n]` |
+| `/logs daemon [n]` | `omp-agent logs daemon [n]` |
 | `/inject <name> <message>` | `omp-agent inject <name> <message>` |
-| `/preset [preset] [name]` | `omp-agent agent create <name> --preset <preset>`; bare `/preset` picks from the list and asks for a name |
+| `/preset [preset] [name]` | `omp-agent agent create <name> --preset <preset>`; bare `/preset` picks from the list and asks for a name. `/preset <name> --preset <preset>` also works, and so does `/preset <name> <preset>` when only the second word is a preset |
 | `/manage` | Full-screen manager; no CLI equivalent |
 
 The status widget shows `oh-my-agent · N running · N parked · N unread · /manage`. If the daemon is down, it shows the same daemon-down sentence as the CLI.
