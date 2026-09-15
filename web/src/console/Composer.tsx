@@ -321,7 +321,12 @@ export function Composer({
           placeholder={label}
           className="max-h-60 min-h-[44px] resize-none rounded-none border-0 bg-transparent px-3 py-2 text-[15px] leading-[1.46] shadow-none focus-visible:border-transparent focus-visible:ring-0 disabled:bg-transparent md:text-[15px] dark:bg-transparent dark:disabled:bg-transparent"
           value={draft.body}
-          disabled={disabled || sending}
+          // Read-only, not disabled, while a send is in flight: disabling the
+          // focused textarea drops focus to <body>, so everything typed after
+          // the send landed went nowhere.
+          disabled={disabled}
+          readOnly={sending}
+          aria-busy={sending}
           onChange={(event) => updateDraft((current) => ({ ...current, body: event.target.value, revision: current.revision + 1 }))}
           onKeyDown={onKeyDown}
           onPaste={onPaste}

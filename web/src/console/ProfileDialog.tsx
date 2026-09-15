@@ -11,9 +11,11 @@
  * Failure modes: the daemon's refusal (a field too long, a bad image, a bad
  * agent name) is shown under the form; nothing is saved until every field is
  * accepted. Only changed personas are sent, so several image avatars never
- * add up past the daemon's request size limit.
+ * add up past the daemon's request size limit. The draft is seeded on open: a
+ * profile broadcast from another console while this one is open never wipes
+ * unsaved edits.
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -25,6 +27,7 @@ import { AvatarEditor } from "./definition/AvatarEditor";
 import { EMPTY_PROFILE, type Persona, type Profile, personaFor, useProfile } from "./profile";
 
 const wire = (persona: Persona | undefined): Persona => ({ displayName: persona?.displayName ?? "", avatar: persona?.avatar ?? "" });
+const seed = (profile: Profile): Profile => ({ operator: { ...profile.operator }, agents: { ...profile.agents } });
 const samePersona = (a: Persona | undefined, b: Persona | undefined) =>
   (a?.displayName ?? "") === (b?.displayName ?? "") && (a?.avatar ?? "") === (b?.avatar ?? "");
 
@@ -39,12 +42,17 @@ export function ProfileDialog({ open, onOpenChange, call, agents, onSaved }: {
   const [draft, setDraft] = useState<Profile>(profile);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (open) {
-      setDraft({ operator: { ...profile.operator }, agents: { ...profile.agents } });
-      setError("");
-    }
-  }, [open, profile]);
+  /** The profile the draft was seeded from; null while closed. */
+  const [base, setBase] = useState<Profile | null>(null);
+  // Adjusting state while rendering. The draft is seeded when the dialog
+  // opens, and follows a newer profile only while nothing has been edited.
+  if (open && base !== profile && (base === null || JSON.stringify(draft) === JSON.stringify(seed(base)))) {
+    setBase(profile);
+    setDraft(seed(profile));
+    if (base === null) setError("");
+  } else if (!open && base !== null) {
+    setBase(null);
+  }
   const setOperator = (key: keyof Persona, value: string) =>
     setDraft((current) => ({ ...current, operator: { ...current.operator, [key]: value } }));
   const setAgent = (name: string, key: keyof Persona, value: string) =>
