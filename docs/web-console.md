@@ -55,7 +55,7 @@ Channels persist an optional canonical working directory. On Start, an agent's e
 
 Existing files on the daemon's machine are attached as absolute paths. The daemon-backed file picker and path entry browse the machine and pass those paths to OMP; files are read in place, not uploaded or copied into the workspace.
 
-Browser-selected, dropped, and pasted files of any type stream into private OS temporary storage. The upload endpoint does not buffer the full file or impose an arbitrary total file-size cap; disk space, browser, and proxy limits still apply. The UI exposes progress and cancellation. Cancelled/failed transfers remove partial bytes; explicit removal of an unsent attachment deletes only its managed copy. A prompt accepts at most 20 file paths.
+Browser-selected, dropped, and pasted files of any type stream into private OS temporary storage. The upload endpoint does not buffer the full file. Each file is capped at 25 MiB, enforced while it streams: the first byte past the cap aborts the transfer, removes the partial file, and answers `413 payload_too_large`. At most 4 uploads stream at once and at most 40 are held (finished or in flight) until deleted or expired; past either limit the request answers `429 too_many_attachments`. Browser and proxy limits still apply. The UI exposes progress and cancellation. Cancelled/failed transfers remove partial bytes; explicit removal of an unsent attachment deletes only its managed copy. A prompt accepts at most 20 file paths.
 
 Uploads expire after 24 hours, with cleanup at daemon startup and hourly; room messages can outlive the uploaded files they reference. Independent chat metadata and native session JSONL also live in OS temporary storage and can disappear under OS cleanup. Existing original-file references are never deleted by retention. Agent definitions, room/DM history, reactions, membership, workspace assignments, and plans remain durable.
 
@@ -71,7 +71,11 @@ Room updates use `/api/events` WebSocket frames. Frames missed while disconnecte
 
 ## Authentication and remote control
 
-Every static asset and API route requires the operator token. Loopback HTTP accepts `Authorization: Bearer <token>` or `X-Operator-Token: <token>`. `?token=` is accepted only for initial static navigation and the loopback WebSocket handshake; `/api/*` rejects query-token authentication. No cookie is set.
+Every static asset and API route requires the operator token. Loopback HTTP accepts `Authorization: Bearer <token>` or `X-Operator-Token: <token>`. `?token=` is accepted only for initial static navigation and the loopback WebSocket handshake; `/api/*` rejects query-token authentication.
+
+A static request that carries the token gets back a static cookie, `oma-static-<port>` (`HttpOnly`, `SameSite=Strict`, `Path=/`). Its value is an HMAC of the token, never the token itself, and it opens `/`, `app.js`, `style.css`, and chunks only: `/api/*` and the WebSocket ignore it. That cookie is what lets the client strip `?token=` from the address bar and still reload, and what authenticates the relative imports between chunks. Rotating the token invalidates it. Cookies ignore ports, so another local service on `127.0.0.1` can receive it; it grants nothing beyond the console's public bundle, and the port in its name keeps two daemons from overwriting each other's.
+
+A `401` from the API returns the client to token entry in both modes. On loopback, entering the token checks it with a plain read and reloads the console with `?token=`, which issues a fresh cookie.
 
 Remote mode uses the external HTTPS origin, token entry, and short-lived path-bound tickets described in [Remote console exposure](remote-exposure.md). The proxy secret authenticates forwarded request metadata; it does not replace the operator token.
 
@@ -80,9 +84,10 @@ Remote access increases impact because an authenticated operator can control age
 - `/api/chats*`
 - `/api/workspace/*`
 - `/api/attachments*`
-- `/api/agents/:name/start` and agent/channel mutations that set a workspace
+- `/api/agents/:name/start` and channel mutations that set a workspace
+- `POST /api/agents` and `PATCH /api/agents/:name` for any field other than `name`, `description`, `model`, `thinkingLevel`, and `rooms`
 
-`GET /api/capabilities` reports whether full control is available to that request. Rooms, DMs, plans, and existing agent controls remain under the remote operator trust model without this extra flag. There is no browser shell-command endpoint; Git inspection invokes fixed read-only commands with bounded output.
+`GET /api/capabilities` reports whether full control is available to that request. Rooms, DMs, plans, membership, and the kill, inject, and logs controls for existing agents remain under the remote operator trust model without this extra flag. Without it, a remote definition edit may change only the description, model, thinking level, and rooms; every other field is agent policy (sandbox, tools, MCP servers, skills, body, spawn permissions, wake rules, heartbeat, autonomy, schedules, automations, workspace, and the remaining runtime options) and is refused with `403 remote_control_disabled` before anything is written. Creating an agent requires a body, so remote creation also needs full control. The control socket is a local Unix socket and is not reachable remotely. There is no browser shell-command endpoint; Git inspection invokes fixed read-only commands with bounded output.
 
 ## HTTP API
 
@@ -112,7 +117,7 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 | `/api/workspace/files?path=` | GET | Lists up to 1,000 entries in an absolute directory for the daemon picker |
 | `/api/workspace/changes?cwd=` | GET | Reads repository context and Git status |
 | `/api/workspace/diff?cwd=&path=&staged=` | GET | Reads a bounded diff for a reported changed path |
-| `/api/attachments` | GET / POST | Lists managed uploads or streams a raw body into private temporary storage; POST uses percent-encoded `X-Attachment-Name` and `Content-Type`, returns `{id,name,type,size,path}` |
+| `/api/attachments` | GET / POST | Lists managed uploads or streams a raw body into private temporary storage; POST uses percent-encoded `X-Attachment-Name` and `Content-Type`, returns `{id,name,type,size,path}`; `413` past 25 MiB, `429` past 4 concurrent or 40 held uploads |
 | `/api/attachments/:id` | DELETE | Deletes a managed upload by opaque ID; never accepts an original file path |
 
 ### Rooms, DMs, plans, and agents
@@ -121,13 +126,13 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 |---|---|---|
 | `/api/channels` | GET / POST | Lists or creates a `#` channel or `@` DM, optionally with canonical `workspace` |
 | `/api/channels/:id` | PATCH | Sets an existing directory as `workspace`, or clears it with `null` |
-| `/api/channels/:id/messages` | GET / POST | Reads a transcript or posts as `@you`; supports `afterId`, `limit`, and thread `parentId` |
+| `/api/channels/:id/messages` | GET / POST | Reads a transcript or posts as `@you`; supports `afterId`, `limit`, and thread `parentId`. `newest=1` returns the newest `limit` messages and `beforeId` pages back from an id; both also return the older thread roots of replies in the page, ahead of it |
 | `/api/channels/:id/plans` | GET / POST | Lists or creates durable plans for a room |
 | `/api/channels/:id/plans/:planId` | PATCH | Updates a plan using `expectedRevision` |
 | `/api/messages/:id/reactions/toggle` | POST | Toggles the operator's reaction |
-| `/api/agents` | GET / POST | Lists registered and defined agents, or creates a validated definition |
+| `/api/agents` | GET / POST | Lists registered and defined agents, or creates a validated definition; remote creation requires full control |
 | `/api/agents/:name/definition` | GET | Reads the editable definition wire shape |
-| `/api/agents/:name` | PATCH | Validates and edits the definition; the agent name is immutable |
+| `/api/agents/:name` | PATCH | Validates and edits the definition; the agent name is immutable; remote requests without full control may change only `description`, `model`, `thinkingLevel`, and `rooms` |
 | `/api/agents/:name/start` | POST | Explicitly starts a stopped definition with resolved workspace and declared schedules; requires full control |
 | `/api/agents/:name/rooms[/:room]` | POST / DELETE | Adds or removes durable, live-applied membership |
 | `/api/agents/:name/kill` | POST | Stops an agent, cascading by default unless `keepChildren` is true |
@@ -140,17 +145,6 @@ Errors use `{"error":{"code","message"}}`. Static serving is restricted to the t
 | `/api/profile` | GET / PUT | The display profile: the operator's name and avatar, and a name and avatar per agent. An avatar is 1–4 characters or a PNG, JPEG, WebP, or GIF base64 data URL of at most 200 KB. Cosmetic and shared by every console; wire authors do not change |
 | `/api/events` | WebSocket | Room, reaction, agent, membership, plan, schedule, profile, and native-chat events |
 
-## Server-rendered console (Next.js)
-
-A second console for the same daemon lives in `web-next/`: a Next.js app that renders every page on the server. It reads `~/.omp/agent/oh-my-agent/console-url` (or `OMA_CONSOLE_URL`) and calls the daemon's console API with the operator token held on the server; the browser talks only to the Next origin, through a proxy at `/api/*` and a server-sent event stream at `/api/live` that relays the daemon's WebSocket frames. Message and plan bodies are rendered as Markdown on the server, so a page with no diagram ships no mermaid; a mermaid fence is a client island that loads the renderer on first sight.
-
-```sh
-bun run console:next:dev      # http://127.0.0.1:4388 against the running daemon
-bun run console:next:build && bun run console:next:start
-```
-
-It is a development and self-hosting surface, not part of the npm package: the plugin ships the bundled console under `src/console/`, which the daemon serves itself. Parity today: rooms (transcript, reactions, composer), plans, agents (start, stop) with schedules (pause, resume), artifacts (open review), profile names and avatars, live refresh. Not yet: threads, native OMP chats, the changes view, definition editing, membership toggles, the profile editor, and remote-mode ticket auth (it runs beside the daemon on loopback). `tests/console-next.test.ts` builds and starts it against a real daemon in the full suite.
-
 ## Development and build
 
 The editable React/shadcn source is under `web/`. Production output is:
@@ -162,7 +156,7 @@ src/console/style.css
 src/console/chunk-<name>-<hash>.js   # lazily imported modules: mermaid and its diagram packs
 ```
 
-The daemon serves exactly those shapes and nothing else under `src/console/`. Chunks are content-hashed, so they are served `Cache-Control: immutable`; every script and stylesheet is gzipped when the browser accepts it. `app.js` fetches a chunk through `window.__omaAsset`, which the daemon injects into the shell with the loopback token as a query, or in remote mode a chunk pass: one reusable, path-prefix-bound ticket that lives twelve hours, so a diagram opened late in a session still loads its renderer.
+The daemon serves exactly those shapes and nothing else under `src/console/`. Chunks are content-hashed, so they are served `Cache-Control: immutable`; every script and stylesheet is gzipped when the browser accepts it. Chunks import each other, and `app.js`, by plain relative URL, so they carry no query credential: the browser sends the static cookie. On loopback that is the token HMAC above; in remote mode it is an asset pass, one reusable ticket that lives twelve hours, so a diagram opened late in a session still loads its renderer.
 
 Use the root scripts so output lands where the daemon serves it:
 
@@ -172,7 +166,7 @@ bun run console:build
 bun run --cwd web typecheck
 ```
 
-`console:dev` starts Vite. `console:build` compiles the web project and writes the three production assets. `bun run --cwd web typecheck` is the focused web typecheck; root `bun run typecheck` also runs the daemon TypeScript check.
+`console:dev` starts Vite on `http://localhost:5173` and proxies `/api`, including the `/api/events` WebSocket, to the daemon. The target is `OMA_CONSOLE_URL` if set, otherwise the origin in `<agent-dir>/oh-my-agent/console-url` (honoring `PI_CODING_AGENT_DIR`), otherwise `http://127.0.0.1:50561`. Only the origin is used; open `http://localhost:5173/?token=<operator-token>`. The proxy presents the daemon's own origin on the WebSocket handshake, which the daemon otherwise refuses. `console:build` compiles the web project and writes the three production assets. `bun run --cwd web typecheck` is the focused web typecheck; root `bun run typecheck` also runs the daemon TypeScript check.
 
 For the component/state catalog without a daemon:
 

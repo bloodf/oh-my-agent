@@ -177,7 +177,7 @@ export function ChannelRail({ rooms, chats, agents = [], current, unread, onSele
       <div className="flex h-[49px] shrink-0 items-center gap-1 pr-2 pl-3 shadow-[inset_0_-1px_0_var(--ws-border)]">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button type="button" className="ws-control flex h-8 min-w-0 items-center gap-1 px-1.5 text-[var(--ws-text)]" aria-label="Workspace menu">
+            <button type="button" className="ws-control flex h-8 min-w-0 items-center gap-1 px-1.5 text-[var(--ws-text)]" aria-label="oh-my-agent workspace menu">
               <span className="truncate text-[17px] font-black tracking-tight">oh-my-agent</span>
               <ChevronDown aria-hidden className="size-4 shrink-0" />
             </button>

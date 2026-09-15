@@ -151,16 +151,27 @@ export function openProfileStore(path: string): ProfileStore {
 		}
 		return cached;
 	};
+	// Updates run one at a time: each merges over the profile the previous
+	// one stored, so two concurrent saves both land instead of the second
+	// overwriting the first from a stale read. A refused patch rejects its own
+	// caller without breaking the chain for the next.
+	let tail: Promise<unknown> = Promise.resolve();
+	let writes = 0;
+	const write = async (patch: unknown): Promise<Profile> => {
+		const next = mergeProfile(await read(), patch);
+		await mkdir(dirname(path), { recursive: true });
+		const tmp = `${path}.${process.pid}.${++writes}.tmp`;
+		await writeFile(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });
+		await rename(tmp, path);
+		cached = next;
+		return next;
+	};
 	return {
 		read,
-		update: async (patch) => {
-			const next = mergeProfile(await read(), patch);
-			await mkdir(dirname(path), { recursive: true });
-			const tmp = `${path}.${process.pid}.tmp`;
-			await writeFile(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });
-			await rename(tmp, path);
-			cached = next;
-			return next;
+		update: (patch) => {
+			const result = tail.then(() => write(patch));
+			tail = result.catch(() => {});
+			return result;
 		},
 	};
 }

@@ -107,4 +107,10 @@ export const STORIES = [
 		title: "Transcript — load failure",
 		docs: "History failure distinguished from connectivity loss.",
 	},
+	{
+		id: "state-render-error",
+		group: "States",
+		title: "View — render error",
+		docs: "An artifact with an unparseable timestamp renders it as text; a render error shows a recoverable message in place of the view instead of blanking the console.",
+	},
 ];

@@ -10,7 +10,7 @@ export default function DemoTeaser() {
 			<div className="container demo">
 				<Reveal className="demo-copy">
 					<p className="eyebrow">
-						<span className="eyebrow-index">12</span>Live demo
+						<span className="eyebrow-index">12</span>Console demo
 					</p>
 					<h2 id="demo-title" className="section-title">
 						Poke the real console. No install.

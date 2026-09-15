@@ -342,7 +342,9 @@ export async function spawnCommand(
 /**
  * `/preset [preset] [name]` — create a peer from a shipped role. With no
  * arguments it lists the presets in a picker and asks for the name; with
- * both it creates directly. The preset's fields are `agent_create`'s, so
+ * both it creates directly. The CLI's order also works: `/preset <name>
+ * <preset>` when only the second word names a preset, and `/preset <name>
+ * --preset <preset>` always. The preset's fields are `agent_create`'s, so
  * they travel unchanged apart from the name. Creation never spawns:
  * `/spawn <name>` is the second, deliberate call.
  */
@@ -353,7 +355,24 @@ export async function presetCommand(
 ): Promise<void> {
 	await guard(io, async () => {
 		const listed = await client.call<PresetsListResult>("presets_list", {});
-		const [presetArg, nameArg] = args.trim().split(/\s+/).filter(Boolean);
+		const words = args.trim().split(/\s+/).filter(Boolean);
+		const isPreset = (word: string | undefined) =>
+			listed.presets.some((p) => p.name === word);
+		let [presetArg, nameArg] = words;
+		if (words.length === 3 && words[1] === "--preset") {
+			[nameArg, , presetArg] = words;
+		} else if (
+			words.length === 2 &&
+			!isPreset(words[0]) &&
+			isPreset(words[1])
+		) {
+			[nameArg, presetArg] = words;
+		} else if (words.length > 2) {
+			io.notify(
+				"usage: /preset [preset] [name] | /preset <name> --preset <preset>",
+			);
+			return;
+		}
 		let preset: string | undefined = presetArg;
 		if (preset === undefined) {
 			const chosen = await io.select(
@@ -392,32 +411,50 @@ export async function presetCommand(
 	});
 }
 
-/** `/kill <name>` — confirm, then stop the worker. */
+/**
+ * `/kill <name> [--keep-children]` — confirm, then stop the worker. As with
+ * `omp-agent kill`, children stop with it unless `--keep-children` reparents
+ * them to the root.
+ */
 export async function killCommand(
 	client: DaemonClient,
 	io: ExtensionIO,
-	name: string,
+	args: string,
 ): Promise<void> {
-	const trimmed = name.trim();
-	if (trimmed.length === 0) {
-		io.notify("usage: /kill <peer-name>");
+	const [trimmed, flag, ...extra] = args.trim().split(/\s+/).filter(Boolean);
+	const keepChildren = flag === "--keep-children";
+	if (
+		trimmed === undefined ||
+		(flag !== undefined && !keepChildren) ||
+		extra.length > 0
+	) {
+		io.notify("usage: /kill <peer-name> [--keep-children]");
 		return;
 	}
 	const confirmed = await io.confirm(
 		"Kill agent",
-		`Kill ${trimmed}? Its worker stops and parked work waits for a respawn.`,
+		keepChildren
+			? `Kill ${trimmed}? Its worker stops, its children keep running under the root, and parked work waits for a respawn.`
+			: `Kill ${trimmed}? Its worker stops and parked work waits for a respawn.`,
 	);
 	if (!confirmed) {
 		io.notify(`kept ${trimmed}`);
 		return;
 	}
 	await guard(io, async () => {
-		const result = await client.call<KillResult>("kill", { name: trimmed });
+		const result = await client.call<KillResult>(
+			"kill",
+			keepChildren ? { name: trimmed, keep_children: true } : { name: trimmed },
+		);
 		io.notify(`killed ${result.name}`);
 	});
 }
 
-/** `/logs <name> [n]` — print the worker's buffered output tail. */
+/**
+ * `/logs <name|daemon> [n]` — print a buffered output tail. As with
+ * `omp-agent logs`, the literal `daemon` reads the daemon log, not a peer
+ * that happens to share the name.
+ */
 export async function logsCommand(
 	client: DaemonClient,
 	io: ExtensionIO,
@@ -426,13 +463,14 @@ export async function logsCommand(
 	const [name, count, ...extra] = args.trim().split(/\s+/);
 	const lines = count === undefined ? 50 : Number(count);
 	if (!name || extra.length > 0 || !Number.isSafeInteger(lines) || lines <= 0) {
-		io.notify("usage: /logs <peer-name> [line-count]");
+		io.notify("usage: /logs <peer-name|daemon> [line-count]");
 		return;
 	}
 	await guard(io, async () => {
 		const result = await client.call<LogsTailResult>("logs_tail", {
 			name,
 			lines,
+			...(name === "daemon" ? { source: "daemon" as const } : {}),
 		});
 		io.notify(
 			result.lines.length === 0

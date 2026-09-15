@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 /**
- * Purpose: Collect a remote operator token while leaving session handshake to its parent.
+ * Purpose: Collect an operator token while leaving session handshake to its parent.
  * Public API: AuthScreen and AuthScreenProps.
  * Upstream deps: shadcn Card/form primitives and parent authentication callback.
  * Downstream consumers: ConsoleShell remote-auth boundary.
@@ -44,7 +44,7 @@ export function AuthScreen({ onAuthenticate, error = "" }: AuthScreenProps) {
             Operator authentication
           </CardTitle>
           <CardDescription className="text-[15px]">
-            Enter the operator token to open this remote console.
+            Enter the operator token to open this console.
           </CardDescription>
         </CardHeader>
         <CardContent>

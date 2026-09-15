@@ -8,7 +8,10 @@ const Scene = dynamic(() => import("../three/Scene"), { ssr: false });
 function hasWebGL() {
 	try {
 		const canvas = document.createElement("canvas");
-		return Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl"));
+		const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+		// Release the probe right away; browsers cap live contexts per page.
+		gl?.getExtension("WEBGL_lose_context")?.loseContext();
+		return Boolean(gl);
 	} catch {
 		return false;
 	}
@@ -16,7 +19,8 @@ function hasWebGL() {
 
 // Mounts the WebGL constellation after hydration. The CSS star field under it
 // is always painted, so the hero never shifts and still reads without WebGL.
-// Reduced motion gets a single still frame instead of the render loop.
+// Reduced motion gets a single still frame instead of the render loop. A lost
+// context (GPU reset, too many pages) drops back to the CSS star field.
 export default function HeroCanvas({ heroId }: { heroId: string }) {
 	const [mode, setMode] = useState<"pending" | "none" | "live" | "still">("pending");
 	const [ready, setReady] = useState(false);
@@ -40,7 +44,13 @@ export default function HeroCanvas({ heroId }: { heroId: string }) {
 			</div>
 			{mode === "live" || mode === "still" ? (
 				<div className={`hero-canvas ${ready ? "is-ready" : ""}`} data-mode={mode}>
-					<Scene key={mode} heroId={heroId} still={mode === "still"} onReady={() => setReady(true)} />
+					<Scene
+						key={mode}
+						heroId={heroId}
+						still={mode === "still"}
+						onReady={() => setReady(true)}
+						onLost={() => setMode("none")}
+					/>
 				</div>
 			) : null}
 		</div>

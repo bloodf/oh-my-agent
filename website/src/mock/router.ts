@@ -18,7 +18,6 @@ export type ApiRequest = {
 	body: unknown;
 };
 
-const reported = new Set<string>();
 const error = (status: number, code: string, message: string): ApiResult => ({ status, body: { error: { code, message } } });
 
 export function hasOperatorToken(headers: Record<string, string>): boolean {
@@ -34,12 +33,8 @@ export async function handleApi(request: ApiRequest): Promise<ApiResult> {
 	const found = matching.find((candidate) => candidate.method === method);
 	if (!found) {
 		if (matching.length > 0) return error(405, "method_not_allowed", `${method} not allowed`);
-		const key = `${method} ${path}`;
-		if (!reported.has(key)) {
-			reported.add(key);
-			console.debug(`[console demo] no mock for ${key}; answering {}`);
-		}
-		return { status: 200, body: {} };
+		// The daemon's own answer for a route it does not serve.
+		return error(404, "not_found", `Unknown route: ${path}`);
 	}
 	const params = (found.pattern.exec(path) ?? []).slice(1);
 	const body = request.body && typeof request.body === "object" && !Array.isArray(request.body) ? (request.body as Record<string, unknown>) : undefined;

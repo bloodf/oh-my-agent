@@ -9,8 +9,9 @@ import { installDemoTransport } from "./transport";
 export { DEMO_TOKEN } from "./demoToken";
 export { ensureDemoSession } from "./session";
 
-export function installDemoBackend(): void {
-	installDemoTransport();
+/** Returns a function that puts the browser's own seams back. */
+export function installDemoBackend(): () => void {
+	return installDemoTransport();
 }
 
 export function resetDemo(): void {

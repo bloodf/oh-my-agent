@@ -31,5 +31,3 @@ chrome-headless-shell/
 !.agentic/phase0-classifiers.yml
 !.agentic/deferred-work.jsonl
 !.agentic/presets.yml
-# Next.js console build output
-web-next/.next/

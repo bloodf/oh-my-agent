@@ -2,6 +2,8 @@
  * Purpose: Serve the built console plus its story catalog on loopback.
  * Public API: `startStorybook(port?)`.
  * Failure modes: unknown paths 404. This process never talks to the daemon.
+ * Lazily built chunks (the storybook itself, mermaid) are served by the same
+ * name shape the daemon allows, from the build output only.
  */
 import { join } from "node:path";
 
@@ -40,13 +42,28 @@ const ROUTES: Record<string, { path: string; type: string }> = {
 	},
 };
 
+/** The daemon's chunk allowlist: a lazily imported module named by hash. */
+const CHUNK_FILE = /^\/chunk-[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.js$/;
+
 export function startStorybook(port = 0): ReturnType<typeof Bun.serve> {
 	return Bun.serve({
 		port,
 		hostname: "127.0.0.1",
 		async fetch(request) {
 			const url = new URL(request.url);
-			const route = ROUTES[url.pathname];
+			// Browsers ask for a favicon on their own schedule; an empty answer
+			// keeps that request from showing up as a console error in a story.
+			if (url.pathname === "/favicon.ico") {
+				return new Response(null, { status: 204 });
+			}
+			const route =
+				ROUTES[url.pathname] ??
+				(CHUNK_FILE.test(url.pathname)
+					? {
+							path: join(CONSOLE, url.pathname.slice(1)),
+							type: "text/javascript; charset=utf-8",
+						}
+					: undefined);
 			if (route === undefined) {
 				return new Response("Not found", { status: 404 });
 			}

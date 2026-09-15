@@ -1813,6 +1813,36 @@ export async function bootDaemon(
 			}
 		};
 
+		/**
+		 * Stop every worker this daemon started, after any start still in
+		 * flight has settled: a start that finishes after the sweep registers a
+		 * worker nobody stops.
+		 */
+		const stopWorkers = async (): Promise<void> => {
+			await Promise.all(
+				[...spawnInFlight.values()].map(({ promise }) =>
+					promise.catch((error) =>
+						log(`starting peer during shutdown: ${String(error)}`),
+					),
+				),
+			);
+			for (const record of peers.values()) {
+				try {
+					await record.worker.stop();
+				} catch (error) {
+					log(`stopping ${record.worker.name}: ${String(error)}`);
+				} finally {
+					await closeInferenceGateway(record.worker.name);
+				}
+			}
+		};
+		// From here a failed boot has live workers, and the unwind has to stop
+		// them before the gateway and database they use are closed under them.
+		started.push(async () => {
+			shuttingDown = true;
+			await stopWorkers();
+		});
+
 		for (const name of bootOrder(startable)) {
 			const definition = definitions.get(name);
 			if (!definition) continue;
@@ -2044,6 +2074,12 @@ export async function bootDaemon(
 		 * operator may have tightened it, and `verifySecretMode` is the thing
 		 * that judges it.
 		 */
+		// Declared ahead of `ensureCredentials`, which reads the URL: the control
+		// socket that calls it starts serving before the console is built, so a
+		// later declaration would be read in its temporal dead zone.
+		let consoleUrl: string | undefined;
+		let consoleListenerUrl: string | undefined;
+
 		const ensureCredentials = async (): Promise<void> => {
 			const restore = async (file: string, contents: string): Promise<void> => {
 				const path = join(stateDir, file);
@@ -2178,8 +2214,6 @@ export async function bootDaemon(
 		 * read that binding on every call, so from this line on every one of
 		 * those transitions reaches connected consoles.
 		 */
-		let consoleUrl: string | undefined;
-		let consoleListenerUrl: string | undefined;
 		if (consoleEnabled) {
 			const token = operatorToken;
 			// A typo'd port must not quietly become a random one: set means valid,
@@ -2373,22 +2407,7 @@ export async function bootDaemon(
 			await step("chats", async () => await chats.close());
 			await step("plans", () => plans.close());
 			await step("supervisor", async () => await supervisor.settled());
-			await Promise.all(
-				[...spawnInFlight.values()].map(({ promise }) =>
-					promise.catch((error) =>
-						log(`starting peer during shutdown: ${String(error)}`),
-					),
-				),
-			);
-			for (const record of peers.values()) {
-				try {
-					await record.worker.stop();
-				} catch (error) {
-					log(`stopping ${record.worker.name}: ${String(error)}`);
-				} finally {
-					await closeInferenceGateway(record.worker.name);
-				}
-			}
+			await stopWorkers();
 			await step("scheduler", () => scheduler.stop());
 
 			// A turn still in flight belongs to a process about to stop

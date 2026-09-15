@@ -84,7 +84,8 @@ function appendLog(name: string, line: string): void {
 
 const timers = new Set<ReturnType<typeof setTimeout>>();
 
-function later(ms: number, run: () => void): void {
+/** Run one simulated turn later; `cancelActivity` drops it. */
+export function later(ms: number, run: () => void): void {
 	const timer = setTimeout(() => {
 		timers.delete(timer);
 		try {
@@ -200,21 +201,25 @@ const CHAT_ANSWERS: readonly string[] = [
 	"Here is what I would do next:\n\n1. Add a failing test for the edge case.\n2. Make the smallest change that passes it.\n3. Re-run the tokenizer benchmark to confirm we stay within the 5% budget.",
 ];
 
+/** Streaming ticks stay in memory; the tick that ends the turn persists the reply. */
 function updateChat(chatId: string, change: (messages: WebChatMessage[]) => WebChatMessage[], streaming: boolean): void {
-	update((s) => ({
-		...s,
-		chats: s.chats.map((chat) => {
-			if (chat.info.id !== chatId) return chat;
-			const messages = change(chat.messages);
-			const now = Date.now();
-			return {
-				...chat,
-				info: { ...chat.info, updatedAt: now },
-				messages,
-				state: { ...chat.state, updatedAt: now, streaming, messageCount: messages.length },
-			};
+	update(
+		(s) => ({
+			...s,
+			chats: s.chats.map((chat) => {
+				if (chat.info.id !== chatId) return chat;
+				const messages = change(chat.messages);
+				const now = Date.now();
+				return {
+					...chat,
+					info: { ...chat.info, updatedAt: now },
+					messages,
+					state: { ...chat.state, updatedAt: now, streaming, messageCount: messages.length },
+				};
+			}),
 		}),
-	}));
+		{ persist: !streaming },
+	);
 }
 
 export function streamChatReply(chatId: string): void {

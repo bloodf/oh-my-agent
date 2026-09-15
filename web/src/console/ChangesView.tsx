@@ -1,5 +1,5 @@
 import { FileDiff, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ConsoleCall } from "./CreateChannelDialog";
+import { errorText } from "./errors";
 
 /**
  * Purpose: Browse Git workspace changes and inspect staged or working-tree diffs.
@@ -14,6 +15,8 @@ import type { ConsoleCall } from "./CreateChannelDialog";
  * Upstream deps: authenticated ConsoleCall plus shadcn Button, Tabs, Badge, and ScrollArea.
  * Downstream consumers: console workspace shell.
  * Failure modes: list and diff request errors remain visible with focused retry actions.
+ * Only the newest changes request may paint: a slower answer for an earlier
+ * cwd is dropped, so a stale error never sits above a later result.
  * Performance: one changes request per refresh and one diff request per file/side selection.
  */
 
@@ -32,6 +35,8 @@ type ChangesPayload = {
   root: string;
   branch: string;
   files: WorkspaceFile[];
+  /** The daemon cut the status output off; the list is incomplete. */
+  truncated: boolean;
 };
 
 type DiffPayload = {
@@ -47,10 +52,6 @@ export type ChangesViewProps = {
   cwd: string;
   call: ConsoleCall;
 };
-
-function errorMessage(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause);
-}
 
 function isWorkspaceFile(value: unknown): value is WorkspaceFile {
   if (!value || typeof value !== "object") return false;
@@ -104,6 +105,7 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
   const [error, setError] = useState("");
   const [diffError, setDiffError] = useState("");
   const [diffRetry, setDiffRetry] = useState(0);
+  const latestLoad = useRef(0);
   const selectedFile =
     changes?.files.find((file) => file.path === selectedPath) ?? null;
   const effectiveSide: DiffSide = selectedFile && side === "staged" && selectedFile.staged
@@ -113,12 +115,14 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
       : selectedFile?.staged ? "staged" : "working";
 
   const loadChanges = useCallback(async () => {
+    const load = ++latestLoad.current;
     setLoading(true);
     setError("");
     try {
       const payload = await call(
         `/api/workspace/changes?cwd=${encodeURIComponent(cwd)}`,
       );
+      if (load !== latestLoad.current) return;
       const files = Array.isArray(payload.files)
         ? payload.files.filter(isWorkspaceFile)
         : [];
@@ -127,8 +131,10 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
         root: typeof payload.root === "string" ? payload.root : cwd,
         branch: typeof payload.branch === "string" ? payload.branch : "",
         files,
+        truncated: payload.truncated === true,
       };
       setChanges(next);
+      setError("");
       setDiffRetry((value) => value + 1);
       setSelectedPath((current) =>
         files.some((file) => file.path === current)
@@ -136,11 +142,12 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
           : (files[0]?.path ?? ""),
       );
     } catch (cause) {
+      if (load !== latestLoad.current) return;
       setChanges(null);
       setSelectedPath("");
-      setError(errorMessage(cause));
+      setError(errorText(cause));
     } finally {
-      setLoading(false);
+      if (load === latestLoad.current) setLoading(false);
     }
   }, [call, cwd]);
 
@@ -167,7 +174,7 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
           binary: payload.binary === true,
         });
       } catch (cause) {
-        if (current) setDiffError(errorMessage(cause));
+        if (current) setDiffError(errorText(cause));
       } finally {
         if (current) setDiffLoading(false);
       }
@@ -227,6 +234,14 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
           >
             Try again
           </Button>
+        </Alert>
+      )}
+      {changes?.truncated && (
+        <Alert className="mb-3">
+          <AlertTitle>File list truncated</AlertTitle>
+          <AlertDescription>
+            This workspace has more changes than the daemon lists at once. Only the first files are shown.
+          </AlertDescription>
         </Alert>
       )}
       {loading && !changes && (
@@ -297,7 +312,7 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
             </ScrollArea>
           </div>
 
-          <div className="flex min-h-[28rem] min-w-0 flex-col overflow-hidden rounded-lg border bg-card @[56rem]/changes:min-h-0">
+          <div id="changes-diff" className="flex min-h-[28rem] min-w-0 flex-col overflow-hidden rounded-lg border bg-card @[56rem]/changes:min-h-0">
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b bg-muted/50 px-3 py-1.5">
               <div className="min-w-0">
                 <p
@@ -320,13 +335,14 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
                 <TabsList variant="line" aria-label="Diff source">
                   <TabsTrigger
                     value="working"
+                    aria-controls="changes-diff"
                     disabled={
                       !selectedFile?.unstaged && !selectedFile?.untracked
                     }
                   >
                     Working
                   </TabsTrigger>
-                  <TabsTrigger value="staged" disabled={!selectedFile?.staged}>
+                  <TabsTrigger value="staged" aria-controls="changes-diff" disabled={!selectedFile?.staged}>
                     Staged
                   </TabsTrigger>
                 </TabsList>
@@ -368,11 +384,13 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
               </div>
             )}
             {!diffLoading && diff && !diff.binary && diff.diff.length > 0 && (
-              <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain bg-background">
-                <pre
-                  className="w-max min-w-full py-2 font-mono text-[13px] leading-5"
-                  aria-label={`${side} diff for ${diff.path}`}
-                >
+              <div
+                role="region"
+                tabIndex={0}
+                aria-label={`${effectiveSide} diff for ${diff.path}`}
+                className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              >
+                <pre className="w-max min-w-full py-2 font-mono text-[13px] leading-5">
                   <code>
                     {diff.diff.split("\n").map((line, index) => (
                       <span

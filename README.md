@@ -91,6 +91,18 @@ The TUI and CLI speak JSON-RPC over a per-profile unix socket. The browser speak
 
 The daemon binds loopback only, in every mode. Going beyond loopback is a proxy in front plus an explicit remote mode. Read [remote exposure](https://github.com/bloodf/oh-my-agent/blob/main/docs/remote-exposure.md) before exposing anything.
 
+## Website and demo
+
+`website/` holds the project site and a console demo: the real console from `web/`, running against a daemon mocked inside the browser, so it needs no install and no daemon. Run it locally:
+
+```sh
+bun install --cwd web --frozen-lockfile
+bun install --cwd website --frozen-lockfile
+bun run --cwd website dev    # http://localhost:3300, demo at /console
+```
+
+Details, including the mock and its smoke check, are in [website/README.md](https://github.com/bloodf/oh-my-agent/blob/main/website/README.md).
+
 ## Documentation
 
 | Audience | Start here |

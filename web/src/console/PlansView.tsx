@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import type { ConsoleCall } from "./CreateChannelDialog";
+import { errorText, formatDate, hasErrorCode } from "./errors";
 import { MessageBody } from "./Message";
 
 /**
@@ -31,7 +32,10 @@ import { MessageBody } from "./Message";
  * Public API: PlansView and PlansViewProps.
  * Upstream deps: authenticated ConsoleCall plus shadcn card, dialog, and form primitives.
  * Downstream consumers: console workspace shell.
- * Failure modes: request errors and optimistic revision conflicts stay inline and preserve drafts.
+ * Failure modes: request errors stay inline and preserve drafts. A revision
+ * conflict never re-saves a stale draft: refreshing loads the latest server
+ * text into the form and keeps the unsaved draft beside it, read-only, and a
+ * plan deleted meanwhile disables saving rather than turning the edit into a create.
  * Performance: one list request per room/version refresh and one request per submitted mutation.
  */
 
@@ -67,10 +71,6 @@ const STATUS_STYLE: Record<PlanStatus, string> = {
 };
 const SEND_BUTTON = "h-9 px-4 font-bold bg-[var(--send)] text-white hover:bg-[var(--send-hover)]";
 
-function errorMessage(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause);
-}
-
 function isRoomPlan(value: unknown): value is RoomPlan {
   if (!value || typeof value !== "object") return false;
   const plan = value as Partial<RoomPlan>;
@@ -88,6 +88,8 @@ function isRoomPlan(value: unknown): value is RoomPlan {
 function PlanDialog({
   open,
   plan,
+  unsaved,
+  gone,
   busy,
   error,
   conflict,
@@ -97,15 +99,18 @@ function PlanDialog({
 }: {
   open: boolean;
   plan: RoomPlan | null;
+  /** The draft a conflict refresh replaced, shown read-only so nothing typed is lost. */
+  unsaved: PlanDraft | null;
+  /** The edited plan no longer exists on the server. */
+  gone: boolean;
   busy: boolean;
   error: string;
   conflict: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (draft: PlanDraft) => Promise<void>;
-  onRefresh: () => Promise<void>;
+  onRefresh: (draft: PlanDraft) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<PlanDraft>(() => plan ? { title: plan.title, body: plan.body, status: plan.status } : EMPTY_DRAFT);
-
 
   const submit = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -169,6 +174,28 @@ function PlanDialog({
               </select>
             </div>
           )}
+          {unsaved && (
+            <div className="space-y-1.5">
+              <Label htmlFor="plan-unsaved">Your unsaved draft</Label>
+              <p className="text-[13px] text-muted-foreground">
+                The form now shows the latest saved plan (revision {plan?.revision}). Copy anything you still need from your draft, then save.
+              </p>
+              <Textarea
+                id="plan-unsaved"
+                readOnly
+                className="min-h-32 resize-y font-mono"
+                value={`# ${unsaved.title}\n\n${unsaved.body}`}
+              />
+            </div>
+          )}
+          {gone && (
+            <Alert variant="destructive">
+              <AlertTitle>This plan no longer exists</AlertTitle>
+              <AlertDescription>
+                It was removed after you opened it. Your draft stays in the form to copy; saving is disabled.
+              </AlertDescription>
+            </Alert>
+          )}
           {error && (
             <Alert variant="destructive">
               <AlertTitle>
@@ -181,7 +208,7 @@ function PlanDialog({
                   variant="outline"
                   size="sm"
                   className="mt-2"
-                  onClick={() => void onRefresh()}
+                  onClick={() => void onRefresh(draft)}
                 >
                   Refresh latest plan
                 </Button>
@@ -201,7 +228,7 @@ function PlanDialog({
             <Button
               type="submit"
               className={SEND_BUTTON}
-              disabled={busy || !draft.title.trim() || !draft.body.trim()}
+              disabled={busy || gone || !draft.title.trim() || !draft.body.trim()}
             >
               {busy ? "Saving…" : plan ? "Save changes" : "Create plan"}
             </Button>
@@ -221,9 +248,12 @@ export function PlansView({ room, call, version }: PlansViewProps) {
   const [editing, setEditing] = useState<RoomPlan | null>(null);
   const [saveError, setSaveError] = useState("");
   const [conflict, setConflict] = useState(false);
+  const [unsaved, setUnsaved] = useState<PlanDraft | null>(null);
+  const [gone, setGone] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const refresh = useCallback(async () => {
+  /** Re-read the room's plans; answers the list, or null when the read failed. */
+  const refresh = useCallback(async (): Promise<RoomPlan[] | null> => {
     setLoading(true);
     setError("");
     try {
@@ -234,14 +264,15 @@ export function PlansView({ room, call, version }: PlansViewProps) {
         ? payload.plans.filter(isRoomPlan)
         : [];
       setPlans(next);
-		setEditing((current) => current ? (next.find((plan) => plan.id === current.id) ?? null) : null);
+      return next;
     } catch (cause) {
       setPlans([]);
-      setError(errorMessage(cause));
+      setError(errorText(cause));
+      return null;
     } finally {
       setLoading(false);
     }
-	}, [call, room]);
+  }, [call, room]);
 
   useEffect(() => {
     let current = true;
@@ -254,7 +285,7 @@ export function PlansView({ room, call, version }: PlansViewProps) {
       .catch((cause) => {
         if (current) {
           setPlans([]);
-          setError(errorMessage(cause));
+          setError(errorText(cause));
         }
       })
       .finally(() => {
@@ -265,23 +296,29 @@ export function PlansView({ room, call, version }: PlansViewProps) {
     };
   }, [call, room, version]);
 
-  const openCreate = () => {
-    setEditing(null);
+  const resetDialog = () => {
     setSaveError("");
     setConflict(false);
+    setUnsaved(null);
+    setGone(false);
+  };
+
+  const openCreate = () => {
+    setEditing(null);
+    resetDialog();
     setDialogKey((value) => value + 1);
     setDialogOpen(true);
   };
 
   const openEdit = (plan: RoomPlan) => {
     setEditing(plan);
-    setSaveError("");
-    setConflict(false);
+    resetDialog();
     setDialogOpen(true);
     setDialogKey((value) => value + 1);
   };
 
   const save = async (draft: PlanDraft) => {
+    if (gone) return;
     setBusy(true);
     setSaveError("");
     setConflict(false);
@@ -307,18 +344,41 @@ export function PlansView({ room, call, version }: PlansViewProps) {
       setDialogOpen(false);
       setEditing(null);
     } catch (cause) {
-      const message = errorMessage(cause);
-      setSaveError(message);
-      setConflict(message === "PLAN_REVISION_CONFLICT");
+      const isConflict = hasErrorCode(cause, "PLAN_REVISION_CONFLICT");
+      setConflict(isConflict);
+      setSaveError(
+        isConflict
+          ? "Someone saved this plan after you opened it. Refresh to load their version before saving again."
+          : errorText(cause),
+      );
     } finally {
       setBusy(false);
     }
   };
 
-  const refreshConflict = async () => {
-    await refresh();
+  /**
+   * Load the latest server copy into the form. The stale draft is never kept
+   * as the editable text: it moves to a read-only block, so the next save
+   * carries only what the user sees against the revision it was read at.
+   */
+  const refreshConflict = async (draft: PlanDraft) => {
+    if (!editing) return;
+    const next = await refresh();
+    if (next === null) {
+      setSaveError("Could not load the latest plan. Try again.");
+      return;
+    }
+    const latest = next.find((plan) => plan.id === editing.id);
     setConflict(false);
     setSaveError("");
+    if (latest) {
+      setUnsaved(draft);
+      setEditing(latest);
+      setDialogKey((value) => value + 1);
+    } else {
+      // Keep editing the vanished plan so the dialog never flips to Create.
+      setGone(true);
+    }
   };
 
   return (
@@ -396,10 +456,10 @@ export function PlansView({ room, call, version }: PlansViewProps) {
               <CardTitle className="pr-24 text-lg leading-6 font-black">{plan.title}</CardTitle>
               <CardDescription className="text-[13px]">
                 Updated{" "}
-                {new Intl.DateTimeFormat(undefined, {
+                {formatDate(plan.updatedAt, {
                   dateStyle: "medium",
                   timeStyle: "short",
-                }).format(new Date(plan.updatedAt))}{" "}
+                })}{" "}
                 by {plan.updatedBy}
               </CardDescription>
               <CardAction className="flex items-center gap-1.5">
@@ -428,6 +488,8 @@ export function PlansView({ room, call, version }: PlansViewProps) {
         key={dialogKey}
         open={dialogOpen}
         plan={editing}
+        unsaved={unsaved}
+        gone={gone}
         busy={busy}
         error={saveError}
         conflict={conflict}

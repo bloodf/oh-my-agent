@@ -2,7 +2,9 @@
  * Shapes the mocked daemon keeps. Wire types come from the real console and
  * daemon sources so a drift there breaks the website typecheck, not the demo.
  */
-import type { AgentInfo, ConsoleEvent as RoomEvent, MessageReaction, RoomInfo, RoomMessage } from "@/lib/types";
+// Relative, not the `@` alias, so the root test suite can typecheck these shapes too.
+import type { AgentInfo, MessageReaction, RoomInfo, RoomMessage } from "../../../web/src/lib/types";
+import type { AgentState } from "../../../src/shared/protocol";
 import type {
 	WebChatContentBlock,
 	WebChatInfo,
@@ -59,14 +61,6 @@ export type AgentRecord = {
 	/** Present once the agent has a live worker; stopped definitions list rooms from the definition. */
 	definition: AgentDefinition;
 	logs: string[];
-};
-
-export type AccountRecord = {
-	id: string;
-	kind: "subscription" | "metered";
-	budgetUsd?: number;
-	spentUsd: number;
-	state: "ok" | "warned" | "parked";
 };
 
 export type ScheduleRow = {
@@ -134,7 +128,6 @@ export type DemoState = {
 	channels: RoomInfo[];
 	messages: StoredMessage[];
 	agents: AgentRecord[];
-	accounts: AccountRecord[];
 	plans: RoomPlan[];
 	schedules: ScheduleRow[];
 	artifacts: ArtifactRow[];
@@ -143,9 +136,20 @@ export type DemoState = {
 	attachments: ManagedAttachment[];
 };
 
-/** Every frame the real daemon can push, including the two the SPA type omits. */
+/**
+ * Every frame the real daemon can push: a copy of `ConsoleEvent` in
+ * src/daemon/console-api.ts, which the website cannot import (it pulls in the
+ * daemon). tests/website-mock-parity.test.ts fails when the two drift.
+ */
 export type ConsoleFrame =
-	| RoomEvent
 	| { type: "plan"; room: string }
 	| { type: "chat"; chatId: string; event: unknown }
-	| { type: "budget"; account: string; state: "parked" | "resumed" | "bumped" | "warned"; budgetUsd?: number };
+	| { type: "message"; message: RoomMessage }
+	| { type: "reaction"; room: string; messageId: number; actor: string; emoji: string; reacted: boolean }
+	| { type: "agent"; agent: string; state: AgentState }
+	| { type: "definition"; agent: string; rebuildRequired: boolean }
+	| { type: "membership"; agent: string; rooms: string[] }
+	| { type: "channel"; channel: RoomInfo }
+	| { type: "budget"; account: string; state: "parked" | "resumed" | "bumped" | "warned"; budgetUsd?: number }
+	| { type: "schedule"; agent: string; phase: "armed" | "fired" }
+	| { type: "profile" };

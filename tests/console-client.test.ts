@@ -68,12 +68,10 @@ import {
 	expect,
 	test,
 } from "bun:test";
-import { existsSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
-
 import {
 	type ConsoleApi,
 	type ConsoleEvent,
@@ -93,48 +91,9 @@ import {
 	parsePeerDefinition,
 } from "../src/shared/agent-definition";
 import type { RoomInfo } from "../src/shared/protocol";
+import { resolveChrome } from "./fixtures/chrome";
 
 // ── Browser ──────────────────────────────────────────────────────────────────
-
-/**
- * Resolve a Chrome for puppeteer-core: env override, then the puppeteer
- * cache (any version, any platform), then system installs. A hardcoded path
- * breaks on the first machine that is not this one — CI proved it.
- */
-function resolveChrome(): string {
-	const fromEnv = process.env.PUPPETEER_EXECUTABLE_PATH;
-	if (fromEnv && existsSync(fromEnv)) return fromEnv;
-
-	const cacheRoot = join(
-		homedir(),
-		".cache",
-		"puppeteer",
-		"chrome-headless-shell",
-	);
-	try {
-		for (const version of readdirSync(cacheRoot).sort().reverse()) {
-			const versionDir = join(cacheRoot, version);
-			for (const sub of readdirSync(versionDir)) {
-				const candidate = join(versionDir, sub, "chrome-headless-shell");
-				if (existsSync(candidate)) return candidate;
-			}
-		}
-	} catch {
-		// No puppeteer cache on this machine.
-	}
-
-	for (const candidate of [
-		"/usr/bin/google-chrome",
-		"/usr/bin/chromium",
-		"/usr/bin/chromium-browser",
-		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-	]) {
-		if (existsSync(candidate)) return candidate;
-	}
-	throw new Error(
-		"No Chrome found: set PUPPETEER_EXECUTABLE_PATH or run `bunx @puppeteer/browsers install chrome-headless-shell`",
-	);
-}
 
 let browser: Browser;
 
@@ -172,6 +131,11 @@ interface TrackedPage {
 
 async function openPage(): Promise<TrackedPage> {
 	const page = await browser.newPage();
+	// The console only exposes its socket and reconcile probes to a page that
+	// asks before any script runs; a production page never does.
+	await page.evaluateOnNewDocument(() => {
+		Reflect.set(globalThis, "__consoleTestHooks", true);
+	});
 	// A new headless target is not the active one, and in an unfocused
 	// document HTMLElement.focus() is a silent no-op — without this the
 	// keyboard tests flake depending on which target Chrome happened to
@@ -576,13 +540,12 @@ async function harness(
 		);
 
 	/**
-	 * Static client files and a transparent API proxy. The browser sends its
+	 * A transparent proxy for the static client and the API. The browser sends its
 	 * token in a custom header, rewritten to Authorization here so no token
 	 * lands in a URL anywhere. Every write, including the reaction toggle,
 	 * goes to the real console API — T-605 landed the last missing route, so
 	 * nothing is simulated here any more.
 	 */
-	const staticRoot = join(import.meta.dir, "../src/console");
 	/** Browser-side socket by its upstream connection, and frames that
 	 * arrived before the pair was linked. */
 	const downstreamByUpstream = new Map<
@@ -808,33 +771,28 @@ async function harness(
 				);
 			}
 
-			const path = url.pathname === "/" ? "/index.html" : url.pathname;
 			// Chrome fetches a favicon on every fresh profile; a 404 there is
 			// noise that pollutes page-error assertions, so answer it empty.
-			if (path === "/favicon.ico") {
+			if (url.pathname === "/favicon.ico") {
 				return new Response(null, { status: 204 });
 			}
+			// Static files go through the daemon's own static gate in both modes,
+			// cookie and all, so a shell that cannot reload or a chunk that
+			// cannot import its siblings fails here the way it fails for an
+			// operator. Serving src/console from disk once hid exactly that.
+			const headers = new Headers(request.headers);
 			if (options.remoteMode) {
-				const headers = new Headers(request.headers);
 				headers.set("X-OMA-Proxy-Secret", "console-client-proxy-secret");
 				headers.set("X-Forwarded-Host", "remote.example");
 				headers.set("X-Forwarded-Proto", "https");
-				return fetch(
-					new Request(api.url + url.pathname + url.search, {
-						method: request.method,
-						headers,
-					}),
-					{ decompress: false } as RequestInit,
-				);
 			}
-			const file = Bun.file(join(staticRoot, path));
-			if (!(await file.exists())) {
-				return new Response("not found", { status: 404 });
-			}
-			const ext = path.slice(path.lastIndexOf("."));
-			return new Response(file, {
-				headers: { "content-type": MIME[ext] ?? "application/octet-stream" },
-			});
+			return fetch(
+				new Request(api.url + url.pathname + url.search, {
+					method: request.method,
+					headers,
+				}),
+				{ decompress: false } as RequestInit,
+			);
 		},
 		websocket: {
 			open: (socket) => {
@@ -2916,6 +2874,132 @@ describe("remote operator authentication", () => {
 	});
 });
 
+// ── Static credential ────────────────────────────────────────────────────────
+
+/** A message whose body is one small mermaid diagram. */
+const MERMAID_BODY = [
+	"```mermaid",
+	"graph LR",
+	"  A[plan] --> B[build]",
+	"```",
+].join("\n");
+
+/** Wait for the diagram in one message to be drawn as an SVG. */
+const drawnDiagram = (page: Page, id: number) =>
+	waitFor(
+		"mermaid diagram",
+		() =>
+			page
+				.$eval(
+					`#messages .message[data-id="${id}"] .body`,
+					(n) =>
+						n.querySelector('[data-diagram="mermaid"] svg')?.textContent ?? "",
+				)
+				.catch(() => ""),
+		(text) => text.includes("plan") && text.includes("build"),
+	);
+
+describe("static credential", () => {
+	browserTest(
+		"a loopback console reloads with no token in the address bar and still draws diagrams",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const posted = await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: MERMAID_BODY,
+			});
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector('#channels [role="option"]');
+			await waitFor(
+				"token removal",
+				() => Promise.resolve(page.url()),
+				(url) => !url.includes("token="),
+			);
+
+			// The reload asks for `/` with nothing but the browser's cookie, and
+			// every script, stylesheet, and chunk after it the same way.
+			const urls: string[] = [];
+			page.on("request", (request) => urls.push(request.url()));
+			await page.reload({ waitUntil: "domcontentloaded" });
+			await page.waitForSelector('#channels [role="option"]');
+			// Mermaid's core chunk statically imports sibling chunks by relative
+			// URL; a diagram drawn after the reload proves those loaded too.
+			expect(await drawnDiagram(page, posted.id)).toContain("plan");
+			expect(urls.some((url) => /\/chunk-.+\.js$/.test(url))).toBe(true);
+			expect(urls.every((url) => !url.includes(TOKEN))).toBe(true);
+			expect(page.url()).not.toContain("token=");
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"a loopback token the daemon refuses returns the console to token entry",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const { page } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector('#channels [role="option"]');
+
+			// What a restarted daemon with a rotated token looks like to an open
+			// tab: the static cookie no longer matters, the stored token is wrong.
+			await page.evaluate(
+				(key) => sessionStorage.setItem(key, "rotated-away"),
+				OPERATOR_TOKEN_KEY,
+			);
+			await page.reload({ waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#operator-auth-error:not(:empty)");
+			expect(await operatorAuthState(page)).toMatchObject({
+				visible: true,
+				appHidden: true,
+				error: "Operator token refused. Re-enter the token.",
+				stored: null,
+			});
+
+			await page.type("#operator-token", TOKEN);
+			await page.keyboard.press("Enter");
+			await page.waitForSelector('#channels [role="option"]');
+			await waitFor(
+				"token removal after re-entry",
+				() => Promise.resolve(page.url()),
+				(url) => !url.includes("token="),
+			);
+		},
+	);
+
+	browserTest(
+		"a remote console draws diagrams through its chunk pass",
+		async () => {
+			const h = await harness({ remoteMode: true });
+			await h.ensureRoom("#reviews");
+			const posted = await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: MERMAID_BODY,
+			});
+			const { page } = await openPage();
+			// The token-entry page itself answers 401 by design; nothing after
+			// it may.
+			const refused: string[] = [];
+			page.on("response", (response) => {
+				if (response.status() >= 400 && response.url() !== h.remoteConsoleUrl)
+					refused.push(`${response.status()} ${response.url()}`);
+			});
+			await page.goto(h.remoteConsoleUrl, { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#operator-token");
+			await page.type("#operator-token", TOKEN);
+			await page.keyboard.press("Enter");
+			await page.waitForSelector("#operator-auth[hidden]");
+			expect(await drawnDiagram(page, posted.id)).toContain("plan");
+			expect(page.url()).not.toContain("ticket=");
+			expect(refused).toEqual([]);
+		},
+	);
+});
+
 // ── First-class states ───────────────────────────────────────────────────────
 
 /**
@@ -3673,10 +3757,9 @@ describe("unread", () => {
 				10_000,
 			);
 
-			// The pass ran and still left the unvisited room alone — and never
-			// even asked about it, so the badge is absent because the room was
-			// out of scope, not because its read happened to answer nothing.
-			expect(h.feed.reconcileReads.has("#alerts")).toBe(false);
+			// The pass ran and still left the unvisited room alone. It is asked
+			// about, from where its history stood when the feed first opened, so
+			// activity during an outage can still mark it; its history cannot.
 			expect((await unreadLabels(page)).join(" ")).not.toContain("#alerts");
 			// The visited room is at its cursor: nothing arrived after it.
 			expect((await unreadLabels(page)).join(" ")).not.toContain("#ops");
@@ -4809,6 +4892,1167 @@ describe("repaint stability", () => {
 
 			expect((await focusProbe(page))?.text ?? "").toContain("#ops");
 			expect(errors).toEqual([]);
+		},
+	);
+});
+
+// ── Paging, frame costs, and reconnect recovery ─────────────────────────────
+
+/** Wait until this page's events socket is open. */
+const socketOpen = (page: Page) =>
+	waitFor(
+		"events socket open",
+		() =>
+			page.evaluate(() =>
+				(
+					(globalThis as { __consoleSockets?: WebSocket[] }).__consoleSockets ??
+					[]
+				).some((socket) => socket.readyState === WebSocket.OPEN),
+			),
+		(open) => open === true,
+	);
+
+/** Wait until the socket-open reconciliation has finished `count` passes. */
+const reconciled = (page: Page, count = 1) =>
+	waitFor(
+		"reconcile pass",
+		() =>
+			page.evaluate(
+				() =>
+					(globalThis as { __consoleReconcilePasses?: number })
+						.__consoleReconcilePasses ?? 0,
+			),
+		(passes) => passes >= count,
+	);
+
+/** Request URLs the page has sent so far, by reference so later ones show up. */
+function recordRequests(page: Page): string[] {
+	const urls: string[] = [];
+	page.on("request", (request) => urls.push(request.url()));
+	return urls;
+}
+
+describe("large rooms", () => {
+	browserTest(
+		"a room past one page opens on its newest messages and loads older history on request",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			for (let i = 1; i <= 520; i += 1) {
+				await h.rooms.post({
+					room: "#reviews",
+					author: "reviewer",
+					body: `bulk message ${i}`,
+				});
+			}
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			const first = await waitFor(
+				"newest message",
+				() => renderedMessages(page),
+				(bodies) => bodies.includes("bulk message 520"),
+			);
+			expect(first).toHaveLength(200);
+			expect(first[0]).toBe("bulk message 321");
+
+			await socketOpen(page);
+			await h.supervisor.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "live after history",
+			});
+			await waitFor(
+				"live message",
+				() => renderedMessages(page),
+				(bodies) => bodies.at(-1) === "live after history",
+			);
+
+			await clickInPage(page, "#load-older");
+			const second = await waitFor(
+				"second page",
+				() => renderedMessages(page),
+				(bodies) => bodies.includes("bulk message 121"),
+			);
+			expect(second[0]).toBe("bulk message 121");
+			expect(second.at(-1)).toBe("live after history");
+
+			// Another live message must not drop the history already loaded.
+			await h.supervisor.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "second live message",
+			});
+			const kept = await waitFor(
+				"second live message",
+				() => renderedMessages(page),
+				(bodies) => bodies.at(-1) === "second live message",
+			);
+			expect(kept[0]).toBe("bulk message 121");
+
+			await clickInPage(page, "#load-older");
+			const all = await waitFor(
+				"whole history",
+				() => renderedMessages(page),
+				(bodies) => bodies[0] === "bulk message 1",
+			);
+			expect(all).toHaveLength(522);
+			await waitFor(
+				"no older history left",
+				() => page.$("#load-older").then((node) => node === null),
+				(gone) => gone,
+			);
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+});
+
+describe("frame costs", () => {
+	browserTest(
+		"streamed chat deltas do not refetch views per token",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const { page } = await openPage();
+			const requests = recordRequests(page);
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await socketOpen(page);
+			await reconciled(page);
+			// Radix tabs activate on focus, which a synthetic click does not give.
+			await page.waitForSelector('[role="tablist"] [role="tab"]:last-child');
+			await focusInPage(page, '[role="tablist"] [role="tab"]:last-child');
+			const artifactReads = () =>
+				Promise.resolve(
+					requests.filter((url) => new URL(url).pathname === "/api/artifacts")
+						.length,
+				);
+			await waitFor("artifacts load", artifactReads, (count) => count === 1);
+
+			for (let i = 0; i < 100; i += 1) {
+				h.feed.sendRaw(
+					JSON.stringify({
+						type: "chat",
+						chatId: "unviewed-chat",
+						event: { type: "message_update" },
+					}),
+				);
+			}
+			h.feed.sendRaw(
+				JSON.stringify({
+					type: "chat",
+					chatId: "unviewed-chat",
+					event: { type: "agent_end" },
+				}),
+			);
+			await waitFor(
+				"finished turn refetch",
+				artifactReads,
+				(count) => count >= 2,
+			);
+			// A plan frame after the stream is the marker: once its refetch is
+			// seen, every chat frame before it has been handled. It waits for the
+			// turn's refetch first, because two bumps in one tick render once.
+			h.feed.sendRaw(JSON.stringify({ type: "plan", room: "#reviews" }));
+			await waitFor("plan refetch", artifactReads, (count) => count >= 3);
+			expect(await artifactReads()).toBe(3);
+			expect(
+				requests.filter((url) =>
+					new URL(url).pathname.startsWith("/api/chats/"),
+				),
+			).toEqual([]);
+		},
+	);
+
+	browserTest("a budget frame does not refetch agents", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		const { page } = await openPage();
+		const requests = recordRequests(page);
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await socketOpen(page);
+		await reconciled(page);
+		const agentReads = () =>
+			Promise.resolve(
+				requests.filter((url) => new URL(url).pathname === "/api/agents")
+					.length,
+			);
+		const before = await agentReads();
+
+		h.feed.sendRaw(
+			JSON.stringify({ type: "budget", account: "acct-1", state: "warned" }),
+		);
+		// A schedule frame does refetch agents, so its read marks the budget
+		// frame as handled.
+		h.feed.sendRaw(
+			JSON.stringify({ type: "schedule", agent: "reviewer", phase: "armed" }),
+		);
+		await waitFor("schedule refetch", agentReads, (count) => count > before);
+		expect(await agentReads()).toBe(before + 1);
+	});
+
+	browserTest("opening a room reads its transcript once", async () => {
+		const h = await harness();
+		await h.ensureRoom("#reviews");
+		await h.rooms.post({
+			room: "#reviews",
+			author: "reviewer",
+			body: "Hello.",
+		});
+		const { page } = await openPage();
+		const requests = recordRequests(page);
+		await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+		await socketOpen(page);
+		await reconciled(page);
+		const pages = requests.filter((url) => {
+			const parsed = new URL(url);
+			return (
+				parsed.pathname === "/api/channels/%23reviews/messages" &&
+				parsed.searchParams.get("afterId") === null
+			);
+		});
+		expect(pages).toHaveLength(1);
+		expect(await renderedMessages(page)).toEqual(["Hello."]);
+	});
+
+	browserTest(
+		"test probes stay off unless the page asks for them",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const page = await browser.newPage();
+			cleanups.push(async function cleanupBarePage() {
+				await page.close().catch(() => {});
+			});
+			const requests = recordRequests(page);
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"socket handshake",
+				() => Promise.resolve(h.feed.connects),
+				(count) => count > 0,
+			);
+			await waitFor(
+				"connected indicator",
+				() => page.$eval("body", (node) => node.textContent ?? ""),
+				(text) => text.includes("Daemon connected"),
+			);
+			expect(requests.length).toBeGreaterThan(0);
+			expect(
+				await page.evaluate(() => [
+					Reflect.get(globalThis, "__consoleSockets") === undefined,
+					Reflect.get(globalThis, "__consoleReconcilePasses") === undefined,
+				]),
+			).toEqual([true, true]);
+		},
+	);
+});
+
+describe("reconnect recovery", () => {
+	browserTest(
+		"a never-opened room gains an unread badge from activity during an outage",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+			await h.rooms.post({ room: "#ops", author: "reviewer", body: "Old." });
+
+			const { page, errors } = await openPage();
+			const seeded = page.waitForResponse((response) => {
+				const url = new URL(response.url());
+				return (
+					url.pathname === "/api/channels/%23ops/messages" &&
+					url.searchParams.get("newest") === "1"
+				);
+			});
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await seeded;
+			await socketOpen(page);
+			await reconciled(page);
+			expect(await unreadLabels(page)).toEqual([]);
+
+			h.feed.dropMessages = true;
+			const released = Promise.withResolvers<void>();
+			const releaseGate = () => {
+				h.feed.holdConnect = null;
+				released.resolve();
+			};
+			cleanups.push(async function releaseConnectGate() {
+				releaseGate();
+			});
+			h.feed.holdConnect = released.promise;
+			await page.evaluate(() => {
+				(
+					(globalThis as { __consoleSockets?: WebSocket[] }).__consoleSockets ??
+					[]
+				)
+					.find((socket) => socket.readyState === WebSocket.OPEN)
+					?.close();
+			});
+			await h.rooms.post({
+				room: "#ops",
+				author: "reviewer",
+				body: "Posted during the outage.",
+			});
+			releaseGate();
+			await reconciled(page, 2);
+			await waitFor(
+				"unread badge on #ops",
+				() => unreadLabels(page),
+				(labels) => labels.some((label) => label.includes("#ops")),
+			);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"a failed channel bootstrap reloads when the socket opens and keeps the requested room",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.ensureRoom("#ops");
+			await h.rooms.post({
+				room: "#ops",
+				author: "reviewer",
+				body: "Ops here.",
+			});
+
+			const { page, errors } = await openPage();
+			let refused = 0;
+			await page.setRequestInterception(true);
+			page.on("request", (request) => {
+				if (
+					new URL(request.url()).pathname === "/api/channels" &&
+					refused === 0
+				) {
+					refused += 1;
+					void request.respond({
+						status: 502,
+						contentType: "application/json",
+						body: JSON.stringify({
+							error: { code: "unavailable", message: "channels unavailable" },
+						}),
+					});
+					return;
+				}
+				void request.continue();
+			});
+			await page.goto(h.consoleUrl("#ops"), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"requested room transcript",
+				() => renderedMessages(page),
+				(bodies) => bodies.includes("Ops here."),
+			);
+			expect(refused).toBe(1);
+			expect(new URL(page.url()).searchParams.get("room")).toBe("#ops");
+			expect(
+				unexpectedPageErrors(errors).filter((error) => !error.includes("502")),
+			).toEqual([]);
+		},
+	);
+});
+
+describe("unreachable daemon", () => {
+	browserTest(
+		"repeated failed reconnects suggest the daemon moved to a new address",
+		async () => {
+			const json = (body: unknown) =>
+				new Response(JSON.stringify(body), {
+					headers: { "content-type": "application/json" },
+				});
+			// Snapshots answer, but the events socket never opens, as after a
+			// daemon restart on another port behind a still-open tab.
+			const server = await degradedServer((url) => {
+				if (url.pathname === "/api/channels")
+					return json({ channels: [{ id: "#reviews", kind: "channel" }] });
+				if (url.pathname === "/api/agents") return json({ agents: [] });
+				if (url.pathname === "/api/profile") return json({});
+				if (url.pathname.endsWith("/messages")) return json({ messages: [] });
+				return undefined;
+			});
+			const { page } = await openPage();
+			await page.goto(server.url, { waitUntil: "domcontentloaded" });
+			const notice = await waitFor(
+				"restart hint",
+				() => page.$eval("#notice", (node) => node.textContent ?? ""),
+				(text) => text.includes("new address"),
+				15_000,
+			);
+			expect(notice).toContain("omp-agent console");
+		},
+	);
+});
+
+// ── Workspace views ──────────────────────────────────────────────────────────
+
+/**
+ * The console API composed with the web workspace services the daemon adds
+ * (plans, git changes, chats, attachments) and a Lavish state dir under the
+ * test's temp dir. The page loads straight from the API on loopback, as the
+ * daemon serves it. Chats are a stub: no test here may start a real OMP
+ * session, so `create` refuses and the listed chat answers fixtures.
+ */
+async function workspaceHarness() {
+	const { RoomPlans } = await import("../src/rooms/plans");
+	const { WebAttachments } = await import("../src/daemon/web-attachments");
+	const dir = await mkdtemp(join(tmpdir(), "oh-my-agent-console-views-"));
+	cleanups.push(async function cleanupViewsDir() {
+		await rm(dir, { recursive: true, force: true });
+	});
+	const rooms: RoomStore = await Store.open(join(dir, "rooms.db"));
+	cleanups.push(async function cleanupViewsRooms() {
+		await rooms.close();
+	});
+	const plans = await RoomPlans.open(rooms.path);
+	cleanups.push(async function cleanupViewsPlans() {
+		await plans.close();
+	});
+	const scheduler = new Scheduler({
+		now: () => Date.now(),
+		setTimer: () => 0,
+		clearTimer: () => {},
+	});
+	const supervisor = new Supervisor({
+		rooms,
+		scheduler,
+		now: () => Date.now(),
+	});
+	const peers = new Map<string, PeerRecord>();
+	const roots: PeerStoreRoots = {
+		user: join(dir, "user", "agents"),
+		project: join(dir, "project", "agents"),
+	};
+	await mkdir(roots.user, { recursive: true });
+	await mkdir(roots.project, { recursive: true });
+	const peerStore = createPeerStore(roots);
+	const knownRooms = new Map<string, RoomInfo>();
+	const ensureRoom = async (id: string): Promise<void> => {
+		if (knownRooms.has(id)) return;
+		const kind = id.startsWith("@") ? "dm" : "channel";
+		await rooms.createRoom({ id, kind });
+		knownRooms.set(id, { id, kind, name: id });
+	};
+	const chat = {
+		id: "stub-chat",
+		title: "Stub chat",
+		cwd: dir,
+		createdAt: Date.now(),
+		updatedAt: Date.now(),
+	};
+	const chatCreates: string[] = [];
+	const chats = {
+		storageDir: join(dir, "chats"),
+		list: async () => [chat],
+		create: async (input: { cwd: string }) => {
+			chatCreates.push(input.cwd);
+			throw new Error(`Workspace folder does not exist: ${input.cwd}`);
+		},
+		state: async () => ({
+			...chat,
+			running: true,
+			streaming: false,
+			compacting: false,
+			sessionId: "stub-session",
+			messageCount: 2,
+			queuedMessageCount: 0,
+			// A session file without todo state: the Plans tab must not throw.
+			todoPhases: undefined,
+		}),
+		// One malformed message (numeric content, non-numeric timestamp) beside
+		// a well-formed one: the transcript must draw both, not blank.
+		messages: async () => [
+			{ role: "user", content: 42, timestamp: "yesterday" },
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "Hello from the stub chat." }],
+				timestamp: Date.now(),
+			},
+		],
+		models: async () => [],
+		setModel: async () => ({ provider: "none", id: "none" }),
+		prompt: async () => {
+			throw new Error("stub chats never prompt");
+		},
+		abort: async () => {},
+		closeChat: async () => {},
+		close: async () => {},
+	} as unknown as NonNullable<
+		Parameters<typeof startConsoleApi>[0]["web"]
+	>["chats"];
+	const lavishDir = join(dir, "lavish");
+	await mkdir(lavishDir, { recursive: true });
+	const api = await startConsoleApi({
+		rooms,
+		supervisor,
+		peers,
+		peerStore,
+		knownRooms,
+		ensureRoom,
+		operations: createOperations({
+			rooms,
+			supervisor,
+			peers,
+			bumpAccount: async () => [],
+		}),
+		token: TOKEN,
+		profile: openProfileStore(join(dir, "console-profile.json")),
+		lavishStateDir: lavishDir,
+		openArtifact: async (file) => ({
+			file,
+			url: "about:blank",
+			status: "open",
+			pendingPrompts: 0,
+			updatedAt: "",
+		}),
+		pollIntervalMs: 25,
+		web: {
+			chats,
+			plans,
+			attachments: new WebAttachments(join(dir, "clipboard")),
+			remoteFullControl: false,
+		},
+	});
+	cleanups.push(async function cleanupViewsApi() {
+		await api.close();
+	});
+	const origin = String(api.url).replace(/\/$/, "");
+	return {
+		dir,
+		rooms,
+		plans,
+		peerStore,
+		ensureRoom,
+		chatCreates,
+		lavishDir,
+		origin,
+		consoleUrl: (room: string) =>
+			`${origin}/?token=${TOKEN}&room=${encodeURIComponent(room)}`,
+		/** An authenticated write made behind the browser's back. */
+		apiCall: (path: string, init: { method: string; body: unknown }) =>
+			fetch(`${origin}${path}`, {
+				method: init.method,
+				headers: {
+					Authorization: `Bearer ${TOKEN}`,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify(init.body),
+			}),
+	};
+}
+
+/**
+ * Click the first element matching `selector` whose text contains `text`,
+ * with a real pointer click: Radix tabs switch on pointer down, which a
+ * scripted `element.click()` never sends.
+ */
+async function clickText(
+	page: Page,
+	selector: string,
+	text: string,
+): Promise<void> {
+	const deadline = Date.now() + 10_000;
+	for (;;) {
+		for (const handle of await page.$$(selector)) {
+			const label = await handle
+				.evaluate((node) => node.textContent ?? "")
+				.catch(() => "");
+			if (!label.includes(text)) continue;
+			try {
+				await handle.click();
+				return;
+			} catch {
+				// Detached or covered by a repaint; look again.
+			}
+		}
+		if (Date.now() > deadline)
+			throw new Error(
+				`No clickable ${selector} with text ${JSON.stringify(text)}`,
+			);
+		const tick = Promise.withResolvers<void>();
+		setTimeout(tick.resolve, 20);
+		await tick.promise;
+	}
+}
+
+/** Replace a React-controlled field's value the way typing would. */
+async function fillInPage(
+	page: Page,
+	selector: string,
+	value: string,
+): Promise<void> {
+	await page.waitForSelector(selector, { timeout: 10_000 });
+	await page.evaluate(
+		(s, v) => {
+			const field = document.querySelector(s) as unknown as {
+				value: string;
+				dispatchEvent(event: unknown): boolean;
+				constructor: { prototype: object };
+			};
+			const setter = Object.getOwnPropertyDescriptor(
+				field.constructor.prototype,
+				"value",
+			)?.set;
+			setter?.call(field, v);
+			field.dispatchEvent(
+				new (
+					globalThis as unknown as {
+						Event: new (type: string, init: object) => unknown;
+					}
+				).Event("input", { bubbles: true }),
+			);
+		},
+		selector,
+		value,
+	);
+}
+
+const fieldValue = (page: Page, selector: string): Promise<string> =>
+	page
+		.$eval(selector, (node) => (node as unknown as { value: string }).value)
+		.catch(() => "");
+
+const pageText = (page: Page, selector = "body"): Promise<string> =>
+	page.$eval(selector, (node) => node.textContent ?? "").catch(() => "");
+
+describe("plans view", () => {
+	browserTest(
+		"a stale tab's conflicting save never overwrites the other tab's edit",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#plans");
+
+			const a = await openPage();
+			await a.page.goto(h.consoleUrl("#plans"), {
+				waitUntil: "domcontentloaded",
+			});
+			await clickText(a.page, 'main [role="tab"]', "Plans");
+			await clickText(a.page, "section button", "New plan");
+			await fillInPage(a.page, "#plan-title", "Release");
+			await fillInPage(a.page, "#plan-body", "Original body.");
+			await clickText(
+				a.page,
+				'[role="dialog"] button[type="submit"]',
+				"Create plan",
+			);
+			await waitFor(
+				"plan created",
+				() => Promise.resolve(h.plans.list("#plans")),
+				(list) => list.length === 1,
+			);
+
+			const b = await openPage();
+			await b.page.goto(h.consoleUrl("#plans"), {
+				waitUntil: "domcontentloaded",
+			});
+			await clickText(b.page, 'main [role="tab"]', "Plans");
+			// Both tabs open the editor on the same revision.
+			for (const { page } of [a, b]) {
+				await page.waitForSelector('[aria-label="Edit Release"]', {
+					timeout: 10_000,
+				});
+				await clickInPage(page, '[aria-label="Edit Release"]');
+				await page.waitForSelector("#plan-body", { timeout: 10_000 });
+			}
+
+			await fillInPage(a.page, "#plan-body", "Edited by tab A.");
+			await clickText(
+				a.page,
+				'[role="dialog"] button[type="submit"]',
+				"Save changes",
+			);
+			await waitFor(
+				"tab A saved",
+				() => Promise.resolve(h.plans.list("#plans")[0]?.body),
+				(body) => body === "Edited by tab A.",
+			);
+
+			await fillInPage(b.page, "#plan-body", "Edited by stale tab B.");
+			await clickText(
+				b.page,
+				'[role="dialog"] button[type="submit"]',
+				"Save changes",
+			);
+			await waitFor(
+				"conflict shown",
+				() => pageText(b.page, '[role="dialog"]'),
+				(text) => text.includes("This plan changed"),
+			);
+			expect(h.plans.list("#plans")[0]?.body).toBe("Edited by tab A.");
+
+			await clickText(b.page, '[role="dialog"] button', "Refresh latest plan");
+			// The form now holds the other writer's text; the stale draft is
+			// kept read-only beside it, never as what Save would send.
+			await waitFor(
+				"latest plan loaded into the form",
+				() => fieldValue(b.page, "#plan-body"),
+				(body) => body === "Edited by tab A.",
+			);
+			expect(await fieldValue(b.page, "#plan-unsaved")).toContain(
+				"Edited by stale tab B.",
+			);
+
+			await clickText(
+				b.page,
+				'[role="dialog"] button[type="submit"]',
+				"Save changes",
+			);
+			await b.page.waitForSelector("#plan-body", {
+				hidden: true,
+				timeout: 10_000,
+			});
+			const [saved] = h.plans.list("#plans");
+			expect(saved?.body).toBe("Edited by tab A.");
+			expect(saved?.revision).toBe(3);
+			expect(unexpectedPageErrors(a.errors)).toEqual([]);
+			// The one 409 is the conflict this test provoked.
+			expect(
+				unexpectedPageErrors(b.errors).filter((e) => !e.includes("409")),
+			).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"a plan removed before the conflict refresh disables saving instead of creating a duplicate",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#plans");
+			const plan = h.plans.create({
+				room: "#plans",
+				title: "Doomed",
+				body: "Body.",
+				author: "@you",
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#plans"), {
+				waitUntil: "domcontentloaded",
+			});
+			await clickText(page, 'main [role="tab"]', "Plans");
+			await clickInPage(page, '[aria-label="Edit Doomed"]');
+			await fillInPage(page, "#plan-body", "My edit.");
+
+			// Another writer saves, so this save conflicts...
+			h.plans.update({
+				id: plan.id,
+				room: "#plans",
+				expectedRevision: plan.revision,
+				author: "@you",
+				body: "Theirs.",
+			});
+			await clickText(
+				page,
+				'[role="dialog"] button[type="submit"]',
+				"Save changes",
+			);
+			await waitFor(
+				"conflict shown",
+				() => pageText(page, '[role="dialog"]'),
+				(text) => text.includes("This plan changed"),
+			);
+			// ...and the plan disappears before the refresh.
+			const { Database } = await import("bun:sqlite");
+			const db = new Database(h.rooms.path);
+			try {
+				db.run("DELETE FROM room_plans WHERE id = ?", [plan.id]);
+			} finally {
+				db.close();
+			}
+
+			await clickText(page, '[role="dialog"] button', "Refresh latest plan");
+			await waitFor(
+				"vanished plan reported",
+				() => pageText(page, '[role="dialog"]'),
+				(text) => text.includes("This plan no longer exists"),
+			);
+			expect(await pageText(page, '[role="dialog"] h2')).toContain("Edit plan");
+			const disabled = await page.$eval(
+				'[role="dialog"] button[type="submit"]',
+				(node) => node.getAttribute("disabled") !== null,
+			);
+			expect(disabled).toBe(true);
+			expect(h.plans.list("#plans")).toEqual([]);
+			expect(
+				unexpectedPageErrors(errors).filter((e) => !e.includes("409")),
+			).toEqual([]);
+		},
+	);
+});
+
+describe("changes view", () => {
+	browserTest(
+		"a typed repository path lists changes and a diff, debounced, and stays in its room",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#code");
+			await h.ensureRoom("#elsewhere");
+			const repo = join(h.dir, "repo");
+			await mkdir(repo, { recursive: true });
+			const git = (...args: string[]) => {
+				const run = Bun.spawnSync(["git", ...args], {
+					cwd: repo,
+					env: {
+						PATH: process.env.PATH ?? "",
+						HOME: h.dir,
+						GIT_CONFIG_NOSYSTEM: "1",
+						GIT_AUTHOR_NAME: "Test",
+						GIT_AUTHOR_EMAIL: "test@example.invalid",
+						GIT_COMMITTER_NAME: "Test",
+						GIT_COMMITTER_EMAIL: "test@example.invalid",
+					},
+				});
+				if (run.exitCode !== 0) throw new Error(run.stderr.toString());
+			};
+			git("init", "-q");
+			await writeFile(join(repo, "file.txt"), "one\n");
+			git("add", "file.txt");
+			git("commit", "-q", "-m", "init");
+			await writeFile(join(repo, "file.txt"), "one\ntwo\n");
+			await writeFile(join(repo, "new.txt"), "fresh\n");
+
+			const { page, errors } = await openPage();
+			const changeReads: string[] = [];
+			page.on("request", (request) => {
+				if (request.url().includes("/api/workspace/changes"))
+					changeReads.push(request.url());
+			});
+			await page.goto(h.consoleUrl("#code"), { waitUntil: "domcontentloaded" });
+			await clickText(page, 'main [role="tab"]:not([disabled])', "Changes");
+			await page.waitForSelector('[aria-label="Repository workspace"]', {
+				timeout: 10_000,
+			});
+			await page.type('[aria-label="Repository workspace"]', repo);
+
+			await waitFor(
+				"changed files listed",
+				() => pageText(page, "#main"),
+				(text) => text.includes("2 changed files") && text.includes("new.txt"),
+				10_000,
+			);
+			await waitFor(
+				"working diff",
+				() => pageText(page, "#main pre"),
+				(text) => text.includes("+two"),
+			);
+			// One inspection for the whole path, not one per keystroke.
+			expect(changeReads.length).toBe(1);
+			expect(await pageText(page, "#main")).not.toContain(
+				"Could not load workspace changes",
+			);
+
+			// The typed path belongs to #code; #elsewhere has no workspace.
+			await clickText(page, "#sidebar button, #channels .channel", "elsewhere");
+			await clickText(page, 'main [role="tab"]:not([disabled])', "Changes");
+			await waitFor(
+				"other room has no typed path",
+				() => pageText(page, "#main"),
+				(text) =>
+					text.includes(
+						"Choose a working directory to inspect its real Git changes.",
+					),
+			);
+			expect(
+				await fieldValue(page, '[aria-label="Repository workspace"]'),
+			).toBe("");
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+});
+
+describe("artifacts view", () => {
+	browserTest(
+		"shows the empty state, then draws an unparseable timestamp as text",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#art");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#art"), { waitUntil: "domcontentloaded" });
+			await clickText(page, 'main [role="tab"]', "Artifacts");
+			await waitFor(
+				"empty artifacts",
+				() => pageText(page, "#artifacts"),
+				(text) => text.includes("No artifacts yet."),
+			);
+
+			await writeFile(
+				join(h.lavishDir, "state.json"),
+				JSON.stringify({
+					sessions: {
+						one: {
+							file: "/tmp/review/report.html",
+							url: "http://127.0.0.1:1/s/one",
+							status: "open",
+							updated_at: "not-a-date",
+						},
+					},
+				}),
+			);
+			await clickInPage(page, '[aria-label="Refresh artifacts"]');
+			await waitFor(
+				"artifact row",
+				() => pageText(page, "#artifacts"),
+				(text) => text.includes("report.html") && text.includes("not-a-date"),
+			);
+			expect(await page.$("[data-error-boundary]")).toBeNull();
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+});
+
+describe("omp chat panel", () => {
+	browserTest(
+		"a refused chat shows its error in the dialog, and a malformed transcript still draws",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#chat");
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#chat"), { waitUntil: "domcontentloaded" });
+			await clickInPage(page, '[aria-label="New OMP chat"]');
+			await fillInPage(page, "#chat-workspace", "/no/such/workspace");
+			await clickText(
+				page,
+				'[role="dialog"] button[type="submit"]',
+				"Start chat",
+			);
+			await waitFor(
+				"chat error",
+				() => pageText(page, '[role="dialog"] [role="alert"]'),
+				(text) => text.includes("Workspace folder does not exist"),
+			);
+			// The daemon's message, without a JavaScript "Error: " prefix.
+			expect(
+				await pageText(page, '[role="dialog"] [role="alert"]'),
+			).not.toContain("Error:");
+			expect(h.chatCreates).toEqual(["/no/such/workspace"]);
+			await page.keyboard.press("Escape");
+			await page.waitForSelector("#chat-workspace", {
+				hidden: true,
+				timeout: 10_000,
+			});
+
+			await clickText(page, "#sidebar button", "Stub chat");
+			await waitFor(
+				"stub chat transcript",
+				() => transcriptText(page),
+				(text) =>
+					text.includes("Hello from the stub chat.") && text.includes("42"),
+			);
+			await clickText(page, 'main [role="tab"]', "Plans");
+			await waitFor(
+				"session plan placeholder",
+				() => pageText(page, "#main"),
+				(text) => text.includes("OMP's plan will appear here"),
+			);
+			expect(await page.$("[data-error-boundary]")).toBeNull();
+			// The refused create is the one 400 this test provoked.
+			expect(
+				unexpectedPageErrors(errors).filter((e) => !e.includes("400")),
+			).toEqual([]);
+		},
+	);
+});
+
+describe("review fixes", () => {
+	browserTest(
+		"the create agent dialog names the blank required fields instead of doing nothing",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#reviews");
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#reviews"), {
+				waitUntil: "domcontentloaded",
+			});
+			await page.click("#open-new-agent");
+			await page.waitForSelector("#new-agent-name");
+			expect(
+				await pageText(page, 'label[for="new-agent-description"]'),
+			).toContain("(required)");
+			await page.type("#new-agent-name", "halfdone");
+			await page.click("#new-agent-create");
+			await page.waitForSelector("#new-agent-description-error", {
+				timeout: 5_000,
+			});
+			expect(await pageText(page, "#new-agent-description-error")).toBe(
+				"Enter a description.",
+			);
+			expect(await pageText(page, "#new-agent-body-error")).toBe(
+				"Enter a soul or system prompt.",
+			);
+			expect(await page.$("#new-agent-name-error")).toBeNull();
+			const focused = await page.evaluate(
+				() => document.activeElement?.id ?? "",
+			);
+			expect(focused).toBe("new-agent-description");
+			expect((await h.peerStore.list()).definitions).toEqual([]);
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"cancelling the channel workspace picker sends nothing",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#reviews");
+			const { page, errors } = await openPage();
+			const patches: string[] = [];
+			page.on("request", (request) => {
+				if (request.method() === "PATCH") patches.push(request.url());
+			});
+			await page.goto(h.consoleUrl("#reviews"), {
+				waitUntil: "domcontentloaded",
+			});
+			await clickInPage(page, '[aria-label="Edit channel workspace"]');
+			await clickText(page, '[role="dialog"] button', "Choose");
+			await page.waitForSelector('[aria-label="Absolute path"]', {
+				timeout: 10_000,
+			});
+			// Cancel through the picker's own close button: a pointer click
+			// lands on the picker whichever element holds keyboard focus.
+			await clickInPage(
+				page,
+				'[role="dialog"]:has([aria-label="Absolute path"]) [data-slot="dialog-close"]',
+			);
+			await page.waitForSelector('[aria-label="Absolute path"]', {
+				hidden: true,
+				timeout: 10_000,
+			});
+			// The picker closing resolves the pick; a PATCH would follow at once.
+			await waitFor(
+				"channel settings dialog back",
+				() => pageText(page, '[role="dialog"]'),
+				(text) => text.includes("working directory"),
+			);
+			await page.evaluate(
+				() =>
+					new Promise((resolve) =>
+						(
+							globalThis as unknown as {
+								requestAnimationFrame(cb: () => void): void;
+							}
+						).requestAnimationFrame(() => resolve(null)),
+					),
+			);
+			expect(patches).toEqual([]);
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"a profile broadcast while the profile dialog is open keeps unsaved edits",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#reviews");
+			await h.rooms.post({ room: "#reviews", author: "someone", body: "Hi." });
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#reviews"), {
+				waitUntil: "domcontentloaded",
+			});
+			await waitFor(
+				"transcript",
+				() => transcriptText(page),
+				(text) => text.includes("Hi."),
+				10_000,
+			);
+			await page.click("#open-profile");
+			await page.waitForSelector("#profile-operator-name", { visible: true });
+			await page.type("#profile-operator-name", "Unsaved name");
+
+			const response = await h.apiCall("/api/profile", {
+				method: "PUT",
+				body: { agents: { someone: { displayName: "Else" } } },
+			});
+			expect(response.status).toBe(200);
+			// The page has seen the broadcast once the transcript draws the new name.
+			await waitFor(
+				"profile broadcast applied",
+				() =>
+					page
+						.$eval('#messages .message .author[data-author="someone"]', (n) =>
+							(n.textContent ?? "").trim(),
+						)
+						.catch(() => ""),
+				(name) => name === "Else",
+			);
+			expect(await fieldValue(page, "#profile-operator-name")).toBe(
+				"Unsaved name",
+			);
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"the stopped-agent notice belongs to that DM, not to the next room",
+		async () => {
+			const h = await workspaceHarness();
+			await h.ensureRoom("#reviews");
+			await h.peerStore.write({
+				name: "sleeper",
+				description: "Stopped agent.",
+				spawns: "*",
+				body: "Wait.",
+			});
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl("#reviews"), {
+				waitUntil: "domcontentloaded",
+			});
+			await openAgentTab(page, "Members");
+			await clickText(
+				page,
+				'#agents .agent[data-name="sleeper"] button',
+				"Message",
+			);
+			const notice =
+				"This agent is stopped. Messages wait here until it starts.";
+			await waitFor(
+				"stopped notice in the DM",
+				() => pageText(page, "#notice"),
+				(text) => text.includes(notice),
+				10_000,
+			);
+			await waitForAgentSheet(page, false);
+			await clickText(page, "#channels .channel", "reviews");
+			await waitFor(
+				"back in #reviews",
+				() => pageText(page, "#current-channel h1"),
+				(text) => text.includes("reviews"),
+			);
+			await waitFor(
+				"notice gone in another room",
+				() => pageText(page, "#notice"),
+				(text) => !text.includes(notice),
+			);
+			await waitFor(
+				"toast dismissed",
+				() => pageText(page, "[data-sonner-toaster]"),
+				(text) => !text.includes(notice),
+			);
+			expect(unexpectedPageErrors(errors)).toEqual([]);
+		},
+	);
+
+	browserTest(
+		"the composer keeps focus after a send, so the next words land",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await page.waitForSelector("#composer-input");
+			await page.type("#composer-input", "First message.");
+			await page.keyboard.press("Enter");
+			await waitFor(
+				"first message sent",
+				() => transcriptText(page),
+				(text) => text.includes("First message."),
+			);
+			await waitFor(
+				"composer idle",
+				() => fieldValue(page, "#composer-input"),
+				(value) => value === "",
+			);
+			// No re-focus: typing continues where the operator already was.
+			await page.keyboard.type("Second thought");
+			expect(await fieldValue(page, "#composer-input")).toBe("Second thought");
+			expect(unexpectedPageErrors(errors)).toEqual([]);
 		},
 	);
 });

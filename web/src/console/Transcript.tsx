@@ -21,6 +21,9 @@ export type TranscriptProps = {
   onThread: (id: number) => void;
   onReact: (id: number, emoji: string) => Promise<void>;
   onRetry?: () => void | Promise<void>;
+  /** Present while older history exists above the loaded messages. */
+  onLoadOlder?: () => void | Promise<void>;
+  loadingOlder?: boolean;
   interactive?: boolean;
 };
 
@@ -49,6 +52,8 @@ export function Transcript({
   onThread,
   onReact,
   onRetry,
+  onLoadOlder,
+  loadingOlder = false,
   interactive = true,
 }: TranscriptProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -58,6 +63,7 @@ export function Transcript({
     nearBottom: true,
   });
   const previousRoomRef = useRef(currentRoom);
+  const firstIdRef = useRef(messages[0]?.id);
   const retryRef = useRef<HTMLButtonElement>(null);
 
   useLayoutEffect(() => {
@@ -66,11 +72,20 @@ export function Transcript({
     const snapshot = snapshotRef.current;
     const topBeforeUpdate = element.scrollTop;
     const wasNearBottom = snapshot.height === 0 || snapshot.height - topBeforeUpdate - element.clientHeight < 72;
+    const firstId = messages[0]?.id;
+    const prepended =
+      firstId !== undefined &&
+      firstIdRef.current !== undefined &&
+      firstId < firstIdRef.current;
+    firstIdRef.current = firstId;
     if (previousRoomRef.current !== currentRoom) {
       element.scrollTop = element.scrollHeight;
       previousRoomRef.current = currentRoom;
     } else if (wasNearBottom) {
       element.scrollTop = element.scrollHeight;
+    } else if (prepended) {
+      // Older history went in above: keep the messages in view where they were.
+      element.scrollTop = topBeforeUpdate + element.scrollHeight - snapshot.height;
     } else if (element.scrollHeight !== snapshot.height) {
       element.scrollTop = topBeforeUpdate;
     }
@@ -202,6 +217,20 @@ export function Transcript({
         </section>
       ) : (
         <div id="state" role="status" hidden />
+      )}
+      {!showState && onLoadOlder && (
+        <div className="flex justify-center py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            id="load-older"
+            disabled={loadingOlder}
+            onClick={() => void onLoadOlder()}
+          >
+            {loadingOlder ? "Loading older messages" : "Load older messages"}
+          </Button>
+        </div>
       )}
       {roots.map((message, index) => {
         const previous = roots[index - 1];
