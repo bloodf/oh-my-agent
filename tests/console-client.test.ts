@@ -5085,14 +5085,16 @@ describe("frame costs", () => {
 					event: { type: "agent_end" },
 				}),
 			);
-			// A plan frame after the stream is the marker: once its refetch is
-			// seen, every chat frame before it has been handled.
-			h.feed.sendRaw(JSON.stringify({ type: "plan", room: "#reviews" }));
 			await waitFor(
-				"finished turn and plan refetch",
+				"finished turn refetch",
 				artifactReads,
-				(count) => count >= 3,
+				(count) => count >= 2,
 			);
+			// A plan frame after the stream is the marker: once its refetch is
+			// seen, every chat frame before it has been handled. It waits for the
+			// turn's refetch first, because two bumps in one tick render once.
+			h.feed.sendRaw(JSON.stringify({ type: "plan", room: "#reviews" }));
+			await waitFor("plan refetch", artifactReads, (count) => count >= 3);
 			expect(await artifactReads()).toBe(3);
 			expect(
 				requests.filter((url) =>

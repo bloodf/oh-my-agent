@@ -2214,7 +2214,9 @@ export async function startConsoleApi(
 									/\s*<link rel="stylesheet"[^>]*href="\/style\.css"[^>]*>/,
 									"",
 								)
-								.replace(/\s*<script[^>]*src="\/app\.js"[^>]*><\/script>/, "");
+								.replace(/\s*<script[^>]*src="\/app\.js"[^>]*><\/script>/, "")
+								// Vite preloads shared chunks; this page has no credential for them.
+								.replace(/\s*<link rel="modulepreload"[^>]*>/g, "");
 							return new Response(bootstrap, {
 								status: 401,
 								headers: {
