@@ -36,7 +36,7 @@ export default function Footer() {
 		<footer className="footer">
 			<div className="container footer-grid">
 				<div className="footer-brand">
-					<a href="#top" className="nav-brand" aria-label="Back to top">
+					<a href="#top" className="nav-brand" aria-label="oh-my-agent, back to top">
 						<BrandMark size={32} />
 						<span>oh-my-agent</span>
 					</a>
@@ -49,7 +49,7 @@ export default function Footer() {
 				</div>
 				{COLUMNS.map((col) => (
 					<nav key={col.title} className="footer-col" aria-label={col.title}>
-						<h3>{col.title}</h3>
+						<h2>{col.title}</h2>
 						<ul>
 							{col.links.map((link) => (
 								<li key={link.label}>

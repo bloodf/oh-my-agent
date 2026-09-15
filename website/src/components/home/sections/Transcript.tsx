@@ -35,7 +35,7 @@ export default function Transcript() {
 
 	const shown = MESSAGES.slice(0, Math.min(count, MESSAGES.length));
 	return (
-		<div ref={ref} className="transcript" aria-label="Illustrative room transcript">
+		<div ref={ref} className="transcript" role="group" aria-label="Illustrative room transcript">
 			<p className="transcript-head">
 				<span className="live-dot" aria-hidden="true" /> Illustrative transcript
 			</p>

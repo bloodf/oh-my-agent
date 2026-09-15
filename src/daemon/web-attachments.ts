@@ -41,6 +41,35 @@ interface ParsedMetadata {
 }
 
 export const WEB_ATTACHMENT_TTL_MS = 24 * 60 * 60 * 1000;
+/** Largest single upload; the stream is cut off at the first byte past it. */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+/** Uploads streaming at once, so parallel requests cannot multiply the byte cap. */
+export const MAX_CONCURRENT_UPLOADS = 4;
+/** Attachments held at once, finished or in flight, before the TTL frees them. */
+export const MAX_STORED_ATTACHMENTS = 40;
+
+export interface AttachmentLimits {
+	maxBytes: number;
+	maxConcurrent: number;
+	maxStored: number;
+}
+
+const DEFAULT_LIMITS: AttachmentLimits = {
+	maxBytes: MAX_ATTACHMENT_BYTES,
+	maxConcurrent: MAX_CONCURRENT_UPLOADS,
+	maxStored: MAX_STORED_ATTACHMENTS,
+};
+
+/** An upload refused for size or count; the route answers `status` with `code`. */
+export class AttachmentLimitError extends Error {
+	constructor(
+		readonly status: 413 | 429,
+		readonly code: "payload_too_large" | "too_many_attachments",
+		message: string,
+	) {
+		super(message);
+	}
+}
 const ID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -112,12 +141,15 @@ function parseMetadata(
 export class WebAttachments {
 	private readonly directory: string;
 	private readonly active = new Set<string>();
+	private readonly limits: AttachmentLimits;
 
 	constructor(
 		directory: string,
 		private readonly ttlMs = WEB_ATTACHMENT_TTL_MS,
+		limits: Partial<AttachmentLimits> = {},
 	) {
 		this.directory = isAbsolute(directory) ? directory : resolve(directory);
+		this.limits = { ...DEFAULT_LIMITS, ...limits };
 	}
 
 	private async ensureDirectory(): Promise<void> {
@@ -178,7 +210,16 @@ export class WebAttachments {
 		signal?: AbortSignal,
 	): Promise<WebAttachment> {
 		await this.ensureDirectory();
+		// Checked and reserved with no await in between, so parallel requests
+		// cannot all pass the same concurrency count.
+		if (this.active.size >= this.limits.maxConcurrent)
+			throw new AttachmentLimitError(
+				429,
+				"too_many_attachments",
+				`At most ${this.limits.maxConcurrent} uploads may run at once`,
+			);
 		const id = randomUUID();
+		this.active.add(id);
 		const paths = this.paths(id);
 		const stored: StoredAttachment = {
 			id,
@@ -188,7 +229,6 @@ export class WebAttachments {
 			createdAt: Date.now(),
 			complete: false,
 		};
-		this.active.add(id);
 		let file: FileHandle | undefined;
 		let reader: UploadReader | undefined;
 		let complete = false;
@@ -196,6 +236,18 @@ export class WebAttachments {
 			void reader?.cancel(signal?.reason).catch(() => {});
 		};
 		try {
+			// Every record on disk that is not an upload in flight, plus the
+			// uploads in flight (this one included).
+			const held = (await readdir(this.directory)).filter((name) => {
+				const match = /^([0-9a-f-]+)\.json$/.exec(name);
+				return match !== null && !this.active.has(match[1]);
+			}).length;
+			if (held + this.active.size > this.limits.maxStored)
+				throw new AttachmentLimitError(
+					429,
+					"too_many_attachments",
+					`At most ${this.limits.maxStored} attachments may be held; delete some first`,
+				);
 			await writeFile(paths.metadata, JSON.stringify(stored), {
 				mode: 0o600,
 				flag: "wx",
@@ -208,6 +260,12 @@ export class WebAttachments {
 			while (true) {
 				const next = await uploadReader.read();
 				if (next.done) break;
+				if (stored.size + next.value.byteLength > this.limits.maxBytes)
+					throw new AttachmentLimitError(
+						413,
+						"payload_too_large",
+						`Attachment exceeds ${this.limits.maxBytes} bytes`,
+					);
 				let offset = 0;
 				while (offset < next.value.byteLength) {
 					const { bytesWritten } = await file.write(

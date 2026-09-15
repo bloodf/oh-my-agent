@@ -319,7 +319,11 @@ describe("serving the console", () => {
 		// the paths: an asset the browser cannot fetch is a blank console, and
 		// hardcoding the URLs here would hide exactly that. In-page anchors
 		// (accessibility skip links) are not assets — filter them out.
-		const html = await (await fetch(url)).text();
+		// A browser sends the shell's static cookie with every asset request,
+		// and nothing else: the asset URLs themselves carry no credential.
+		const shell = await fetch(url);
+		const cookie = (shell.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+		const html = await shell.text();
 		const references = [...html.matchAll(/(?:src|href)="([^"]+)"/g)]
 			.map((match) => match[1] as string)
 			.filter((reference) => !reference.startsWith("#"));
@@ -331,7 +335,7 @@ describe("serving the console", () => {
 		};
 		for (const reference of references) {
 			const asset = new URL(reference, url);
-			const response = await fetch(asset);
+			const response = await fetch(asset, { headers: { Cookie: cookie } });
 			expect(`${reference} -> ${response.status}`).toBe(`${reference} -> 200`);
 			const extension = reference.includes(".css") ? ".css" : ".js";
 			expect(response.headers.get("content-type")).toContain(
@@ -439,7 +443,7 @@ describe("lazy chunks", () => {
 		expect(statSync(join(consoleDir, "app.js")).size).toBeLessThan(1_500_000);
 	});
 
-	test("a chunk is served immutable and gzipped, and the shell mints its URL with the token", async () => {
+	test("a chunk is served immutable and gzipped, and the shell leaves the token out of its URLs", async () => {
 		const booted = await boot();
 		const url = printedConsoleUrl(booted.logs);
 		const token = url.searchParams.get("token") as string;
@@ -449,11 +453,11 @@ describe("lazy chunks", () => {
 		);
 		if (chunk === undefined) throw new Error("no mermaid chunk built");
 
-		// The shell tells app.js how to fetch a chunk: same token, as a query.
+		// Chunks import each other by relative URL, so the token cannot ride
+		// along as a query; the shell carries it nowhere.
 		const html = await (await fetch(url)).text();
-		expect(html).toContain(
-			`window.__omaAsset=(n)=>"/"+n+"?token=${encodeURIComponent(token)}"`,
-		);
+		expect(html).not.toContain(token);
+		expect(html).not.toContain("__omaAsset");
 
 		// Bun's fetch asks for gzip on its own; ask for identity to see the
 		// uncompressed wire body.
@@ -485,6 +489,73 @@ describe("lazy chunks", () => {
 				.status,
 		).toBe(404);
 		expect((await fetch(new URL(`/${chunk}`, url))).status).toBe(401);
+	});
+});
+
+describe("static cookie", () => {
+	/** The Set-Cookie pair (`name=value`) and its attributes, lowercased. */
+	const parseSetCookie = (header: string | null) => {
+		if (header === null) throw new Error("no Set-Cookie on the shell");
+		const [pair = "", ...attributes] = header.split(";").map((p) => p.trim());
+		return {
+			pair,
+			value: pair.slice(pair.indexOf("=") + 1),
+			attributes: attributes.map((a) => a.toLowerCase()),
+		};
+	};
+
+	test("a token-bearing shell load sets a static-only cookie that reloads the console", async () => {
+		const booted = await boot();
+		const url = printedConsoleUrl(booted.logs);
+		const token = url.searchParams.get("token") as string;
+		const consoleDir = join(import.meta.dir, "..", "src", "console");
+		const files = await readdir(consoleDir);
+		// A chunk that is only reached through another chunk's static import:
+		// the shape the browser requests with no query at all.
+		const nested = files.find(
+			(f) => f.startsWith("chunk-") && !f.startsWith("chunk-mermaid"),
+		);
+		if (nested === undefined) throw new Error("no nested chunk built");
+
+		const first = await fetch(url);
+		expect(first.status).toBe(200);
+		const cookie = parseSetCookie(first.headers.get("set-cookie"));
+		const port = new URL(url).port;
+		expect(cookie.pair.startsWith(`oma-static-${port}=`)).toBe(true);
+		expect(cookie.attributes).toEqual(
+			expect.arrayContaining(["path=/", "httponly", "samesite=strict"]),
+		);
+		// Loopback is plain HTTP; a Secure cookie would never be stored.
+		expect(cookie.attributes).not.toContain("secure");
+		expect(cookie.value).not.toContain(token);
+		expect(cookie.value.length).toBeGreaterThan(0);
+
+		const withCookie = { headers: { Cookie: cookie.pair } };
+		const bare = (path: string) => new URL(path, `http://${url.host}`);
+		// A reload: `/` with no token anywhere, only the cookie.
+		const reload = await fetch(bare("/"), withCookie);
+		expect(reload.status).toBe(200);
+		expect(await reload.text()).toContain('<div id="root">');
+		for (const path of ["/app.js", "/style.css", `/${nested}`]) {
+			const response = await fetch(bare(path), withCookie);
+			expect(`${path} -> ${response.status}`).toBe(`${path} -> 200`);
+		}
+
+		// The cookie is not an API credential, nor a WebSocket one.
+		expect((await fetch(bare("/api/channels"), withCookie)).status).toBe(401);
+		expect((await fetch(bare("/api/events"), withCookie)).status).toBe(401);
+		// And nothing but the exact derived value opens a static file.
+		for (const forged of [
+			`oma-static-${port}=${token}`,
+			`oma-static-${port}=${cookie.value}x`,
+			`oma-static-${Number(port) + 1}=${cookie.value}`,
+		]) {
+			const response = await fetch(bare("/"), {
+				headers: { Cookie: forged },
+			});
+			expect(`${forged} -> ${response.status}`).toBe(`${forged} -> 401`);
+		}
+		expect((await fetch(bare("/"))).status).toBe(401);
 	});
 });
 

@@ -984,6 +984,18 @@ export async function runCli(
 			: argv.slice(argv[flagEnd] === "--" ? flagEnd + 1 : flagEnd);
 	const json = flagPart.includes("--json");
 	const args = positional;
+	const io = opts.io ?? {
+		stdout: (text: string) => process.stdout.write(text),
+		stderr: (text: string) => process.stderr.write(text),
+	};
+	// USAGE defines one leading flag. Ignoring any other let a typo such as
+	// `--jsn` run the verb with human output a script would then misparse.
+	const unknownFlag = flagPart.find((arg) => arg !== "--json");
+	if (unknownFlag !== undefined) {
+		write(io, false, `unknown flag: ${unknownFlag}`, false);
+		write(io, false, USAGE, false);
+		return 2;
+	}
 	const agentDir =
 		opts.agentDir ?? process.env.PI_CODING_AGENT_DIR ?? getAgentDir();
 	const stateDir = join(agentDir, STATE_DIR);
@@ -1000,10 +1012,6 @@ export async function runCli(
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
 	const client = createCliClient(join(stateDir, "daemon.sock"), operatorToken);
-	const io = opts.io ?? {
-		stdout: (text: string) => process.stdout.write(text),
-		stderr: (text: string) => process.stderr.write(text),
-	};
 	const readStdin = opts.readStdin ?? (() => Bun.stdin.text());
 
 	try {

@@ -12,7 +12,7 @@ const HOPS = [
 ];
 
 const GUARDS = [
-	"OMA_CONSOLE_ORIGIN is required; the daemon refuses to boot without it.",
+	"In remote mode with the console enabled, OMA_CONSOLE_ORIGIN is required; the daemon refuses to boot without it.",
 	"A routable OMA_CONSOLE_HOST, OMA_CONTROL_HOST, or gateway host is refused in every mode.",
 	"console-token and console-proxy-secret must be mode 0600 or boot stops.",
 	"One-time, path-bound tickets authenticate the shell, assets, and WebSocket upgrade.",
@@ -69,8 +69,8 @@ export default function Remote() {
 				</div>
 
 				<p className="fine-print">
-					Caddy and SSH-tunnel recipes were run against real Caddy-terminated TLS; the <code>tailscale serve</code> recipe is
-					unverified.{" "}
+					The Caddy, SSH-tunnel, and <code>tailscale serve</code> recipes each passed 11 of 11 checks against a real proxy; public
+					ACME issuance for the Caddy recipe is still unverified.{" "}
 					<a className="text-link" href={DOCS.remote} target="_blank" rel="noreferrer">
 						Read the remote exposure runbook <ArrowUpRight size={14} aria-hidden="true" />
 					</a>

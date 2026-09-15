@@ -28,5 +28,5 @@ Add web-next/, a Next.js app that renders pages on the server and holds the oper
 
 | Claim | Source |
 |---|---|
-| The Next console against a real daemon | [`tests/console-next.test.ts`](../../../tests/console-next.test.ts) |
+| The Next console against a real daemon, removed by ADR-018 | `04f359c` |
 | The daemon's own console serving | [`src/daemon/console-api.ts`](../../../src/daemon/console-api.ts) |

@@ -7,7 +7,7 @@ import { ensureLive } from "./activity";
 import { subscribe } from "./bus";
 import { DEMO_TOKEN } from "./demoToken";
 import { handleApi, hasOperatorToken } from "./router";
-import { recordUpload } from "./routes/workspace";
+import { MAX_UPLOAD_BYTES, recordUpload } from "./routes/workspace";
 
 const LATENCY_MS = [35, 110] as const;
 const delay = () => new Promise((resolve) => setTimeout(resolve, LATENCY_MS[0] + Math.random() * (LATENCY_MS[1] - LATENCY_MS[0])));
@@ -194,6 +194,9 @@ function installXhr(): void {
 						if (!hasOperatorToken(demo.headers)) {
 							demo.status = 401;
 							demo.response = JSON.stringify({ error: { code: "unauthorized", message: "Operator token refused" } });
+						} else if (total > MAX_UPLOAD_BYTES) {
+							demo.status = 413;
+							demo.response = JSON.stringify({ error: { code: "payload_too_large", message: "Attachment exceeds 25 MiB" } });
 						} else if (!name) {
 							demo.status = 400;
 							demo.response = JSON.stringify({ error: { code: "workspace_error", message: "Attachment name is required" } });
@@ -227,12 +230,27 @@ function installXhr(): void {
 }
 
 let installed = false;
+const originals = { fetch: undefined as typeof fetch | undefined, WebSocket: undefined as typeof WebSocket | undefined, XMLHttpRequest: undefined as typeof XMLHttpRequest | undefined };
 
-/** Patch the browser seams once, before the console mounts. */
-export function installDemoTransport(): void {
-	if (installed || typeof window === "undefined") return;
-	installed = true;
-	installFetch();
-	installWebSocket();
-	installXhr();
+function uninstallDemoTransport(): void {
+	if (!installed) return;
+	installed = false;
+	if (originals.fetch) globalThis.fetch = originals.fetch;
+	if (originals.WebSocket) globalThis.WebSocket = originals.WebSocket;
+	if (originals.XMLHttpRequest) globalThis.XMLHttpRequest = originals.XMLHttpRequest;
+}
+
+/** Patch the browser seams once, before the console mounts; the result undoes it. */
+export function installDemoTransport(): () => void {
+	if (typeof window === "undefined") return () => {};
+	if (!installed) {
+		installed = true;
+		originals.fetch = globalThis.fetch;
+		originals.WebSocket = globalThis.WebSocket;
+		originals.XMLHttpRequest = globalThis.XMLHttpRequest;
+		installFetch();
+		installWebSocket();
+		installXhr();
+	}
+	return uninstallDemoTransport;
 }

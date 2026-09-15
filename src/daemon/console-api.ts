@@ -46,7 +46,12 @@
  * per room.
  */
 
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+	createHash,
+	createHmac,
+	randomBytes,
+	timingSafeEqual,
+} from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join, resolve, sep } from "node:path";
@@ -80,6 +85,7 @@ import {
 	type ScheduleRecord,
 } from "./socket";
 import type { Supervisor } from "./supervisor";
+import { MAX_ATTACHMENT_BYTES } from "./web-attachments";
 import { handleWebRoute, type WebServices } from "./web-routes";
 
 /** Loopback: a console reachable from the network is a rooms leak. */
@@ -174,6 +180,34 @@ const REACTION_WINDOW = 200;
  * the same reason the socket drops them: the digest is derived, and the path
  * rides beside the definition rather than inside it.
  */
+/**
+ * The definition fields a remote request without `OMA_REMOTE_FULL_CONTROL`
+ * may create or edit. An allowlist, so a field added to the schema later is
+ * refused remotely until someone decides it is harmless. Everything else is
+ * policy an agent runs under: its sandbox, tools, MCP servers, skills, body,
+ * spawn permissions, wake rules, schedules, automations, and workspace.
+ * Relaxing any of those on a definition and then injecting (or letting a
+ * spawning peer start it) reaches what a refused Start would have reached.
+ * `body` is required at creation, so creating an agent remotely needs full
+ * control too.
+ */
+const REMOTE_EDITABLE_DEFINITION_FIELDS: ReadonlySet<string> = new Set([
+	"name",
+	"description",
+	"model",
+	"thinkingLevel",
+	"rooms",
+]);
+
+/** The first submitted field a remote request without full control may not set. */
+function remotelyRefusedField(
+	payload: Record<string, unknown>,
+): string | undefined {
+	return Object.keys(payload).find(
+		(field) => !REMOTE_EDITABLE_DEFINITION_FIELDS.has(field),
+	);
+}
+
 const WIRE_DEFINITION_FIELDS = [
 	"name",
 	"description",
@@ -492,23 +526,52 @@ export async function startConsoleApi(
 		return url.searchParams.get("token") ?? undefined;
 	};
 
+	/**
+	 * The console's module graph imports chunks from chunks with plain
+	 * relative URLs, and a reload asks for `/` with nothing in the address bar,
+	 * so static requests need a credential the browser sends by itself: a
+	 * cookie. It never carries the operator token. On loopback it holds an
+	 * HMAC of the token, so rotating the token revokes it; in remote mode it
+	 * holds the asset pass. Either way it opens static files and nothing else —
+	 * `/api/*` and the WebSocket never read it. Cookies ignore ports, so the
+	 * name carries this listener's port and two daemons on one host do not
+	 * overwrite each other.
+	 */
+	const staticCookieName = (): string => `oma-static-${server.port}`;
+	const staticCookie = (value: string, secure: boolean): string =>
+		`${staticCookieName()}=${value}; Path=/; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`;
+	const presentedStaticCookie = (request: Request): string | undefined => {
+		const name = `${staticCookieName()}=`;
+		for (const part of (request.headers.get("Cookie") ?? "").split(";")) {
+			const pair = part.trim();
+			if (pair.startsWith(name)) return pair.slice(name.length);
+		}
+		return undefined;
+	};
+	const loopbackStaticCredential = createHmac("sha256", token)
+		.update("console-static")
+		.digest("base64url");
+
 	const tickets = new Map<
 		string,
 		{ path: string; expiresAt: number; reusable?: boolean }
 	>();
 	/**
-	 * A chunk pass: one ticket, good for every `chunk-*.js` for as long as a
-	 * tab plausibly stays open, minted into the shell beside the one-time
-	 * asset tickets. Chunks are the same public code as app.js; the pass only
+	 * An asset pass: one ticket, good for app.js, style.css, and every
+	 * `chunk-*.js` for as long as a tab plausibly stays open, set as the
+	 * static cookie on the shell. The shell must load app.js by its bare URL:
+	 * chunks import `./app.js`, and a ticketed URL would make the browser run
+	 * a second copy of the app. These files are public code; the pass only
 	 * keeps an anonymous caller from pulling the bundle, and a diagram opened
-	 * an hour into a session must still be able to fetch its renderer.
+	 * an hour into a session must still be able to fetch its renderer. The
+	 * shell itself still needs a one-time ticket.
 	 */
-	const CHUNK_PASS_TTL_MS = 12 * 60 * 60 * 1000;
-	const mintChunkPass = (): string => {
+	const ASSET_PASS_TTL_MS = 12 * 60 * 60 * 1000;
+	const mintAssetPass = (): string => {
 		const ticket = randomBytes(32).toString("base64url");
 		tickets.set(ticket, {
-			path: "/chunk-",
-			expiresAt: Date.now() + CHUNK_PASS_TTL_MS,
+			path: "",
+			expiresAt: Date.now() + ASSET_PASS_TTL_MS,
 			reusable: true,
 		});
 		return ticket;
@@ -526,18 +589,28 @@ export async function startConsoleApi(
 		const value = url.searchParams.get("ticket");
 		if (value === null) return false;
 		const ticket = tickets.get(value);
-		if (ticket?.reusable) {
-			if (ticket.expiresAt < Date.now()) {
-				tickets.delete(value);
-				return false;
-			}
-			return isChunkPath(url.pathname) && url.pathname.startsWith(ticket.path);
-		}
+		// An asset pass travels only in the static cookie.
+		if (ticket?.reusable) return false;
 		tickets.delete(value);
 		return (
 			ticket !== undefined &&
 			ticket.path === url.pathname &&
 			ticket.expiresAt >= Date.now()
+		);
+	};
+	const assetPassAdmits = (request: Request, url: URL): boolean => {
+		const value = presentedStaticCookie(request);
+		if (value === undefined) return false;
+		const ticket = tickets.get(value);
+		if (!ticket?.reusable) return false;
+		if (ticket.expiresAt < Date.now()) {
+			tickets.delete(value);
+			return false;
+		}
+		return (
+			url.pathname === "/app.js" ||
+			url.pathname === "/style.css" ||
+			isChunkPath(url.pathname)
 		);
 	};
 
@@ -1254,11 +1327,14 @@ export async function startConsoleApi(
 				if (!payload) {
 					return fail(400, "invalid_request", "Body is not valid JSON");
 				}
-				if ("workspace" in payload && !fullControl) {
+				const refusedField = fullControl
+					? undefined
+					: remotelyRefusedField(payload);
+				if (refusedField !== undefined) {
 					return fail(
 						403,
 						"remote_control_disabled",
-						"Full OMP control is disabled remotely",
+						`Full OMP control is disabled remotely; ${refusedField} cannot be set`,
 					);
 				}
 				const name =
@@ -1619,11 +1695,14 @@ export async function startConsoleApi(
 			if (!payload) {
 				return fail(400, "invalid_request", "Body is not valid JSON");
 			}
-			if ("workspace" in payload && !fullControl) {
+			const refusedField = fullControl
+				? undefined
+				: remotelyRefusedField(payload);
+			if (refusedField !== undefined) {
 				return fail(
 					403,
 					"remote_control_disabled",
-					"Full OMP control is disabled remotely",
+					`Full OMP control is disabled remotely; ${refusedField} cannot be changed`,
 				);
 			}
 			// The name identifies the file; renaming through an edit would
@@ -1839,15 +1918,28 @@ export async function startConsoleApi(
 			}
 
 			if (request.method === "GET") {
-				const rawAfter = url.searchParams.get("afterId");
 				const rawLimit = url.searchParams.get("limit");
-				const opts: { afterId?: number; limit?: number } = {};
-				if (rawAfter !== null) {
-					const afterId = Number(rawAfter);
-					if (!Number.isInteger(afterId) || afterId < 0) {
-						return fail(400, "invalid_request", "afterId must be an integer");
+				const opts: {
+					afterId?: number;
+					beforeId?: number;
+					limit?: number;
+					newest?: boolean;
+				} = {};
+				for (const name of ["afterId", "beforeId"] as const) {
+					const raw = url.searchParams.get(name);
+					if (raw === null) continue;
+					const cursor = Number(raw);
+					if (!Number.isInteger(cursor) || cursor < 0) {
+						return fail(400, "invalid_request", `${name} must be an integer`);
 					}
-					opts.afterId = afterId;
+					opts[name] = cursor;
+				}
+				const rawNewest = url.searchParams.get("newest");
+				if (rawNewest !== null) {
+					if (rawNewest !== "1") {
+						return fail(400, "invalid_request", "newest must be 1");
+					}
+					opts.newest = true;
 				}
 				if (rawLimit !== null) {
 					const limit = Number(rawLimit);
@@ -1958,11 +2050,15 @@ export async function startConsoleApi(
 
 	const consoleRoot = resolve(join(import.meta.dir, "..", "console"));
 
-	/** Serve one allowlisted console asset after its enclosing auth gate. */
+	/**
+	 * Serve one allowlisted console asset after its enclosing auth gate.
+	 * `cookie` is a Set-Cookie value for the static credential, sent when the
+	 * request authenticated some other way and the browser needs one.
+	 */
 	const serveStatic = async (
 		request: Request,
 		pathname: string,
-		presented?: string,
+		cookie?: string,
 		remoteRequest = false,
 	): Promise<Response> => {
 		const notFound = (): Response =>
@@ -1990,6 +2086,7 @@ export async function startConsoleApi(
 
 		if (filename !== "index.html") {
 			const headers: Record<string, string> = {
+				...(cookie === undefined ? {} : { "Set-Cookie": cookie }),
 				"content-type": file.type,
 				Vary: "Accept-Encoding",
 				// A hashed chunk never changes under its name; app.js does.
@@ -2008,36 +2105,17 @@ export async function startConsoleApi(
 			});
 		}
 		let html = await file.text();
-		// Lazy chunks are fetched by app.js at runtime with the same
-		// credential the shell's own assets carry: the loopback token as a
-		// query, or in remote mode a chunk pass minted for this shell.
-		const minter = (suffix: string): string =>
-			`<script>window.__omaAsset=(n)=>"/"+n+${JSON.stringify(suffix)};</script>`;
+		let shellCookie = cookie;
 		if (remoteRequest) {
-			const assetTicket = (asset: string): string =>
-				`${asset}?ticket=${encodeURIComponent(mintTicket(asset))}`;
-			html = html
-				.replace('<html lang="en"', '<html lang="en" data-auth-mode="remote"')
-				.replace('href="/style.css"', `href="${assetTicket("/style.css")}"`)
-				.replace('src="/app.js"', `src="${assetTicket("/app.js")}"`)
-				.replace(
-					'<script type="module"',
-					`${minter(`?ticket=${encodeURIComponent(mintChunkPass())}`)}<script type="module"`,
-				);
-		} else if (presented !== undefined) {
-			const query = `?token=${encodeURIComponent(presented)}`;
-			html = html
-				.replace(
-					/(<(?:script|link)\b[^>]*?\b(?:src|href)=")(\/[^"?]*)(")/g,
-					`$1$2${query}$3`,
-				)
-				.replace(
-					'<script type="module"',
-					`${minter(query)}<script type="module"`,
-				);
+			html = html.replace(
+				'<html lang="en"',
+				'<html lang="en" data-auth-mode="remote"',
+			);
+			shellCookie = staticCookie(mintAssetPass(), true);
 		}
 		return new Response(html, {
 			headers: {
+				...(shellCookie === undefined ? {} : { "Set-Cookie": shellCookie }),
 				"content-type": "text/html;charset=utf-8",
 				"Cache-Control": "no-store",
 				"Referrer-Policy": "no-referrer",
@@ -2048,8 +2126,9 @@ export async function startConsoleApi(
 	const server = Bun.serve<SocketData>({
 		hostname,
 		port: options.port ?? 0,
-		// Attachment route streams; JSON routes enforce 1 MiB in application code.
-		maxRequestBodySize: Number.MAX_SAFE_INTEGER,
+		// The attachment route streams and enforces its own per-file cap; JSON
+		// routes enforce 1 MiB in application code. This is the outer bound.
+		maxRequestBodySize: MAX_ATTACHMENT_BYTES + MAX_JSON_BODY_BYTES,
 		// A console sits open with nothing to say for minutes at a time; the
 		// default idle timeout would sever its live feed.
 		idleTimeout: 0,
@@ -2116,7 +2195,7 @@ export async function startConsoleApi(
 					);
 				}
 				if (isStatic) {
-					if (!consumeTicket(url)) {
+					if (!consumeTicket(url) && !assetPassAdmits(request, url)) {
 						if (url.pathname === "/") {
 							let shell: string;
 							try {
@@ -2135,7 +2214,9 @@ export async function startConsoleApi(
 									/\s*<link rel="stylesheet"[^>]*href="\/style\.css"[^>]*>/,
 									"",
 								)
-								.replace(/\s*<script[^>]*src="\/app\.js"[^>]*><\/script>/, "");
+								.replace(/\s*<script[^>]*src="\/app\.js"[^>]*><\/script>/, "")
+								// Vite preloads shared chunks; this page has no credential for them.
+								.replace(/\s*<link rel="modulepreload"[^>]*>/g, "");
 							return new Response(bootstrap, {
 								status: 401,
 								headers: {
@@ -2176,11 +2257,28 @@ export async function startConsoleApi(
 				}
 			} else {
 				const presented = presentedToken(request, url, isUpgrade || isStatic);
-				if (presented === undefined || !tokenMatches(presented, token)) {
+				const tokenValid =
+					presented !== undefined && tokenMatches(presented, token);
+				if (isStatic) {
+					if (tokenValid) {
+						return await serveStatic(
+							request,
+							url.pathname,
+							staticCookie(loopbackStaticCredential, false),
+						);
+					}
+					const cookie = presentedStaticCookie(request);
+					if (
+						cookie !== undefined &&
+						tokenMatches(cookie, loopbackStaticCredential)
+					) {
+						return await serveStatic(request, url.pathname);
+					}
 					return fail(401, "unauthorized", "Operator token required");
 				}
-				if (isStatic)
-					return await serveStatic(request, url.pathname, presented);
+				if (!tokenValid) {
+					return fail(401, "unauthorized", "Operator token required");
+				}
 			}
 
 			const connectionClass: AuditConnectionClass = remoteRequest

@@ -209,6 +209,79 @@ describe("temporary web attachments", () => {
 		expect(deleted?.status).toBe(204);
 	});
 
+	test("an upload past the byte cap is cut off mid-stream, removed, and answered 413", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "oma-attachments-"));
+		cleanups.push(() => rm(directory, { recursive: true, force: true }));
+		const attachments = new WebAttachments(directory, 60_000, { maxBytes: 8 });
+		let pulled = 0;
+		const endless = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				pulled += 1;
+				controller.enqueue(new Uint8Array(4));
+			},
+		});
+		const request = new Request("http://localhost/api/attachments", {
+			method: "POST",
+			headers: { "X-Attachment-Name": "big.bin" },
+			body: endless,
+			duplex: "half",
+		});
+		const response = await handleWebRoute(
+			request,
+			new URL(request.url),
+			services(attachments),
+			false,
+			() => {},
+		);
+		expect(response?.status).toBe(413);
+		expect(await response?.json()).toMatchObject({
+			error: { code: "payload_too_large" },
+		});
+		expect(pulled).toBeLessThan(10);
+		expect(await readdir(directory)).toEqual([]);
+
+		const exact = await attachments.upload(stream("12345678"), {
+			name: "exact.bin",
+			type: "application/octet-stream",
+		});
+		expect(exact.size).toBe(8);
+	});
+
+	test("held and concurrent upload counts are bounded", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "oma-attachments-"));
+		cleanups.push(() => rm(directory, { recursive: true, force: true }));
+		const attachments = new WebAttachments(directory, 60_000, {
+			maxStored: 2,
+			maxConcurrent: 1,
+		});
+		const meta = { name: "a.txt", type: "text/plain" };
+
+		const stalled = new ReadableStream<Uint8Array>({ pull() {} });
+		const abort = new AbortController();
+		const inFlight = attachments.upload(stalled, meta, abort.signal);
+		// The stalled upload has reserved its slot once its record is on disk.
+		const deadline = Date.now() + 5_000;
+		while ((await readdir(directory)).length === 0) {
+			if (Date.now() > deadline) throw new Error("upload never started");
+			await Bun.sleep(5);
+		}
+		const concurrent = attachments.upload(stream("x"), meta);
+		await expect(concurrent).rejects.toMatchObject({
+			status: 429,
+			code: "too_many_attachments",
+		});
+		abort.abort(new Error("client disconnected"));
+		await expect(inFlight).rejects.toThrow("client disconnected");
+
+		await attachments.upload(stream("1"), meta);
+		const second = await attachments.upload(stream("2"), meta);
+		await expect(attachments.upload(stream("3"), meta)).rejects.toMatchObject({
+			status: 429,
+		});
+		await attachments.delete(second.id);
+		expect((await attachments.upload(stream("3"), meta)).size).toBe(1);
+	});
+
 	test("remote attachment routes require full-control opt-in before body access", async () => {
 		const { attachments, directory } = await fixture();
 		const restricted = services(attachments);
@@ -226,5 +299,26 @@ describe("temporary web attachments", () => {
 		);
 		expect(response?.status).toBe(403);
 		expect(await readdir(directory)).toEqual([]);
+	});
+});
+
+describe("web route methods", () => {
+	test("a plan route answers 405 for a wrong method before reading any body", async () => {
+		const { attachments } = await fixture();
+		for (const [method, path] of [
+			["DELETE", "/api/channels/%23room/plans/plan-1"],
+			["GET", "/api/channels/%23room/plans/plan-1"],
+			["PUT", "/api/channels/%23room/plans"],
+		] as const) {
+			const url = `http://localhost${path}`;
+			const response = await handleWebRoute(
+				new Request(url, { method }),
+				new URL(url),
+				services(attachments),
+				false,
+				() => {},
+			);
+			expect(response?.status).toBe(405);
+		}
 	});
 });

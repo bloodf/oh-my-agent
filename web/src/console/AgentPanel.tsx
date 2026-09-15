@@ -385,6 +385,7 @@ export function AgentPanel({
                         }}
                       >
                         <Input
+                          id={`ops-inject-${agent.name}`}
                           aria-label={`Instruction for ${agent.name}`}
                           className="ops-inject-input"
                           placeholder="Instruction"

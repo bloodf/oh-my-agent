@@ -344,7 +344,7 @@ export function Message({
                   key={emoji}
                   type="button"
                   disabled={pendingEmoji !== null}
-                  aria-label={`${mine ? "Remove" : "Add"} ${emoji} reaction`}
+                  aria-label={`${emoji} ${actors.length}: ${mine ? "remove your" : "add"} reaction`}
                   aria-pressed={mine}
                   className={`${pill} ${mine ? minePill : otherPill} disabled:cursor-wait`}
                   onClick={() => void toggleReaction(emoji)}

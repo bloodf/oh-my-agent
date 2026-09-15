@@ -25,7 +25,7 @@ export function WorkspaceToolbar({ onSearch, onProfile }: { onSearch: () => void
       <div className="flex min-w-0 flex-1 justify-center">
         <button
           type="button"
-          aria-label="Search conversations and actions"
+          aria-label="Search oh-my-agent conversations and actions"
           onClick={onSearch}
           className="flex h-7 w-full max-w-[720px] min-w-0 items-center gap-2 rounded-md border border-[var(--ws-border)] bg-[var(--ws-search)] px-2.5 text-[13px] text-[var(--ws-text-dim)] shadow-[inset_0_1px_0_rgb(255_255_255/6%)] transition-colors hover:bg-[var(--ws-search-hover)] hover:text-[var(--ws-text)]"
         >

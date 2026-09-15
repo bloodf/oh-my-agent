@@ -333,13 +333,28 @@ export class RoomStore {
 		];
 	}
 
+	/**
+	 * A room's messages in id order.
+	 *
+	 * By default the page is the oldest `limit` rows after `afterId`. With
+	 * `newest` or `beforeId` it is the newest `limit` rows below `beforeId`
+	 * instead, and the thread roots of replies in that page are returned
+	 * ahead of it even when they are older, so a reply is never left without
+	 * its root. The page itself is always the last `limit` rows returned.
+	 */
 	async listMessages(
 		roomId: string,
-		opts: { afterId?: number; limit?: number },
+		opts: {
+			afterId?: number;
+			beforeId?: number;
+			limit?: number;
+			newest?: boolean;
+		},
 	): Promise<RoomMessage[]> {
 		if (!roomId) throw new Error("ROOM_NOT_FOUND");
-		if (opts.afterId !== undefined) {
-			if (!Number.isInteger(opts.afterId) || opts.afterId < 0)
+		for (const cursor of [opts.afterId, opts.beforeId]) {
+			if (cursor === undefined) continue;
+			if (!Number.isInteger(cursor) || cursor < 0)
 				throw new Error("INVALID_PAGE");
 		}
 		if (opts.limit !== undefined) {
@@ -353,16 +368,21 @@ export class RoomStore {
 			messageFilter = " AND id > ?";
 			args.push(opts.afterId);
 		}
+		if (opts.beforeId !== undefined) {
+			messageFilter += " AND id < ?";
+			args.push(opts.beforeId);
+		}
+		const tail = opts.newest === true || opts.beforeId !== undefined;
 		let limit = "";
 		if (opts.limit !== undefined) limit = ` LIMIT ${opts.limit}`;
 		const rows = this.db
 			.prepare(
 				`WITH RECURSIVE
-				selected AS (
-					SELECT * FROM messages WHERE room = ?${messageFilter} ORDER BY id ASC${limit}
+				page AS (
+					SELECT * FROM messages WHERE room = ?${messageFilter} ORDER BY id ${tail ? "DESC" : "ASC"}${limit}
 				),
 				ancestry(message_id, ancestor_id, parent_id) AS (
-					SELECT id, id, parent_id FROM selected
+					SELECT id, id, parent_id FROM page
 					UNION ALL
 					SELECT a.message_id, p.id, p.parent_id
 					FROM ancestry a JOIN messages p ON p.id = a.parent_id
@@ -370,6 +390,13 @@ export class RoomStore {
 				thread_roots AS (
 					SELECT message_id, MAX(CASE WHEN parent_id IS NULL AND ancestor_id != message_id THEN ancestor_id END) AS thread_root_id
 					FROM ancestry GROUP BY message_id
+				),
+				selected AS (
+					SELECT * FROM page${
+						tail
+							? " UNION SELECT m.* FROM messages m JOIN thread_roots tr ON m.id = tr.thread_root_id"
+							: ""
+					}
 				)
 				SELECT m.id, r.id AS room, m.author, m.body, m.mentions, m.created_at, m.parent_id,
 					tr.thread_root_id,

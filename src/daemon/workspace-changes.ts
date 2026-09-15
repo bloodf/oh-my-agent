@@ -9,9 +9,12 @@
  * Downstream consumers: the authenticated console API composed by `main.ts`.
  *
  * Failure modes: rejects invalid or inaccessible directories, non-repositories,
- * paths absent from current Git status, command failures, timeouts, and oversized
- * status output. Diff output is safely cut off and marked `truncated` instead.
- * Calls are read-only and safe to retry.
+ * paths absent from current Git status, paths that are not valid UTF-8, command
+ * failures, and timeouts. Oversized status output is cut back to whole entries and
+ * oversized diff output is cut off; both are marked `truncated`. Filenames that are
+ * not valid UTF-8 are listed with replacement characters. Submodule contents are
+ * never inspected, so their filters cannot run. Calls are read-only and safe to
+ * retry.
  *
  * Performance: status output is capped at 4 MiB, diff output at 1 MiB, stderr at
  * 64 KiB, and every Git process has a 10-second deadline.
@@ -40,6 +43,7 @@ export interface WorkspaceInspection {
 	root: string;
 	branch: string | null;
 	files: WorkspaceFileStatus[];
+	truncated: boolean;
 }
 
 export interface WorkspaceDiff {
@@ -60,6 +64,9 @@ interface RepositoryContext {
 	cwd: string;
 	root: string;
 	files: WorkspaceFileStatus[];
+	truncated: boolean;
+	/** Status paths decoded with replacement characters; Git cannot address them. */
+	undecodablePaths: Set<string>;
 	filterConfig: string[];
 }
 
@@ -262,13 +269,39 @@ async function canonicalDirectory(cwd: string): Promise<string> {
 	return canonical;
 }
 
-function parseStatus(bytes: Uint8Array): WorkspaceFileStatus[] {
-	const fields = decode(bytes).split("\0");
-	if (fields.at(-1) === "") fields.pop();
+function parseStatus(
+	bytes: Uint8Array,
+	truncated: boolean,
+): { files: WorkspaceFileStatus[]; undecodablePaths: Set<string> } {
+	// A truncated stream ends inside an entry: keep only NUL-terminated fields.
+	const complete = truncated
+		? bytes.subarray(0, bytes.lastIndexOf(0) + 1)
+		: bytes;
+	const undecodableFields = new Set<number>();
+	const fields: string[] = [];
+	let start = 0;
+	for (
+		let end = complete.indexOf(0);
+		end !== -1;
+		end = complete.indexOf(0, start)
+	) {
+		const raw = complete.subarray(start, end);
+		try {
+			fields.push(decode(raw));
+		} catch {
+			undecodableFields.add(fields.length);
+			fields.push(new TextDecoder().decode(raw));
+		}
+		start = end + 1;
+	}
+	if (start < complete.byteLength)
+		throw new Error("Git returned malformed status output");
 	const files: WorkspaceFileStatus[] = [];
+	const undecodablePaths = new Set<string>();
 
 	for (let index = 0; index < fields.length; index += 1) {
 		const entry = fields[index];
+		if (undecodableFields.has(index)) undecodablePaths.add(entry.slice(3));
 		if (entry.length < 4 || entry[2] !== " ")
 			throw new Error("Git returned malformed status output");
 		const indexStatus = entry[0];
@@ -288,14 +321,16 @@ function parseStatus(bytes: Uint8Array): WorkspaceFileStatus[] {
 			worktreeStatus === "C"
 		) {
 			const originalPath = fields[index + 1];
-			if (originalPath === undefined)
+			if (originalPath === undefined) {
+				if (truncated) break;
 				throw new Error("Git returned an incomplete rename status");
+			}
 			file.originalPath = originalPath;
 			index += 1;
 		}
 		files.push(file);
 	}
-	return files;
+	return { files, undecodablePaths };
 }
 
 async function repositoryContext(cwd: string): Promise<RepositoryContext> {
@@ -309,13 +344,22 @@ async function repositoryContext(cwd: string): Promise<RepositoryContext> {
 	const filterConfig = await safeFilterConfig(root);
 	const status = await runGit(
 		root,
-		["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-		{ config: filterConfig },
+		[
+			"status",
+			"--porcelain=v1",
+			"-z",
+			"--untracked-files=all",
+			"--ignore-submodules=dirty",
+		],
+		{ config: filterConfig, truncateStdout: true },
 	);
+	const parsed = parseStatus(status.stdout, status.truncated);
 	return {
 		cwd: canonicalCwd,
 		root,
-		files: parseStatus(status.stdout),
+		files: parsed.files,
+		truncated: status.truncated,
+		undecodablePaths: parsed.undecodablePaths,
 		filterConfig,
 	};
 }
@@ -390,6 +434,7 @@ export async function inspectWorkspace(
 		root: context.root,
 		branch: await currentBranch(context.root),
 		files: context.files,
+		truncated: context.truncated,
 	};
 }
 
@@ -401,6 +446,8 @@ export async function readWorkspaceDiff(
 	if (typeof staged !== "boolean") throw new Error("staged must be a boolean");
 	const context = await repositoryContext(cwd);
 	const file = validateChangedPath(context.root, path, context.files);
+	if (context.undecodablePaths.has(file.path))
+		throw new Error(`path is not valid UTF-8 and cannot be diffed: ${path}`);
 	if (staged && !file.staged)
 		throw new Error(`path has no staged change: ${path}`);
 	if (!staged && !file.unstaged && !file.untracked)
@@ -437,7 +484,12 @@ export async function readWorkspaceDiff(
 		];
 		acceptedExitCodes = [0, 1];
 	} else {
-		args = ["diff", "--no-ext-diff", "--no-textconv"];
+		args = [
+			"diff",
+			"--no-ext-diff",
+			"--no-textconv",
+			"--ignore-submodules=dirty",
+		];
 		if (staged) args.push("--cached");
 		args.push("--", `:(literal)${file.path}`);
 	}

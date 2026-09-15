@@ -34,7 +34,10 @@ function canRender() {
 	if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
 	try {
 		const canvas = document.createElement("canvas");
-		return Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl"));
+		const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+		// Release the probe right away; browsers cap live contexts per page.
+		gl?.getExtension("WEBGL_lose_context")?.loseContext();
+		return Boolean(gl);
 	} catch {
 		return false;
 	}

@@ -45,6 +45,8 @@ export interface SetupReport {
 	models?: ModelsListResult;
 	/** Crew peers that are not running, with the reason when the daemon has one. */
 	stoppedCrew: AgentStatus[];
+	/** Crew peers parked on a spent account budget; they resume after a bump. */
+	parkedCrew: AgentStatus[];
 	/** Crew peers missing from the daemon entirely: not seeded, or deleted. */
 	missingCrew: string[];
 	/** The default model is set but the daemon cannot route to it. */
@@ -52,6 +54,26 @@ export interface SetupReport {
 }
 
 const ok = (text: string) => `✓ ${text}`;
+
+/**
+ * Orders two `major.minor.patch` versions numerically, ignoring any
+ * prerelease suffix; negative when `a` is older. Parts that do not parse
+ * compare as zero, so an odd version string reads as drift, not a crash.
+ */
+function compareVersions(a: string, b: string): number {
+	const parts = (version: string) =>
+		version
+			.split("-")[0]
+			.split(".")
+			.map((part) => Number.parseInt(part, 10) || 0);
+	const left = parts(a);
+	const right = parts(b);
+	for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+		const diff = (left[i] ?? 0) - (right[i] ?? 0);
+		if (diff !== 0) return diff;
+	}
+	return 0;
+}
 const bad = (text: string) => `✗ ${text}`;
 
 /** Run every check and describe what was found and what to do next. */
@@ -64,6 +86,7 @@ export async function collectSetupReport(
 		lines,
 		ready: false,
 		stoppedCrew: [],
+		parkedCrew: [],
 		missingCrew: [],
 		defaultUnroutable: false,
 	};
@@ -87,7 +110,7 @@ export async function collectSetupReport(
 	lines.push(
 		drift
 			? bad(
-					`daemon ${daemon.version} is older than this plugin ${pluginVersion} — /cli daemon restart`,
+					`daemon ${daemon.version} is ${compareVersions(daemon.version ?? "", pluginVersion ?? "") > 0 ? "newer" : "older"} than this plugin ${pluginVersion} — /cli daemon restart`,
 				)
 			: ok(`daemon ${daemon.version ?? ""} up, ${daemon.agents.length} agents`),
 	);
@@ -132,6 +155,7 @@ export async function collectSetupReport(
 		const agent = byName.get(name);
 		if (agent === undefined) report.missingCrew.push(name);
 		else if (agent.state === "stopped") report.stoppedCrew.push(agent);
+		else if (agent.state === "parked") report.parkedCrew.push(agent);
 	}
 	const running = CREW.filter((n) => byName.get(n)?.state === "running");
 	if (running.length === CREW.length) {
@@ -142,6 +166,13 @@ export async function collectSetupReport(
 			lines.push(
 				bad(
 					`${agent.name} stopped${agent.lastError ? `: ${agent.lastError}` : ""} — /spawn ${agent.name}`,
+				),
+			);
+		}
+		for (const agent of report.parkedCrew) {
+			lines.push(
+				bad(
+					`${agent.name} parked: account ${agent.account} is out of budget — /cli bump ${agent.account} <usd>`,
 				),
 			);
 		}

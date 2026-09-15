@@ -965,57 +965,65 @@ describe("remote console ticket authentication", () => {
 			expect(shell.status).toBe(200);
 			expect((await use("/", boundary)).status).toBe(401);
 			const html = await shell.text();
-			const style = /href="(\/style\.css\?ticket=[^"]+)"/.exec(html)?.[1];
-			const script = /src="(\/app\.js\?ticket=[^"]+)"/.exec(html)?.[1];
-			if (style === undefined || script === undefined) {
-				throw new Error("Authenticated shell carried no asset tickets");
-			}
-			// The chunk pass: minted into the same shell, reusable for every
-			// built chunk and nothing else, so a diagram opened later still
-			// loads its renderer.
-			const pass = /__omaAsset=\(n\)=>"\/"\+n\+"\?ticket=([^"]+)"/.exec(
-				html,
-			)?.[1];
-			if (pass === undefined)
-				throw new Error("Authenticated shell carried no chunk pass");
+			// The shell loads its assets by bare URL, because chunks import
+			// `./app.js` and a ticketed entry would run the app twice. They
+			// authenticate with the asset pass: set as a cookie on this shell,
+			// reusable for app.js, style.css, and every built chunk, so a diagram
+			// opened later still loads its renderer and a chunk's relative
+			// imports carry it without any query.
+			expect(html).toContain('src="/app.js"');
+			expect(html).toContain('href="/style.css"');
+			const setCookie = shell.headers.get("set-cookie");
+			if (setCookie === null)
+				throw new Error("Authenticated shell carried no asset pass");
+			const [pair = "", ...attributes] = setCookie
+				.split(";")
+				.map((part) => part.trim().toLowerCase());
+			expect(attributes).toEqual(
+				expect.arrayContaining([
+					"path=/",
+					"httponly",
+					"samesite=strict",
+					"secure",
+				]),
+			);
+			const cookiePair = setCookie.split(";")[0] as string;
+			expect(pair.startsWith("oma-static-")).toBe(true);
+			const pass = cookiePair.slice(cookiePair.indexOf("=") + 1);
+			expect(html).not.toContain(pass);
+			const withPass = (path: string) =>
+				fetch(anonymous(booted.handle, path, booted.localUrl), {
+					headers: { ...forwarded, Cookie: cookiePair },
+				});
 			const chunk = (
 				await readdir(join(import.meta.dir, "..", "src", "console"))
 			).find((f) => f.startsWith("chunk-mermaid"));
 			if (chunk === undefined) throw new Error("no mermaid chunk built");
-			for (let attempt = 0; attempt < 2; attempt++) {
-				expect((await use(`/${chunk}`, decodeURIComponent(pass))).status).toBe(
-					200,
-				);
+			for (const path of [`/${chunk}`, "/app.js", "/style.css"]) {
+				for (let attempt = 0; attempt < 2; attempt++) {
+					const response = await withPass(path);
+					expect(`${path} -> ${response.status}`).toBe(`${path} -> 200`);
+				}
 			}
-			expect((await use("/app.js", decodeURIComponent(pass))).status).toBe(401);
-			expect(
-				(
-					await fetch(anonymous(booted.handle, `/${chunk}`, booted.localUrl), {
-						headers: forwarded,
-					})
-				).status,
-			).toBe(401);
-			expect(
-				(
-					await fetch(new URL(style, booted.localUrl), {
-						headers: forwarded,
-					})
-				).status,
-			).toBe(200);
-			expect(
-				(
-					await fetch(new URL(style, booted.localUrl), {
-						headers: forwarded,
-					})
-				).status,
-			).toBe(401);
-			expect(
-				(
-					await fetch(new URL(script, booted.localUrl), {
-						headers: forwarded,
-					})
-				).status,
-			).toBe(200);
+			// Not the shell, not the API, not the WebSocket.
+			expect((await withPass("/")).status).toBe(401);
+			expect((await withPass("/api/channels")).status).toBe(401);
+			expect((await withPass("/api/events")).status).toBe(401);
+			// And only as the cookie: the same value as a query ticket is refused,
+			// without being consumed.
+			expect((await use(`/${chunk}`, pass)).status).toBe(401);
+			expect((await withPass(`/${chunk}`)).status).toBe(200);
+			for (const path of [`/${chunk}`, "/app.js", "/style.css"]) {
+				const response = await fetch(
+					anonymous(booted.handle, path, booted.localUrl),
+					{ headers: forwarded },
+				);
+				expect(`${path} -> ${response.status}`).toBe(`${path} -> 401`);
+			}
+			// A pass outlives the one-time tickets, but not its own lifetime.
+			now += 12 * 60 * 60 * 1000 + 1;
+			expect((await withPass("/app.js")).status).toBe(401);
+			now -= 12 * 60 * 60 * 1000 + 1;
 
 			const expired = await mint("/api/session");
 			now += 30_001;

@@ -1,4 +1,5 @@
-import { AUTHENTICATION_REQUIRED, readToken } from "./api";
+import { AUTHENTICATION_REQUIRED } from "./api";
+import { readToken } from "./token";
 
 export type ManagedAttachment = {
   id: string;
@@ -21,10 +22,17 @@ function errorMessage(xhr: XMLHttpRequest): string {
   return xhr.status ? `Upload failed: HTTP ${xhr.status}` : "Upload failed.";
 }
 
-/** Uploads the browser File directly through XHR so bytes are never copied into JS memory. */
+/**
+ * Uploads the browser File directly through XHR so bytes are never copied into JS memory.
+ * XHR cannot go through `api()`, so a 401 reports to `onUnauthorized` here, the same way.
+ */
 export function uploadAttachment(
   file: File,
-  options: { signal?: AbortSignal; onProgress?: (loaded: number, total: number) => void } = {},
+  options: {
+    signal?: AbortSignal;
+    onProgress?: (loaded: number, total: number) => void;
+    onUnauthorized?: () => void;
+  } = {},
 ): AttachmentUpload {
   const xhr = new XMLHttpRequest();
   const { token, remoteMode } = readToken();
@@ -52,7 +60,10 @@ export function uploadAttachment(
     xhr.onerror = () => reject(new Error("Upload failed. Check the daemon connection."));
     xhr.onabort = () => reject(new DOMException("Upload cancelled", "AbortError"));
     xhr.onload = () => {
-      if (remoteMode && xhr.status === 401) return reject(AUTHENTICATION_REQUIRED);
+      if (xhr.status === 401) {
+        options.onUnauthorized?.();
+        return reject(AUTHENTICATION_REQUIRED);
+      }
       if (xhr.status < 200 || xhr.status >= 300) return reject(new Error(errorMessage(xhr)));
       try {
         resolve(JSON.parse(xhr.responseText) as ManagedAttachment);
@@ -66,16 +77,9 @@ export function uploadAttachment(
   return { promise, cancel: () => { if (started) xhr.abort(); } };
 }
 
-export async function deleteManagedAttachment(id: string): Promise<void> {
-  const { token, remoteMode } = readToken();
-  const response = await fetch(`/api/attachments/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers: { "X-Operator-Token": token },
-  });
-
-  if (remoteMode && response.status === 401) throw AUTHENTICATION_REQUIRED;
-  if (response.ok) return;
-  const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-  throw new Error(payload?.error?.message ?? `Could not remove upload: HTTP ${response.status}`);
+export async function deleteManagedAttachment(
+  id: string,
+  call: (path: string, init: { method: string }) => Promise<unknown>,
+): Promise<void> {
+  await call(`/api/attachments/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
-

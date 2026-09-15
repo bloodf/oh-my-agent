@@ -6,6 +6,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-15
+
 ### Changed
 
 - The web console is redesigned after Slack desktop: a labeled icon rail, a gradient sidebar with a conversation filter, unread badges, and presence dots on direct messages, a toolbar with a centered search field, a channel header with a member stack and underline tabs, messages with a floating action toolbar, thread summary rows, and date pills, a composer with a Markdown formatting row and a green send button, and Slack-style sheets and dialogs. Behavior, keyboard access, and every element id are unchanged.
@@ -18,11 +20,29 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 - Avatars can be images. The operator and every agent can have an uploaded PNG, JPEG, WebP, or GIF avatar, resized in the browser to fit 256×256; the daemon accepts it as a base64 data URL of at most 200 KB and still refuses anything else. The avatar editor opens from **Profile and avatars**, from an agent's settings, from its avatar in the Members tab, and from the create dialogs.
 - `website/`, a Next.js site for Vercel: a single-page animated homepage at `/` and, at `/console`, the real console from `web/src` running against a browser-local mock of the daemon's console API, seeded with agents, accounts, rooms, plans, changes, artifacts, schedules, and chats. Nothing in the daemon, the console, or the npm package changes.
 
+### Removed
+
+- `web-next/` and the `console:next:*` scripts. The daemon's bundled console is the only console.
+
 ### Fixed
 
+- Reloading the console no longer shows a raw 401 page, and Mermaid diagrams render on a real daemon. Static files now authenticate with a per-port HttpOnly cookie that opens static files only, so reloads and lazily loaded chunks carry a credential. The browser suite now loads the console through the daemon, which is why neither failure showed up in CI before.
+- Rooms with more than 500 messages open on their newest messages, with **Load older messages** at the top. Before, the console loaded the oldest 500 and never showed anything newer. `GET /api/channels/:id/messages` accepts `newest=1` and `beforeId`.
+- **Refresh latest plan** after a save conflict loads the other writer's version. Before, it kept the stale draft, and the next save silently overwrote the other edit.
+- A streaming OMP chat no longer makes every open console refetch on each token. Refetches are batched and only for the chat in view.
+- The Changes view waits for typing to stop, ignores stale answers, and keeps each room's working directory separate. One non-UTF-8 filename, a submodule filter driver, or very large status output no longer breaks it.
+- Unread badges cover rooms you have not opened yet, a failed first load recovers when the socket connects, and repeated reconnect failures suggest the daemon may have a new address.
+- Uploads are capped at 25 MiB per file and by count. Concurrent profile saves keep both edits. A bad payload shows an error in its view instead of blanking the console. Cancelling the workspace picker sends nothing, and the profile dialog keeps unsaved edits when another console saves.
+- `omp-agent setup` reports parked crew peers, a failed boot stops workers it already started, chat storage uses a private directory, closing a chat removes its files, and unknown CLI flags are errors. `/logs daemon`, `/kill`, `/preset`, and `/edit` in the TUI match the CLI.
+- The website states six console themes, lists the `models` verb, and describes the `tailscale serve` recipe as verified. Its demo matches the daemon for image avatars, plan errors, stopped agents, and message paging, and CI now builds the website and checks the demo against the daemon's routes.
 - **Add schedule** in the agent sheet keeps an agent's existing schedules. It read the schedule list from the wrong level of the definition response and replaced every schedule with the new one.
 - The agent sheet's Schedules tab scrolls inside the sheet, so **Add schedule** stays reachable with many rows, and its rows no longer clip the Pause buttons.
 - The `tailscale serve` recipe in `docs/remote-exposure.md` binds its Caddy boundary to loopback and matches any host. As written before, Caddy listened on every interface, so a LAN client that sent `Host: 127.0.0.1:8443` reached the daemon over plaintext with the proxy secret injected, while tailnet requests never matched the site. The recipe also sets `trusted_proxies`, so the audit records the operator's tailnet address instead of `127.0.0.1`. Both were found by the first end-to-end run of that recipe on two tailnet devices, which now passes 11/11 checks.
+
+### Security
+
+- Remote console requests without `OMA_REMOTE_FULL_CONTROL` can change only an agent's name, description, model, thinking level, and rooms. Before, they could also turn off an agent's sandbox, add tools, or change its body, then send it a message. Creating an agent remotely now needs full control.
+- `web-next/`, the server-rendered console, is removed. Its proxy attached the operator token to every request with no authentication and listened on every interface, so anyone on the network, or any web page through a cross-origin form post, could control the daemon.
 
 ## [1.5.1] - 2026-09-12
 

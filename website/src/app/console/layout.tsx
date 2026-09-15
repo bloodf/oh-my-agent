@@ -5,6 +5,7 @@ import "./console.css";
 export const metadata: Metadata = {
 	title: "Console demo · oh-my-agent",
 	description: "The real oh-my-agent web console, running against a mocked in-browser daemon.",
+	alternates: { canonical: "/console" },
 };
 
 export default function ConsoleLayout({ children }: { children: ReactNode }) {

@@ -8,6 +8,8 @@ import { getState, update } from "../store";
 import type { ChatRecord, ManagedAttachment } from "../types";
 
 const MAX_DIFF = 64_000;
+/** The daemon's per-file upload cap; larger uploads answer 413. */
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 /** The daemon answers workspace failures as 400 `workspace_error`. */
 const refuse = (message: string): never => fail(400, "workspace_error", message);
@@ -48,7 +50,7 @@ export const workspaceRoutes: Route[] = [
 		const cwd = ctx.url.searchParams.get("cwd") ?? "";
 		if (!cwd.startsWith("/") || !isDirectory(cwd)) refuse(`Workspace is not a directory: ${cwd}`);
 		const repo = repoFor(cwd) ?? refuse(`Not a Git repository: ${normalizePath(cwd)}`);
-		return ok({ cwd: normalizePath(cwd), root: repo.root, branch: repo.branch, files: repo.files });
+		return ok({ cwd: normalizePath(cwd), root: repo.root, branch: repo.branch, files: repo.files, truncated: false });
 	}),
 
 	route("GET", /^\/api\/workspace\/diff$/, (ctx) => {

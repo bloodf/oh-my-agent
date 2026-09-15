@@ -649,6 +649,17 @@ describe("/preset", () => {
 		expect(bad.notices.join("\n")).toContain("unknown preset pirate");
 		expect(bad.notices.join("\n")).toContain("researcher");
 	});
+
+	test("accepts the CLI's name-first order when only the second word is a preset", async () => {
+		const daemon = await startDaemon([]);
+		const swapped = fakeIo();
+		await presetCommand(daemon.client, swapped, "ops-bot sre");
+		expect(swapped.notices.join("\n")).toContain("created ops-bot from sre");
+
+		const flagged = fakeIo();
+		await presetCommand(daemon.client, flagged, "night-bot --preset sre");
+		expect(flagged.notices.join("\n")).toContain("created night-bot from sre");
+	});
 });
 
 describe("/spawn", () => {
@@ -739,6 +750,32 @@ describe("/kill", () => {
 		expect(io.confirms).toHaveLength(1);
 		expect(daemon.workers.get("reviewer")?.state).toBe("running");
 	});
+
+	test("--keep-children is sent as keep_children, and a stray argument is refused", async () => {
+		const calls: { method: string; params: unknown }[] = [];
+		const spy = {
+			call: async <T>(method: string, params?: unknown): Promise<T> => {
+				calls.push({ method, params });
+				return { name: "reviewer", state: "stopped" } as T;
+			},
+		};
+		const io = fakeIo(true);
+		await killCommand(spy as never, io, "reviewer --keep-children");
+		expect(calls).toEqual([
+			{ method: "kill", params: { name: "reviewer", keep_children: true } },
+		]);
+		expect(io.confirms[0]?.message).toContain("children keep running");
+
+		const plain = fakeIo(true);
+		await killCommand(spy as never, plain, "reviewer");
+		expect(calls.at(-1)?.params).toEqual({ name: "reviewer" });
+
+		const bad = fakeIo(true);
+		await killCommand(spy as never, bad, "reviewer --keep");
+		expect(bad.confirms).toHaveLength(0);
+		expect(bad.notices.join("\n")).toContain("usage: /kill");
+		expect(calls).toHaveLength(2);
+	});
 });
 
 // ── /logs and /inject ───────────────────────────────────────────────────────
@@ -764,6 +801,26 @@ describe("operator steering", () => {
 		const limitedIo = fakeIo();
 		await logsCommand(daemon.client, limitedIo, "reviewer 2");
 		expect(limitedIo.notices).toEqual(["line 59\nline 60"]);
+	});
+
+	test("/logs daemon reads the daemon log, as the CLI does", async () => {
+		const calls: { method: string; params: unknown }[] = [];
+		const spy = {
+			call: async <T>(method: string, params?: unknown): Promise<T> => {
+				calls.push({ method, params });
+				return { name: "daemon", lines: ["booted"] } as T;
+			},
+		};
+		const io = fakeIo();
+		await logsCommand(spy as never, io, "daemon 5");
+		expect(calls).toEqual([
+			{
+				method: "logs_tail",
+				params: { name: "daemon", lines: 5, source: "daemon" },
+			},
+		]);
+		await logsCommand(spy as never, io, "reviewer");
+		expect(calls.at(-1)?.params).toEqual({ name: "reviewer", lines: 50 });
 	});
 
 	test("/inject confirms immediate delivery and queued delivery", async () => {
@@ -1091,6 +1148,8 @@ describe("extension factory", () => {
 
 		expect(registered).toContain("spawn");
 		expect(registered).toContain("kill");
+		expect(registered).toContain("edit");
+		expect(registered).toContain("preset");
 		expect(registered).toContain("rooms");
 		expect(registered).toContain("schedule");
 		expect(registered).toContain("logs");

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,11 +7,19 @@ import {
 	readWorkspaceDiff,
 } from "../src/daemon/workspace-changes";
 
-async function git(cwd: string, ...args: string[]): Promise<void> {
+async function git(cwd: string, ...args: string[]): Promise<string> {
+	return gitWithInput(cwd, "ignore", ...args);
+}
+
+async function gitWithInput(
+	cwd: string,
+	stdin: "ignore" | Uint8Array,
+	...args: string[]
+): Promise<string> {
 	const child = Bun.spawn({
 		cmd: ["git", ...args],
 		cwd,
-		stdin: "ignore",
+		stdin,
 		stdout: "pipe",
 		stderr: "pipe",
 	});
@@ -25,6 +33,7 @@ async function git(cwd: string, ...args: string[]): Promise<void> {
 			`git ${args.join(" ")} failed (${exitCode}): ${stderr || stdout}`,
 		);
 	}
+	return stdout;
 }
 
 async function withRepository<T>(
@@ -148,4 +157,126 @@ describe("workspace changes", () => {
 			expect(result.truncated).toBe(false);
 		});
 	});
+
+	test("clean filters configured inside a submodule never execute during inspection", async () => {
+		const scratch = await mkdtemp(join(tmpdir(), "oma-workspace-submodule-"));
+		try {
+			const upstream = join(scratch, "upstream");
+			const marker = join(scratch, "submodule-filter-marker");
+			await mkdir(upstream);
+			await git(upstream, "init", "--quiet");
+			await git(upstream, "config", "user.name", "Workspace Test");
+			await git(upstream, "config", "user.email", "workspace@example.test");
+			await writeFile(
+				join(upstream, ".gitattributes"),
+				"*.txt filter=nested\n",
+			);
+			await writeFile(join(upstream, "inner.txt"), "inner before\n");
+			await commitAll(upstream);
+
+			await withRepository(async (root) => {
+				await writeFile(join(root, "outer.txt"), "outer\n");
+				await commitAll(root);
+				await git(
+					root,
+					"-c",
+					"protocol.file.allow=always",
+					"submodule",
+					"add",
+					"--quiet",
+					upstream,
+					"nested",
+				);
+				await commitAll(root);
+
+				const nested = join(root, "nested");
+				// A clone keeps no identity of its own; CI has no global one.
+				await git(nested, "config", "user.name", "Workspace Test");
+				await git(nested, "config", "user.email", "workspace@example.test");
+				// Move the submodule commit so its gitlink shows as changed.
+				await writeFile(join(nested, "inner.txt"), "inner second\n");
+				await commitAll(nested);
+				await git(nested, "config", "filter.nested.clean", `touch '${marker}'`);
+				await git(nested, "config", "filter.nested.required", "true");
+				// Same size, new mtime: a dirty check must hash the content, which runs clean.
+				await writeFile(join(nested, "inner.txt"), "inner third!\n");
+
+				const inspection = await inspectWorkspace(root);
+				expect(await Bun.file(marker).exists()).toBe(false);
+				expect(inspection.files.map((file) => file.path)).toEqual(["nested"]);
+				expect(inspection.truncated).toBe(false);
+
+				const diff = await readWorkspaceDiff(root, "nested", false);
+				expect(diff.diff).toContain("Subproject commit");
+				expect(diff.diff).not.toContain("-dirty");
+				expect(await Bun.file(marker).exists()).toBe(false);
+			});
+		} finally {
+			await rm(scratch, { recursive: true, force: true });
+		}
+	});
+
+	test("a filename that is not valid UTF-8 does not break inspection", async () => {
+		await withRepository(async (root) => {
+			await writeFile(join(root, "tracked.txt"), "tracked before\n");
+			await commitAll(root);
+			await writeFile(join(root, "tracked.txt"), "tracked after\n");
+
+			// Stage a Latin-1 path through the index so the fixture works on
+			// filesystems that refuse non-UTF-8 names.
+			const blob = (
+				await gitWithInput(
+					root,
+					new TextEncoder().encode("latin1\n"),
+					"hash-object",
+					"-w",
+					"--stdin",
+				)
+			).trim();
+			const entry = Buffer.concat([
+				Buffer.from(`100644 ${blob}\t`),
+				Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x2e, 0x74, 0x78, 0x74]),
+				Buffer.from([0]),
+			]);
+			await gitWithInput(root, entry, "update-index", "-z", "--index-info");
+
+			const inspection = await inspectWorkspace(root);
+			const paths = inspection.files.map((file) => file.path).sort();
+			expect(paths).toEqual(["caf\uFFFD.txt", "tracked.txt"]);
+			await expect(
+				readWorkspaceDiff(root, "caf\uFFFD.txt", true),
+			).rejects.toThrow("not valid UTF-8");
+			const diff = await readWorkspaceDiff(root, "tracked.txt", false);
+			expect(diff.diff).toContain("+tracked after");
+		});
+	});
+
+	test("status output past the limit is truncated to whole entries instead of failing", async () => {
+		await withRepository(async (root) => {
+			await writeFile(join(root, "tracked.txt"), "tracked\n");
+			await commitAll(root);
+			// About 800 bytes per status entry, so 5,400 entries exceed 4 MiB.
+			const directory = join("a".repeat(200), "b".repeat(200), "c".repeat(200));
+			await mkdir(join(root, directory), { recursive: true });
+			const suffix = "x".repeat(190);
+			const count = 5_400;
+			for (let start = 0; start < count; start += 500) {
+				await Promise.all(
+					Array.from({ length: Math.min(500, count - start) }, (_, offset) =>
+						writeFile(join(root, directory, `${start + offset}-${suffix}`), ""),
+					),
+				);
+			}
+
+			const inspection = await inspectWorkspace(root);
+			expect(inspection.truncated).toBe(true);
+			expect(inspection.files.length).toBeGreaterThan(0);
+			expect(inspection.files.length).toBeLessThan(count);
+			const complete = new RegExp(`^${directory}/\\d+-${suffix}$`);
+			for (const file of inspection.files) {
+				expect(file.untracked).toBe(true);
+				expect(file.path).toMatch(complete);
+			}
+		});
+	}, 60_000);
 });

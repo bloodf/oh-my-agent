@@ -20,6 +20,7 @@ Contributor hub. Operator install and usage live in the [root README](../../READ
 | [testing.md](testing.md) | How to run and write tests, non-vacuity, flake rules |
 | [delivery.md](delivery.md) | Picking a task, adding a task, regenerating the tree |
 | [release.md](release.md) | Manual release ritual, changelog cut, GitHub settings |
+| [review-2026-09.md](review-2026-09.md) | September 2026 review of every surface: findings, severities, and the ordered fix list |
 
 ## Rules that bite
 
@@ -32,7 +33,7 @@ Contributor hub. Operator install and usage live in the [root README](../../READ
 
 ## Current tree
 
-**113 of 115 tasks Done.** Two remain Blocked:
+**118 of 120 tasks Done.** Two remain Blocked:
 
 | Task | Blocker |
 |---|---|

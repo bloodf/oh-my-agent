@@ -90,7 +90,7 @@ export function ProfileSection({ name, draft, set, disabled, persona, onPersona 
   );
 }
 
-export function ModelSection({ draft, set, disabled, catalog }: SectionProps & { catalog: ModelCatalog }) {
+export function ModelSection({ draft, set, disabled, catalog, locked = false }: SectionProps & { catalog: ModelCatalog; locked?: boolean }) {
   const [primary = "", ...fallbacks] = draft.model ?? [];
   const known = catalog.models.map((model) => `${model.provider}/${model.id}`);
   const options = primary && !known.includes(primary) ? [primary, ...known] : known;
@@ -119,13 +119,14 @@ export function ModelSection({ draft, set, disabled, catalog }: SectionProps & {
         <ChipList id="definition-model-fallbacks" label="Fallback models" values={fallbacks} suggestions={known.filter((model) => model !== primary)} placeholder="provider/model" disabled={disabled || !primary} onChange={(next) => setModels([primary, ...next])} />
       </Field>
       <Field id="definition-tools" label="Tools" optional hint="Native tool names the agent is limited to.">
-        <ChipList id="definition-tools" label="Tools" values={draft.tools ?? []} placeholder="read, edit, bash" disabled={disabled} onChange={(next) => set("tools", next)} />
+        <ChipList id="definition-tools" label="Tools" values={draft.tools ?? []} placeholder="read, edit, bash" disabled={disabled || locked} onChange={(next) => set("tools", next)} />
       </Field>
     </section>
   );
 }
 
-export function RoomsSection({ draft, set, disabled, channels, agentNames, fullControl, call }: SectionProps & {
+export function RoomsSection({ draft, set, disabled, channels, agentNames, fullControl, call, locked = false }: SectionProps & {
+  locked?: boolean;
   channels: string[];
   agentNames: string[];
   fullControl: boolean;
@@ -141,10 +142,10 @@ export function RoomsSection({ draft, set, disabled, channels, agentNames, fullC
         <ChipList id="definition-rooms" label="Channels and DMs" values={draft.rooms ?? []} suggestions={channels} placeholder="#engineering" disabled={disabled} onChange={(next) => set("rooms", next)} />
       </Field>
       <div className="grid gap-2">
-        <CheckRow id="definition-spawns-any" label="Can spawn any agent" hint="Off limits spawning to the agents listed below." checked={anySpawn} disabled={disabled} onChange={(checked) => set("spawns", checked ? "*" : spawns)} />
+        <CheckRow id="definition-spawns-any" label="Can spawn any agent" hint="Off limits spawning to the agents listed below." checked={anySpawn} disabled={disabled || locked} onChange={(checked) => set("spawns", checked ? "*" : spawns)} />
         {!anySpawn && (
           <Field id="definition-spawns" label="Can spawn" hint={spawns.length ? undefined : "Add at least one agent; an empty list is refused."}>
-            <ChipList id="definition-spawns" label="Can spawn" values={spawns} suggestions={agentNames} placeholder="agent name" disabled={disabled} onChange={(next) => set("spawns", next)} />
+            <ChipList id="definition-spawns" label="Can spawn" values={spawns} suggestions={agentNames} placeholder="agent name" disabled={disabled || locked} onChange={(next) => set("spawns", next)} />
           </Field>
         )}
       </div>
