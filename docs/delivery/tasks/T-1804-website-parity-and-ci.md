@@ -32,6 +32,8 @@ web-next is gone. CI builds and typechecks the website, runs the demo mock smoke
 - `website/package.json`
 - `website/scripts/mock-smoke.mjs`
 - `website/vercel.json`
+- `src/shared/agent-state.ts`
+- `src/shared/protocol.ts`
 - `website/src/app/(home)/home.css`
 - `website/src/app/(home)/layout.tsx`
 - `website/src/app/(home)/responsive.css`
@@ -111,7 +113,9 @@ web-next is gone. CI builds and typechecks the website, runs the demo mock smoke
 | [`website/next.config.ts`](../../../website/next.config.ts) | Edited | No dead Turbopack block. |
 | [`website/package.json`](../../../website/package.json) | Edited | Declares the console dependencies the build compiles. |
 | [`website/scripts/mock-smoke.mjs`](../../../website/scripts/mock-smoke.mjs) | Edited | Fails on unknown routes, unexpected shapes, and a changed frame set; covers every paging mode. |
-| [`website/vercel.json`](../../../website/vercel.json) | Edited | Frozen-lockfile installs. |
+| [`website/vercel.json`](../../../website/vercel.json) | Edited | Installs with Vercel's own Bun. |
+| [`src/shared/agent-state.ts`](../../../src/shared/agent-state.ts) | New | AgentState with no imports, so the demo mock typechecks without OMP installed. |
+| [`src/shared/protocol.ts`](../../../src/shared/protocol.ts) | Edited | Re-exports AgentState from agent-state.ts. |
 | [`website/src/app/(home)/home.css`](../../../website/src/app/%28home%29/home.css) | Edited | Contrast and focus fixes. |
 | [`website/src/app/(home)/layout.tsx`](../../../website/src/app/%28home%29/layout.tsx) | Edited | Canonical link. |
 | [`website/src/app/(home)/responsive.css`](../../../website/src/app/%28home%29/responsive.css) | Edited | Footer heading styles. |
