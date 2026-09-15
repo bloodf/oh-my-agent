@@ -24,6 +24,18 @@ Long-running `omp-agent` process. Composition root, control socket, persistence,
 | [`credential-gateway.ts`](../../src/daemon/credential-gateway.ts) | Per-worker scoped broker view and revocable bearer. |
 | [`account-registry.ts`](../../src/daemon/account-registry.ts) | Per-account quota, wake gating, subscription auto-resume. |
 | [`quota-state.ts`](../../src/daemon/quota-state.ts) | Metered/subscription state machine with generation guards. |
+| [`inference-gateway.ts`](../../src/daemon/inference-gateway.ts) | Per-worker scoped inference gateway over the broker, and the routable-model list behind `models_list`. |
+| [`default-model.ts`](../../src/daemon/default-model.ts) | Resolve OMP's default model role for peers whose definition names no model. |
+| [`default-peers.ts`](../../src/daemon/default-peers.ts) | Seed the shipped crew from `src/defaults/agents/` into the user store once; operator edits and deletions survive. |
+| [`presets.ts`](../../src/daemon/presets.ts) | The role preset library under `src/defaults/presets/`: shipped, never seeded, copied by `agent_create`. |
+| [`skill-roots.ts`](../../src/daemon/skill-roots.ts) | Map the package's `skills/` directory to the names a peer selects with `skills:`. |
+| [`artifacts.ts`](../../src/daemon/artifacts.ts) | Lavish HTML artifact sessions for the console: list them and resume one. |
+| [`profile.ts`](../../src/daemon/profile.ts) | Console display profile: operator and per-agent display names and avatars. |
+| [`web-routes.ts`](../../src/daemon/web-routes.ts) | Console routes for capabilities, room plans, workspace files and changes, attachments, and web chats, with the remote full-control gate. |
+| [`web-chats.ts`](../../src/daemon/web-chats.ts) | Independent web chats backed by native OMP RPC subprocesses. |
+| [`web-attachments.ts`](../../src/daemon/web-attachments.ts) | Private temporary uploads with per-file size, concurrency, and count limits and expiry. |
+| [`web-files.ts`](../../src/daemon/web-files.ts) | Operator-only directory browsing and attachment reference resolution for web chats. |
+| [`workspace-changes.ts`](../../src/daemon/workspace-changes.ts) | Read-only Git status and per-file diffs for one operator-selected worktree. |
 
 ## `src/worker/`
 
@@ -31,8 +43,9 @@ RPC subprocess lifecycle and the tools injected into each peer.
 
 | File | Purpose |
 |---|---|
-| [`lifecycle.ts`](../../src/worker/lifecycle.ts) | Start, prompt, park, resume, stop an RPC (or in-process) worker. `classifyAgentSpawn`. |
+| [`lifecycle.ts`](../../src/worker/lifecycle.ts) | Start, prompt, park, resume, stop an RPC (or in-process) worker. |
 | [`toolbelt.ts`](../../src/worker/toolbelt.ts) | Nine daemon-backed tools (`chat_*`, `agent_*`, `task_handoff`) over the unix socket. |
+| [`spawn-policy.ts`](../../src/worker/spawn-policy.ts) | `classifyAgentSpawn`: durable peer (declares rooms) versus native one-shot subtask. |
 | [`sandbox.ts`](../../src/worker/sandbox.ts) | Compile a typed policy to Seatbelt or `bwrap`; probe adapters. |
 | [`launch-gate.ts`](../../src/worker/launch-gate.ts) | Fail-closed sandbox launch: probe, then wrap. Never degrade silently. |
 
@@ -41,6 +54,7 @@ RPC subprocess lifecycle and the tools injected into each peer.
 | File | Purpose |
 |---|---|
 | [`store.ts`](../../src/rooms/store.ts) | SQLite rooms, threaded messages, reactions, mentions, subscriptions, read cursors. |
+| [`plans.ts`](../../src/rooms/plans.ts) | Editable plans attached to existing rooms, in the same SQLite database. |
 
 ## `src/extension/`
 
@@ -49,7 +63,9 @@ OMP TUI plugin. Socket-only: no direct DB access.
 | File | Purpose |
 |---|---|
 | [`index.ts`](../../src/extension/index.ts) | Extension factory: register commands and the status widget. Auto-starts the daemon on session start. |
-| [`commands.ts`](../../src/extension/commands.ts) | `/cli agents`, `/rooms`, `/spawn`, `/kill`, inject, logs, schedule, edit. |
+| [`commands.ts`](../../src/extension/commands.ts) | `/spawn`, `/preset`, `/kill`, `/edit`, `/logs`, `/inject`, `/rooms`, `/schedule`. |
+| [`setup.ts`](../../src/extension/setup.ts) | `/setup`: the shared checklist plus the fixes the TUI can apply. |
+| [`theme.ts`](../../src/extension/theme.ts) | The slice of OMP's theme the TUI surfaces use, with a plain fallback. |
 | [`widget.ts`](../../src/extension/widget.ts) | Daemon socket client and running/parked/unread status widget. |
 | [`ensure-daemon.ts`](../../src/extension/ensure-daemon.ts) | Probe the socket; spawn plugin-local `main.ts` if down. Not PATH. |
 | [`cli.ts`](../../src/extension/cli.ts) | `/cli` and `/console`: in-process `runCli`, no PATH. |
@@ -57,7 +73,7 @@ OMP TUI plugin. Socket-only: no direct DB access.
 
 ## `src/console/`
 
-Generated production output: `index.html`, `app.js`, `style.css`. Source lives in `web/` (React/shadcn). Regenerate with `bun run console:build`. The daemon serves these three files via the loopback HTTP listener; do not hand-edit.
+Generated production output: `index.html`, `app.js`, `style.css`, and the lazily loaded `chunk-*.js` split bundles. Source lives in `web/` (React/shadcn). Regenerate with `bun run console:build`. The daemon serves these files via the loopback HTTP listener; do not hand-edit.
 
 ## `web/`
 
@@ -73,6 +89,10 @@ Transport-free types and parsing.
 | [`protocol-schemas.ts`](../../src/shared/protocol-schemas.ts) | Runtime validation for every method's params and result. |
 | [`agent-definition.ts`](../../src/shared/agent-definition.ts) | Parse markdown+YAML peers; reject unknown keys; fingerprint. |
 | [`env-scrub.ts`](../../src/shared/env-scrub.ts) | Worker env allowlist and the selectors that must never be inherited. |
+| [`duration.ts`](../../src/shared/duration.ts) | Parse definition durations (`30m`, `2h`, `90s`, `1d`) into milliseconds. |
+| [`setup-report.ts`](../../src/shared/setup-report.ts) | The setup checklist shared by `/setup` and `omp-agent setup`. |
+| [`version.ts`](../../src/shared/version.ts) | `PACKAGE_VERSION`, read from the manifest; compared against the daemon's for drift. |
+| [`web-workspace.ts`](../../src/shared/web-workspace.ts) | Browser-safe DTOs and the `WebChats` service type for web chats. |
 
 ## Also in the repo
 
@@ -82,6 +102,8 @@ Transport-free types and parsing.
 | [`skills/`](../../skills/) | OMP skills for agent authoring, subagent authoring, orchestration. |
 | [`scripts/gen-delivery-docs.py`](../../scripts/gen-delivery-docs.py) | Source of `docs/delivery/`. |
 | [`scripts/check-patches.py`](../../scripts/check-patches.py) | Patch-key / lockfile hygiene gate. |
+| [`scripts/cut-changelog.ts`](../../scripts/cut-changelog.ts) | Draft and cut `CHANGELOG.md` release sections and bump the manifest. |
+| [`src/defaults/`](../../src/defaults/) | Shipped crew definitions (`agents/`) and role presets (`presets/`). |
 | [`scripts/dogfood.ts`](../../scripts/dogfood.ts) | Live-session harness driven by `omp-agent --json`. |
 | [`repro/bun-plugin-memo/`](../../repro/bun-plugin-memo/) | Minimal repro for the resolver defect behind T-1503. |
 
@@ -110,6 +132,7 @@ Transport-free types and parsing.
 | [`toolbelt.test.ts`](../../tests/toolbelt.test.ts) | Nine collaboration tools against a real socket. |
 | [`daemon-boot.test.ts`](../../tests/daemon-boot.test.ts) | External vs embedded broker hosting. |
 | [`daemon-main.test.ts`](../../tests/daemon-main.test.ts) | Composition, protocol errors, single instance, shutdown, detach. |
+| [`daemon-runtime-composition.test.ts`](../../tests/daemon-runtime-composition.test.ts) | `bootDaemon` wiring: failed-boot unwind, console port refusal, spawn in flight at stop, builder-wired web routes, `schedules_arm`. |
 | [`daemon-persistence.test.ts`](../../tests/daemon-persistence.test.ts) | Restart survival, orphan sweep, run records. |
 | [`daemon-hierarchy.test.ts`](../../tests/daemon-hierarchy.test.ts) | Parentage, inheritance, kill cascade, authoring verbs. |
 | [`daemon-cli.test.ts`](../../tests/daemon-cli.test.ts) | Every CLI verb, `--json`, daemon stop/restart, console URL. |
@@ -127,6 +150,19 @@ Transport-free types and parsing.
 | [`pack.test.ts`](../../tests/pack.test.ts) | `npm pack` allowlist and `prepack` wiring. |
 | [`consumer-install.test.ts`](../../tests/consumer-install.test.ts) | Packed tarball installs via npm, Bun, and OMP and boots. |
 | [`dogfood.test.ts`](../../tests/dogfood.test.ts) | Harness against a fixture daemon: refusals, polling, cleanup. |
+| [`cut-changelog.test.ts`](../../tests/cut-changelog.test.ts) | Changelog parsing, drafting, cutting, and manifest bumps. |
+| [`default-peers.test.ts`](../../tests/default-peers.test.ts) | Shipped crew and presets parse; seeding once; default-model fallback. |
+| [`definition-patch.test.ts`](../../tests/definition-patch.test.ts) | Console agent settings send only changed fields and keep spending ceilings. |
+| [`inference-gateway.test.ts`](../../tests/inference-gateway.test.ts) | Scoped inference gateway against a fake broker and provider. |
+| [`markdown-format.test.ts`](../../tests/markdown-format.test.ts) | Console composer Markdown formatting at a selection. |
+| [`panel-size.test.ts`](../../tests/panel-size.test.ts) | Console panel width clamps and storage fallbacks. |
+| [`profile.test.ts`](../../tests/profile.test.ts) | Profile avatar validation and the profile store. |
+| [`setup-report.test.ts`](../../tests/setup-report.test.ts) | Setup checklist lines and readiness against a stand-in client. |
+| [`web-attachments.test.ts`](../../tests/web-attachments.test.ts) | Temporary web attachments: storage, size and count limits, expiry, deletion; web route method checks. |
+| [`web-files.test.ts`](../../tests/web-files.test.ts) | Directory listing cap and ordering, and attachment path references. |
+| [`web-chats-lifecycle.test.ts`](../../tests/web-chats-lifecycle.test.ts) | Web chat storage directory, close cleanup, and process-group stop. |
+| [`web-workspace-security.test.ts`](../../tests/web-workspace-security.test.ts) | Remote full-control boundary for workspace routes and agent definition edits, and web chat liveness. |
+| [`workspace-changes.test.ts`](../../tests/workspace-changes.test.ts) | Git status and diffs for a selected worktree, including hostile repositories. |
 | [`contracts/discovery.contract.test.ts`](../../tests/contracts/discovery.contract.test.ts) | OMP `discoverAgents` precedence; private store invisible. |
 | [`contracts/broker.contract.test.ts`](../../tests/contracts/broker.contract.test.ts) | Real auth-broker snapshot, stream, block, refresh. |
 | [`contracts/spawn-policy.contract.test.ts`](../../tests/contracts/spawn-policy.contract.test.ts) | OMP `resolveSpawnPolicy` / `isScoutSpawnable`. |

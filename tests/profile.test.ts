@@ -3,10 +3,14 @@
  * graphemes, or a small base64 image data URL, and nothing else.
  */
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	EMPTY_PROFILE,
 	MAX_AVATAR_IMAGE_BYTES,
 	mergeProfile,
+	openProfileStore,
 } from "../src/daemon/profile";
 
 /** A data URL whose base64 payload decodes to exactly `bytes` bytes. */
@@ -82,5 +86,42 @@ describe("profile avatars", () => {
 			}),
 		).toThrow();
 		expect(current.operator).toEqual({ displayName: "Heitor", avatar: "🧭" });
+	});
+});
+
+describe("profile store", () => {
+	test("concurrent updates all land and none is refused", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "oma-profile-"));
+		try {
+			const store = openProfileStore(join(dir, "profile.json"));
+			const names = Array.from({ length: 20 }, (_, i) => `agent-${i}`);
+			await Promise.all(
+				names.map((name) =>
+					store.update({ agents: { [name]: { displayName: name } } }),
+				),
+			);
+			const reopened = openProfileStore(join(dir, "profile.json"));
+			expect(Object.keys((await reopened.read()).agents).sort()).toEqual(
+				[...names].sort(),
+			);
+			expect(
+				(await readdir(dir)).filter((file) => file.endsWith(".tmp")),
+			).toEqual([]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("a refused update does not block the next one", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "oma-profile-"));
+		try {
+			const store = openProfileStore(join(dir, "profile.json"));
+			const bad = store.update({ nope: true });
+			const good = store.update({ operator: { displayName: "Op" } });
+			await expect(bad).rejects.toThrow("nope is not a profile field");
+			expect((await good).operator).toEqual({ displayName: "Op" });
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 });

@@ -889,6 +889,17 @@ describe("omp-agent CLI — usage text", () => {
 			expect(result.io.stderr).toContain(verb);
 		}
 	});
+
+	test("an unknown leading flag exits 2 with usage instead of running the verb", async () => {
+		const agentDir = await tempAgentDir();
+		// No daemon runs here, so a verb that ran anyway would exit 3.
+		const result = await runCapture(["--jsn", "status"], { agentDir });
+
+		expect(result.code).toBe(2);
+		expect(result.io.stderr).toContain("unknown flag: --jsn");
+		expect(result.io.stderr).toContain("Usage:");
+		expect(result.io.stdout).toBe("");
+	});
 });
 
 // ── Scripting scenario ──────────────────────────────────────────────────────

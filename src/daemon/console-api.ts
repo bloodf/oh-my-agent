@@ -80,6 +80,7 @@ import {
 	type ScheduleRecord,
 } from "./socket";
 import type { Supervisor } from "./supervisor";
+import { MAX_ATTACHMENT_BYTES } from "./web-attachments";
 import { handleWebRoute, type WebServices } from "./web-routes";
 
 /** Loopback: a console reachable from the network is a rooms leak. */
@@ -174,6 +175,34 @@ const REACTION_WINDOW = 200;
  * the same reason the socket drops them: the digest is derived, and the path
  * rides beside the definition rather than inside it.
  */
+/**
+ * The definition fields a remote request without `OMA_REMOTE_FULL_CONTROL`
+ * may create or edit. An allowlist, so a field added to the schema later is
+ * refused remotely until someone decides it is harmless. Everything else is
+ * policy an agent runs under: its sandbox, tools, MCP servers, skills, body,
+ * spawn permissions, wake rules, schedules, automations, and workspace.
+ * Relaxing any of those on a definition and then injecting (or letting a
+ * spawning peer start it) reaches what a refused Start would have reached.
+ * `body` is required at creation, so creating an agent remotely needs full
+ * control too.
+ */
+const REMOTE_EDITABLE_DEFINITION_FIELDS: ReadonlySet<string> = new Set([
+	"name",
+	"description",
+	"model",
+	"thinkingLevel",
+	"rooms",
+]);
+
+/** The first submitted field a remote request without full control may not set. */
+function remotelyRefusedField(
+	payload: Record<string, unknown>,
+): string | undefined {
+	return Object.keys(payload).find(
+		(field) => !REMOTE_EDITABLE_DEFINITION_FIELDS.has(field),
+	);
+}
+
 const WIRE_DEFINITION_FIELDS = [
 	"name",
 	"description",
@@ -1254,11 +1283,14 @@ export async function startConsoleApi(
 				if (!payload) {
 					return fail(400, "invalid_request", "Body is not valid JSON");
 				}
-				if ("workspace" in payload && !fullControl) {
+				const refusedField = fullControl
+					? undefined
+					: remotelyRefusedField(payload);
+				if (refusedField !== undefined) {
 					return fail(
 						403,
 						"remote_control_disabled",
-						"Full OMP control is disabled remotely",
+						`Full OMP control is disabled remotely; ${refusedField} cannot be set`,
 					);
 				}
 				const name =
@@ -1619,11 +1651,14 @@ export async function startConsoleApi(
 			if (!payload) {
 				return fail(400, "invalid_request", "Body is not valid JSON");
 			}
-			if ("workspace" in payload && !fullControl) {
+			const refusedField = fullControl
+				? undefined
+				: remotelyRefusedField(payload);
+			if (refusedField !== undefined) {
 				return fail(
 					403,
 					"remote_control_disabled",
-					"Full OMP control is disabled remotely",
+					`Full OMP control is disabled remotely; ${refusedField} cannot be changed`,
 				);
 			}
 			// The name identifies the file; renaming through an edit would
@@ -2048,8 +2083,9 @@ export async function startConsoleApi(
 	const server = Bun.serve<SocketData>({
 		hostname,
 		port: options.port ?? 0,
-		// Attachment route streams; JSON routes enforce 1 MiB in application code.
-		maxRequestBodySize: Number.MAX_SAFE_INTEGER,
+		// The attachment route streams and enforces its own per-file cap; JSON
+		// routes enforce 1 MiB in application code. This is the outer bound.
+		maxRequestBodySize: MAX_ATTACHMENT_BYTES + MAX_JSON_BODY_BYTES,
 		// A console sits open with nothing to say for minutes at a time; the
 		// default idle timeout would sever its live feed.
 		idleTimeout: 0,

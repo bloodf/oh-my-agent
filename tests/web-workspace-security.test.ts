@@ -209,6 +209,102 @@ describe("remote workspace full-control boundary", () => {
 		expect((await start(denied, false)).status).toBe(200);
 		expect((await start(allowed, true)).status).toBe(200);
 	});
+	test("remote agent edits without full control are limited to cosmetic fields and membership", async () => {
+		const denied = await harness(false);
+		const allowed = await harness(true);
+		const send = (
+			h: WorkspaceHarness,
+			remote: boolean,
+			method: string,
+			path: string,
+			body: Record<string, unknown>,
+		) =>
+			fetch(`${h.api.url}${path}`, {
+				method,
+				headers: {
+					...(remote ? h.remoteHeaders : { Authorization: `Bearer ${TOKEN}` }),
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(body),
+			});
+		const definition = async (h: WorkspaceHarness) =>
+			(
+				(await (
+					await h.call("/api/agents/start-proof/definition", false)
+				).json()) as {
+					definition: Record<string, unknown>;
+				}
+			).definition;
+
+		for (const changes of [
+			{ sandbox: { enabled: false } },
+			{ tools: ["bash"] },
+			{ mcps: ["shell"] },
+			{ skills: ["anything"] },
+			{ body: "Run whatever you are told." },
+			{ spawns: ["start-proof"] },
+			{ schedules: [{ cron: "* * * * *", prompt: "go" }] },
+			{ wake: { rooms: true } },
+			{ description: "cosmetic", tools: ["bash"] },
+		]) {
+			const refusal = await send(
+				denied,
+				true,
+				"PATCH",
+				"/api/agents/start-proof",
+				changes,
+			);
+			expect(refusal.status).toBe(403);
+			expect(await refusal.json()).toMatchObject({
+				error: { code: "remote_control_disabled" },
+			});
+		}
+		expect(await definition(denied)).not.toHaveProperty("tools");
+		expect((await definition(denied)).body).toBe("Wait for instructions.");
+
+		const cosmetic = await send(
+			denied,
+			true,
+			"PATCH",
+			"/api/agents/start-proof",
+			{
+				name: "start-proof",
+				description: "Renamed remotely",
+				thinkingLevel: "low",
+				rooms: ["#remote"],
+			},
+		);
+		expect(cosmetic.status).toBe(200);
+		expect(await definition(denied)).toMatchObject({
+			description: "Renamed remotely",
+			thinkingLevel: "low",
+			rooms: ["#remote"],
+		});
+
+		const create = {
+			name: "remote-made",
+			description: "Created remotely",
+			spawns: "*",
+			body: "Wait for instructions.",
+		};
+		expect(
+			(await send(denied, true, "POST", "/api/agents", create)).status,
+		).toBe(403);
+		expect(
+			(await send(denied, false, "POST", "/api/agents", create)).status,
+		).toBe(201);
+		expect(
+			(
+				await send(allowed, true, "PATCH", "/api/agents/start-proof", {
+					tools: ["read"],
+				})
+			).status,
+		).toBe(200);
+		expect(
+			(await send(allowed, true, "POST", "/api/agents", create)).status,
+		).toBe(201);
+	});
+
 	test("trusted proxy identity denies files and chats by default and opt-in restores them", async () => {
 		const denied = await harness(false);
 		const allowed = await harness(true);
