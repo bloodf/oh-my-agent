@@ -1,7 +1,7 @@
 /**
  * Resolve a Chrome for puppeteer-core: env override, then the puppeteer
- * cache (any version, any platform), then system installs. The same lookup
- * `tests/console-client.test.ts` uses, shared so browser suites agree on it.
+ * cache (any version, any platform), then system installs. Shared so every
+ * browser suite agrees on it.
  */
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
