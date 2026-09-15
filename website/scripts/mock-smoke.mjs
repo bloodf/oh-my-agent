@@ -29,7 +29,7 @@ const PROJECT = "/Users/you/code/quarry";
 
 const isList = (key) => (body) => Array.isArray(body?.[key]);
 const hasError = (code) => (body) => body?.error?.code === code && typeof body.error.message === "string";
-/** The two newest #quarry-core ids, read by the `limit=2` call for the `before` call after it. */
+/** The two newest #quarry-core ids, read by the `newest=1&limit=2` call for the `beforeId` call after it. */
 let newest = [];
 const AVATAR = `data:image/png;base64,${Buffer.from("smoke-png-bytes!").toString("base64")}`;
 
@@ -48,14 +48,14 @@ const CALLS = [
 	["PATCH", `/api/channels/${q("#smoke")}`, { workspace: null }, 200, undefined, (b) => b.channel?.id === "#smoke" && !("workspace" in b.channel)],
 	["GET", `/api/channels/${q("#quarry-core")}/messages?limit=500`, undefined, 200, undefined, isList("messages")],
 	["POST", `/api/channels/${q("#quarry-core")}/messages`, { body: "smoke @atlas", author: "@you", parentId: null }, 201, undefined, (b) => b.message?.author === "@you"],
-	// Without a cursor the newest N come back, oldest first; `before` pages further back.
-	["GET", `/api/channels/${q("#quarry-core")}/messages?limit=2`, undefined, 200, undefined, (b) => {
+	// `newest=1` returns the newest N, oldest first; `beforeId` pages further back.
+	["GET", `/api/channels/${q("#quarry-core")}/messages?newest=1&limit=2`, undefined, 200, undefined, (b) => {
 		newest = b.messages.map((m) => m.id);
 		return b.messages.length === 2 && b.messages[1].body === "smoke @atlas" && b.messages[0].id < b.messages[1].id;
 	}],
 	[
 		"GET",
-		() => `/api/channels/${q("#quarry-core")}/messages?limit=1&before=${newest[1]}`,
+		() => `/api/channels/${q("#quarry-core")}/messages?limit=1&beforeId=${newest[1]}`,
 		undefined,
 		200,
 		undefined,

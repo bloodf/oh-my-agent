@@ -92,15 +92,19 @@ export const roomRoutes: Route[] = [
 			return value;
 		};
 		const afterId = cursor("afterId");
-		const before = cursor("before");
+		const beforeId = cursor("beforeId");
+		const rawNewest = ctx.url.searchParams.get("newest");
+		if (rawNewest !== null && rawNewest !== "1") fail(400, "invalid_request", "newest must be 1");
 		const rawLimit = ctx.url.searchParams.get("limit");
-		const limit = rawLimit === null ? 500 : Number(rawLimit);
-		if (!Number.isInteger(limit) || limit < 1 || limit > 500) fail(400, "invalid_request", "limit must be 1..500");
-		const page = roomMessages(id).filter((m) => (afterId === undefined || m.id > afterId) && (before === undefined || m.id < before));
-		// `afterId` pages forward from a cursor, oldest first. Without it the
-		// answer is the newest `limit` messages (older than `before`, if given),
-		// still in ascending order.
-		return ok({ messages: afterId === undefined ? page.slice(-limit) : page.slice(0, limit) });
+		const limit = rawLimit === null ? undefined : Number(rawLimit);
+		if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 500)) fail(400, "invalid_request", "limit must be 1..500");
+		const page = roomMessages(id).filter((m) => (afterId === undefined || m.id > afterId) && (beforeId === undefined || m.id < beforeId));
+		// Same paging as the daemon: the oldest `limit` rows by default, the
+		// newest `limit` rows with `newest=1` or `beforeId`, ascending either way.
+		// ponytail: omits the daemon's older thread roots for replies on a tail page; the fixtures keep threads inside one page.
+		const tail = rawNewest !== null || beforeId !== undefined;
+		if (limit === undefined) return ok({ messages: page });
+		return ok({ messages: tail ? page.slice(-limit) : page.slice(0, limit) });
 	}),
 
 	route("POST", /^\/api\/channels\/([^/]+)\/messages$/, (ctx) => {
