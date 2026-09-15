@@ -29,7 +29,7 @@ const PROJECT = "/Users/you/code/quarry";
 
 const isList = (key) => (body) => Array.isArray(body?.[key]);
 const hasError = (code) => (body) => body?.error?.code === code && typeof body.error.message === "string";
-/** The two newest #quarry-core ids, read by the `newest=1&limit=2` call for the `beforeId` call after it. */
+/** The two newest #quarry-core ids, read by the `newest=1` call for the cursor calls after it. */
 let newest = [];
 const AVATAR = `data:image/png;base64,${Buffer.from("smoke-png-bytes!").toString("base64")}`;
 
@@ -48,18 +48,18 @@ const CALLS = [
 	["PATCH", `/api/channels/${q("#smoke")}`, { workspace: null }, 200, undefined, (b) => b.channel?.id === "#smoke" && !("workspace" in b.channel)],
 	["GET", `/api/channels/${q("#quarry-core")}/messages?limit=500`, undefined, 200, undefined, isList("messages")],
 	["POST", `/api/channels/${q("#quarry-core")}/messages`, { body: "smoke @atlas", author: "@you", parentId: null }, 201, undefined, (b) => b.message?.author === "@you"],
-	// `newest=1` returns the newest N, oldest first; `beforeId` pages further back.
+	// `newest=1` is the latest N ascending, `beforeId` the N just before an id, `afterId` the N after one.
 	["GET", `/api/channels/${q("#quarry-core")}/messages?newest=1&limit=2`, undefined, 200, undefined, (b) => {
 		newest = b.messages.map((m) => m.id);
 		return b.messages.length === 2 && b.messages[1].body === "smoke @atlas" && b.messages[0].id < b.messages[1].id;
 	}],
 	[
 		"GET",
-		() => `/api/channels/${q("#quarry-core")}/messages?limit=1&beforeId=${newest[1]}`,
+		() => `/api/channels/${q("#quarry-core")}/messages?beforeId=${newest[1]}&limit=1`,
 		undefined,
 		200,
 		undefined,
-		(b) => b.messages.length === 1 && b.messages[0].id === newest[0],
+		(b) => b.messages.at(-1)?.id === newest[0],
 	],
 	[
 		"GET",
@@ -67,8 +67,10 @@ const CALLS = [
 		undefined,
 		200,
 		undefined,
-		(b) => b.messages.length === 1 && b.messages[0].id === newest[1],
+		(b) => b.messages.at(-1)?.id === newest[1] && b.messages.every((m, i, all) => i === 0 || all[i - 1].id < m.id),
 	],
+	// Plain `limit` stays the oldest N.
+	["GET", `/api/channels/${q("#quarry-core")}/messages?limit=1`, undefined, 200, undefined, (b) => b.messages.length === 1 && b.messages[0].id < newest[0]],
 	["POST", "/api/messages/1/reactions/toggle", { emoji: "✅" }, 200, undefined, (b) => typeof b.reacted === "boolean"],
 	["GET", `/api/channels/${q("#release")}/plans`, undefined, 200, undefined, isList("plans")],
 	["POST", `/api/channels/${q("#release")}/plans`, { title: "Smoke", body: "" }, 201, undefined, (b) => b.plan?.revision === 1 && b.plan.body === ""],
@@ -98,7 +100,7 @@ const CALLS = [
 	["PUT", "/api/profile", { operator: { displayName: "Smoke", avatar: "🧪" }, agents: { atlas: { displayName: "", avatar: AVATAR } } }, 200, undefined, (b) => b.profile?.agents?.atlas?.avatar === AVATAR],
 	["PUT", "/api/profile", { operator: { avatar: "data:image/svg+xml;base64,PHN2Zz4=" } }, 400, undefined, hasError("invalid_request")],
 	["GET", `/api/workspace/files?path=${q(PROJECT)}`],
-	["GET", `/api/workspace/changes?cwd=${q(PROJECT)}`, undefined, 200, undefined, isList("files")],
+	["GET", `/api/workspace/changes?cwd=${q(PROJECT)}`, undefined, 200, undefined, (b) => Array.isArray(b.files) && typeof b.truncated === "boolean"],
 	["GET", `/api/workspace/diff?cwd=${q(PROJECT)}&path=${q("src/indexer/tokenizer.ts")}&staged=false`, undefined, 200, undefined, (b) => typeof b.diff === "string"],
 	["GET", "/api/attachments", undefined, 200, undefined, isList("attachments")],
 	["POST", "/api/attachments", undefined, 201, { "x-attachment-name": "notes.txt", "content-type": "text/plain" }, (b) => typeof b.id === "string"],

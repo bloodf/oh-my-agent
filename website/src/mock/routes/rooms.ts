@@ -93,18 +93,26 @@ export const roomRoutes: Route[] = [
 		};
 		const afterId = cursor("afterId");
 		const beforeId = cursor("beforeId");
-		const rawNewest = ctx.url.searchParams.get("newest");
-		if (rawNewest !== null && rawNewest !== "1") fail(400, "invalid_request", "newest must be 1");
+		const newest = ctx.url.searchParams.get("newest") === "1";
 		const rawLimit = ctx.url.searchParams.get("limit");
-		const limit = rawLimit === null ? undefined : Number(rawLimit);
-		if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 500)) fail(400, "invalid_request", "limit must be 1..500");
-		const page = roomMessages(id).filter((m) => (afterId === undefined || m.id > afterId) && (beforeId === undefined || m.id < beforeId));
-		// Same paging as the daemon: the oldest `limit` rows by default, the
-		// newest `limit` rows with `newest=1` or `beforeId`, ascending either way.
-		// ponytail: omits the daemon's older thread roots for replies on a tail page; the fixtures keep threads inside one page.
-		const tail = rawNewest !== null || beforeId !== undefined;
-		if (limit === undefined) return ok({ messages: page });
-		return ok({ messages: tail ? page.slice(-limit) : page.slice(0, limit) });
+		const limit = rawLimit === null ? 500 : Number(rawLimit);
+		if (!Number.isInteger(limit) || limit < 1 || limit > 500) fail(400, "invalid_request", "limit must be 1..500");
+		// As the daemon pages: `afterId` and plain `limit` take the oldest N
+		// (after the cursor); `beforeId` takes the N just before that id and
+		// `newest=1` the latest N. Always ascending.
+		const all = roomMessages(id);
+		const page =
+			afterId !== undefined
+				? all.filter((m) => m.id > afterId).slice(0, limit)
+				: beforeId !== undefined
+					? all.filter((m) => m.id < beforeId).slice(-limit)
+					: newest
+						? all.slice(-limit)
+						: all.slice(0, limit);
+		// A reply whose thread root is older than the page brings that root along, first.
+		const onPage = new Set(page.map((m) => m.id));
+		const roots = all.filter((m) => !onPage.has(m.id) && page.some((reply) => reply.threadRootId === m.id));
+		return ok({ messages: [...roots, ...page] });
 	}),
 
 	route("POST", /^\/api\/channels\/([^/]+)\/messages$/, (ctx) => {
