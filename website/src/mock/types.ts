@@ -4,7 +4,7 @@
  */
 // Relative, not the `@` alias, so the root test suite can typecheck these shapes too.
 import type { AgentInfo, MessageReaction, RoomInfo, RoomMessage } from "../../../web/src/lib/types";
-import type { AgentState } from "../../../src/shared/protocol";
+import type { AgentState } from "../../../src/shared/agent-state";
 import type {
 	WebChatContentBlock,
 	WebChatInfo,

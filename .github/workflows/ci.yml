@@ -78,3 +78,21 @@ jobs:
         run: |
           python3 scripts/gen-delivery-docs.py
           git diff --exit-code docs/
+
+  website-deploy-shape:
+    # Vercel installs only website/ and web/, never the repository root. The
+    # verify job has root dependencies on disk, so it cannot see a website
+    # import that reaches a package only the plugin installs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install as Vercel does
+        run: |
+          bun install --cwd website --frozen-lockfile
+          bun install --cwd web --frozen-lockfile
+
+      - name: Build the website without root dependencies
+        run: bun run --cwd website build
