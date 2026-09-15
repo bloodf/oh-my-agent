@@ -93,7 +93,7 @@ export function ProfileDialog({ open, onOpenChange, call, agents, onSaved }: {
             {names.map((name) => (
               <div key={name} className="grid min-h-11 grid-cols-[minmax(0,1fr)] items-center gap-2 border-t pt-2 first-of-type:border-t-0 sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:border-t-0 sm:pt-0" data-agent={name}>
                 <span className="truncate text-[15px] font-bold" title={name}>{name}</span>
-                <Input aria-label={`${name} display name`} placeholder={name} maxLength={40} value={draft.agents[name]?.displayName ?? ""} onChange={(e) => setAgent(name, "displayName", e.target.value)} />
+                <Input id={`profile-agent-${name}-name`} aria-label={`${name} display name`} placeholder={name} maxLength={40} value={draft.agents[name]?.displayName ?? ""} onChange={(e) => setAgent(name, "displayName", e.target.value)} />
                 <AvatarEditor label={`${name} avatar`} placeholder="🤖" value={draft.agents[name]?.avatar ?? ""} onChange={(value) => setAgent(name, "avatar", value)} fallback={personaFor(EMPTY_PROFILE, name).avatar} />
               </div>
             ))}

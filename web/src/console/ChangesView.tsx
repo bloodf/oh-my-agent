@@ -312,7 +312,7 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
             </ScrollArea>
           </div>
 
-          <div className="flex min-h-[28rem] min-w-0 flex-col overflow-hidden rounded-lg border bg-card @[56rem]/changes:min-h-0">
+          <div id="changes-diff" className="flex min-h-[28rem] min-w-0 flex-col overflow-hidden rounded-lg border bg-card @[56rem]/changes:min-h-0">
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b bg-muted/50 px-3 py-1.5">
               <div className="min-w-0">
                 <p
@@ -335,13 +335,14 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
                 <TabsList variant="line" aria-label="Diff source">
                   <TabsTrigger
                     value="working"
+                    aria-controls="changes-diff"
                     disabled={
                       !selectedFile?.unstaged && !selectedFile?.untracked
                     }
                   >
                     Working
                   </TabsTrigger>
-                  <TabsTrigger value="staged" disabled={!selectedFile?.staged}>
+                  <TabsTrigger value="staged" aria-controls="changes-diff" disabled={!selectedFile?.staged}>
                     Staged
                   </TabsTrigger>
                 </TabsList>
@@ -383,11 +384,13 @@ export function ChangesView({ cwd, call }: ChangesViewProps) {
               </div>
             )}
             {!diffLoading && diff && !diff.binary && diff.diff.length > 0 && (
-              <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain bg-background">
-                <pre
-                  className="w-max min-w-full py-2 font-mono text-[13px] leading-5"
-                  aria-label={`${side} diff for ${diff.path}`}
-                >
+              <div
+                role="region"
+                tabIndex={0}
+                aria-label={`${effectiveSide} diff for ${diff.path}`}
+                className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              >
+                <pre className="w-max min-w-full py-2 font-mono text-[13px] leading-5">
                   <code>
                     {diff.diff.split("\n").map((line, index) => (
                       <span

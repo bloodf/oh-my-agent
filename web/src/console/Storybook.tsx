@@ -21,7 +21,7 @@ import { ThreadPanel } from "./ThreadPanel";
 import { Transcript } from "./Transcript";
 import { AvatarTile, WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
 import { EMPTY_PROFILE, ProfileContext, type Profile } from "./profile";
-import { type ConsoleView, ViewTabs } from "./ViewTabs";
+import { type ConsoleView, VIEW_PANEL_ID, ViewTabs } from "./ViewTabs";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 const PROFILE: Profile = { ...EMPTY_PROFILE, operator: { displayName: "Heitor", avatar: "🧭" }, agents: { researcher: { avatar: "🔬" } } };
@@ -304,7 +304,7 @@ function StoryFrame({
             </Button>
           </header>
           <ViewTabs view={view} onViewChange={setView} directory={current?.workspace ?? "Daemon working directory"} />
-          <div className="flex min-h-0 min-w-0 flex-1">
+          <div id={VIEW_PANEL_ID} className="flex min-h-0 min-w-0 flex-1">
             {view === "conversation" ? <>
               <div className="flex min-w-0 flex-1 flex-col">
                 <Transcript messages={messages} status={status} statusDetail={status === "offline" ? "Connection to the daemon was lost." : status === "load-failure" ? "The room history request failed." : ""} currentRoom={room} onThread={setThread} onReact={noopAsync} onRetry={noopAsync} />

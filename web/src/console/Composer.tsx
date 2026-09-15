@@ -289,7 +289,7 @@ export function Composer({
           </div>
         )}
         {(draft.paths.length > 0 || draft.uploads.length > 0 || draft.active.length > 0) && (
-          <div className="flex flex-wrap gap-2 px-3 pt-2" aria-label="Attachments">
+          <div role="group" className="flex flex-wrap gap-2 px-3 pt-2" aria-label="Attachments">
             {draft.paths.map((path, index) => (
               <span key={path} title={path} className="attachment-chip">
                 <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#1264A3] text-white"><FolderOpen className="size-4" /></span>
@@ -333,7 +333,7 @@ export function Composer({
         />
         <div className="flex h-10 items-center gap-0.5 px-1.5 pb-1 pointer-coarse:h-12">
           {supportsAttachments && onUpload && (
-            <input ref={inputRef} className="sr-only" tabIndex={-1} type="file" multiple aria-label="Upload files from this device" onChange={(event) => { uploadFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
+            <input ref={inputRef} id={`${idPrefix}-files`} name="files" className="sr-only" tabIndex={-1} type="file" multiple aria-label="Upload files from this device" onChange={(event) => { uploadFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
           )}
           {supportsAttachments && (onUpload || onPickFiles) && (
             <DropdownMenu>
@@ -349,13 +349,13 @@ export function Composer({
               </Tooltip>
               <DropdownMenuContent align="start" side="top" className="min-w-64">
                 {onUpload && (
-                  <DropdownMenuItem aria-label="Upload files from this device" onSelect={() => inputRef.current?.click()}>
+                  <DropdownMenuItem onSelect={() => inputRef.current?.click()}>
                     <Upload />
                     <span className="flex flex-col"><span>Upload from this device</span><span className="text-[11px] text-muted-foreground">Managed temporary storage</span></span>
                   </DropdownMenuItem>
                 )}
                 {onPickFiles && (
-                  <DropdownMenuItem aria-label="Reference local files by path" onSelect={() => void onPickFiles().then(addLocalPaths).catch((cause) => setError(cause instanceof Error ? cause.message : "Files could not be selected."))}>
+                  <DropdownMenuItem onSelect={() => void onPickFiles().then(addLocalPaths).catch((cause) => setError(cause instanceof Error ? cause.message : "Files could not be selected."))}>
                     <Paperclip />
                     <span className="flex flex-col"><span>Reference local files by path</span><span className="text-[11px] text-muted-foreground">Originals stay in place</span></span>
                   </DropdownMenuItem>

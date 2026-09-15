@@ -57,7 +57,7 @@ import { ArtifactsView } from "./ArtifactsView";
 import { ChangesView } from "./ChangesView";
 import { AvatarTile, WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { ViewTabs } from "./ViewTabs";
+import { VIEW_PANEL_ID, ViewTabs } from "./ViewTabs";
 import { errorText } from "./errors";
 
 /** Typing pauses this long before the Changes view inspects a typed path. */
@@ -284,9 +284,12 @@ export function ConsoleShell() {
     {c.authRequired && <AuthScreen onAuthenticate={c.authenticate} error={c.authError} />}
     <div hidden={c.authRequired} inert={c.authRequired} className="console-shell flex h-svh flex-col overflow-hidden bg-background text-foreground">
       {!c.authRequired && <section id="operator-auth" hidden aria-label="Operator authentication" />}
-      <a href="#composer-input" className="skip-link">
-        Skip to composer
-      </a>
+      {/* Only while the composer exists: a skip link with no target is a dead stop. */}
+      {view === "conversation" && (
+        <a href="#composer-input" className="skip-link">
+          Skip to composer
+        </a>
+      )}
       <WorkspaceToolbar onSearch={() => setSearch(true)} onProfile={() => setProfileOpen(true)} />
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} call={c.call} agents={c.agents} onSaved={c.setProfile} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -411,7 +414,7 @@ export function ConsoleShell() {
             {error}
           </p>
         )}
-        <div className="flex min-h-0 min-w-0 flex-1">
+        <div id={VIEW_PANEL_ID} className="flex min-h-0 min-w-0 flex-1">
           <ErrorBoundary label={VIEW_LABEL[view] ?? "This view"} resetKey={`${view}:${selected ?? ""}`}>
           {view === "conversation" ? (
             <>
@@ -503,6 +506,7 @@ export function ConsoleShell() {
               {!selectedChat && (
                 <div className="flex min-w-0 gap-2 border-b p-3">
                   <Input
+                    id="changes-workspace"
                     aria-label="Repository workspace"
                     value={typedChangesInput}
                     onChange={(e) => setChangesInput({ room: c.currentRoom, value: e.target.value })}
@@ -574,7 +578,7 @@ export function ConsoleShell() {
       <Dialog open={roomSettings} onOpenChange={(open) => { setRoomSettings(open); setRoomSettingsError(""); }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle>{c.currentRoom} working directory</DialogTitle><DialogDescription>Channel context for agents without an explicit workspace. This is metadata, not a sandbox boundary.</DialogDescription></DialogHeader>
-          <div className="flex gap-2"><Input readOnly value={selectedRoom?.workspace ?? ""} placeholder="Daemon working directory" aria-label="Channel working directory" /><Button type="button" variant="outline" onClick={() => {
+          <div className="flex gap-2"><Input id="channel-workspace" readOnly value={selectedRoom?.workspace ?? ""} placeholder="Daemon working directory" aria-label="Channel working directory" /><Button type="button" variant="outline" onClick={() => {
             setRoomSettingsError("");
             const current = selectedRoom?.workspace ?? "";
             void pickWorkspace(current).then((workspace) => {
