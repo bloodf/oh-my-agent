@@ -31,3 +31,8 @@ chrome-headless-shell/
 !.agentic/phase0-classifiers.yml
 !.agentic/deferred-work.jsonl
 !.agentic/presets.yml
+# Local agent and browser tooling state, never part of the project
+.claude/
+.playwright-mcp/
+# Bun is the only package manager; npm lockfiles split the dependency tree
+package-lock.json
