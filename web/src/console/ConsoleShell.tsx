@@ -158,12 +158,12 @@ export function ConsoleShell() {
     chatRef.current = chatId;
     if (!chatId) return;
     let stale = false;
-    void call(`/api/chats/${chatId}/models`)
+    void call(`/api/chats/${encodeURIComponent(chatId)}/models`)
       .then((catalog) => {
         if (!stale) setModels(catalog.models as WebChatModel[]);
       })
       .catch((e) => {
-        if (!stale) setError(String(e));
+        if (!stale) setError(errorText(e));
       });
     return () => {
       stale = true;
@@ -177,8 +177,8 @@ export function ConsoleShell() {
     const current = () =>
       chatRef.current === chatId && serial > chatLoads.current.applied;
     void Promise.all([
-      call(`/api/chats/${chatId}/state`),
-      call(`/api/chats/${chatId}/messages`),
+      call(`/api/chats/${encodeURIComponent(chatId)}/state`),
+      call(`/api/chats/${encodeURIComponent(chatId)}/messages`),
     ])
       .then(([state, messages]) => {
         if (!current()) return;
@@ -188,7 +188,7 @@ export function ConsoleShell() {
         setError("");
       })
       .catch((e) => {
-        if (current()) setError(String(e));
+        if (current()) setError(errorText(e));
       });
   }, [chatId, call, chatVersion]);
   useEffect(() => {
