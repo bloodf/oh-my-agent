@@ -21,10 +21,11 @@ import { ThreadPanel } from "./ThreadPanel";
 import { Transcript } from "./Transcript";
 import { AvatarTile, WorkspaceNavigation, WorkspaceToolbar } from "./WorkspaceToolbar";
 import { EMPTY_PROFILE, ProfileContext, type Profile } from "./profile";
+import { ThinkingProvider } from "./thinking";
 import { type ConsoleView, VIEW_PANEL_ID, ViewTabs } from "./ViewTabs";
 import { ErrorBoundary } from "./ErrorBoundary";
 
-const PROFILE: Profile = { ...EMPTY_PROFILE, operator: { displayName: "Heitor", avatar: "🧭" }, agents: { researcher: { avatar: "🔬" } } };
+const PROFILE: Profile = { ...EMPTY_PROFILE, operator: { displayName: "Heitor" }, agents: { researcher: { displayName: "Researcher" } } };
 
 const NOW = Date.UTC(2026, 8, 4, 14, 30);
 const ROOMS: RoomInfo[] = [
@@ -79,7 +80,7 @@ const MESSAGES: RoomMessage[] = [
     parentId: null,
     threadRootId: null,
     replyCount: 0,
-    reactions: [],
+    reactions: [{ actor: "researcher", emoji: "⏳" }],
   },
   {
     id: 103,
@@ -285,6 +286,7 @@ function StoryFrame({
   );
   return (
     <ProfileContext.Provider value={PROFILE}>
+    <ThinkingProvider messages={MESSAGES}>
     <div className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
       <WorkspaceToolbar onSearch={noop} onProfile={noop} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -323,6 +325,7 @@ function StoryFrame({
       <CreateAgentDialog open={agentOpen} onOpenChange={setAgentOpen} call={call} onCreated={noop} onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")} />
       <CreateAgentDialog open={botOpen} onOpenChange={setBotOpen} call={call} onCreated={noop} initialKind="bot" onPickWorkspace={() => Promise.resolve("/workspace/oh-my-agent")} />
     </div>
+    </ThinkingProvider>
     </ProfileContext.Provider>
   );
 }

@@ -1291,8 +1291,8 @@ describe("manager component", () => {
 		const first = component.render(80);
 		expect(first.join("\n")).toContain("alpha");
 		// Indented under its parent, and the cursor marks the first row.
-		expect(first.some((line) => line.includes("  bravo"))).toBe(true);
-		expect(first.some((line) => line.startsWith("› alpha"))).toBe(true);
+		expect(first.some((line) => line.includes("● bravo"))).toBe(true);
+		expect(first.some((line) => line.startsWith("› ● alpha"))).toBe(true);
 
 		// An unchanged frame must return the identical array reference: the
 		// engine derives its stable prefix from that identity.
@@ -1302,7 +1302,7 @@ describe("manager component", () => {
 		expect(renders).toBe(1);
 		const moved = component.render(80);
 		expect(moved).not.toBe(first);
-		expect(moved.some((line) => line.startsWith("›   bravo"))).toBe(true);
+		expect(moved.some((line) => line.startsWith("›   ● bravo"))).toBe(true);
 
 		expect(closed).toBe(false);
 		component.handleInput("\u001b");

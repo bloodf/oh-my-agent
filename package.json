@@ -70,5 +70,8 @@
 		"extensions": [
 			"src/extension/index.ts"
 		]
+	},
+	"dependencies": {
+		"blobatar": "^2.7.0"
 	}
 }

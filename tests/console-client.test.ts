@@ -1628,6 +1628,54 @@ describe("definition editor", () => {
 
 describe("profile and schedules", () => {
 	browserTest(
+		"an empty profile draws blobatars from the wire name",
+		async () => {
+			const h = await harness();
+			await h.ensureRoom("#reviews");
+			await h.registerPeer("reviewer", ["#reviews"]);
+			await h.rooms.post({
+				room: "#reviews",
+				author: "reviewer",
+				body: "Agent line.",
+			});
+
+			const { page, errors } = await openPage();
+			await page.goto(h.consoleUrl(), { waitUntil: "domcontentloaded" });
+			await waitFor(
+				"transcript",
+				() => transcriptText(page),
+				(t) => t.includes("Agent line."),
+			);
+			const kind = await page.$eval(
+				"#messages .message [data-avatar-kind]",
+				(n) => n.getAttribute("data-avatar-kind"),
+			);
+			expect(kind).toBe("blobatar");
+			const text = await page.$eval(
+				"#messages .message [data-avatar-kind]",
+				(n) => (n.textContent ?? "").trim(),
+			);
+			expect(text).not.toBe("RE");
+
+			await page.click("#open-profile");
+			await page.waitForSelector('[aria-label="reviewer avatar"]', {
+				visible: true,
+			});
+			await page.type('[aria-label="reviewer avatar"]', "🧭");
+			await page.click("#profile-save");
+			await waitFor(
+				"glyph avatar",
+				() =>
+					page.$eval("#messages .message [data-avatar-kind]", (n) =>
+						n.getAttribute("data-avatar-kind"),
+					),
+				(k) => k === "glyph",
+			);
+			expect(errors).toEqual([]);
+		},
+	);
+
+	browserTest(
 		"the profile dialog renames the operator and an agent everywhere they are drawn",
 		async () => {
 			const h = await harness();

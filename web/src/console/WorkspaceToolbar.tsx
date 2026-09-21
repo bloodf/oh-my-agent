@@ -1,18 +1,36 @@
 import type { ComponentType, ReactNode } from "react";
+import { Blobatar } from "@blobatar/react";
+import { thinking as thinkingPose } from "blobatar/expression";
 import { Bot, House, Search, SquarePen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HUMAN_AUTHOR } from "@/lib/types";
 import { ThemeSelector } from "./ThemeSelector";
-import { isImageAvatar, personaFor, useProfile } from "./profile";
+import { personaFor, resolveAvatar, useProfile } from "./profile";
+import { useThinking } from "./thinking";
 
-/** Square avatar tile: an uploaded image, an emoji, or initials from the profile, sized by the caller. */
+/** Square avatar tile: uploaded image, emoji, or a blobatar from the wire name. */
 export function AvatarTile({ author, className = "", children }: { author: string; className?: string; children?: ReactNode }) {
   const { avatar } = personaFor(useProfile(), author);
-  const image = isImageAvatar(avatar);
-  const glyph = !image && [...avatar].length <= 2 && /\p{Extended_Pictographic}/u.test(avatar);
+  const resolved = resolveAvatar(avatar || undefined, author);
+  const thinking = useThinking(author) && resolved.kind === "blobatar";
+  const glyph = resolved.kind === "glyph" && [...resolved.text].length <= 2 && /\p{Extended_Pictographic}/u.test(resolved.text);
+  const plate = resolved.kind === "blobatar" ? "bg-transparent" : "bg-[var(--ws-tile)] text-[var(--ws-tile-text)]";
   return (
-    <span aria-hidden className={`relative inline-flex shrink-0 select-none items-center justify-center rounded-md bg-[var(--ws-tile)] font-bold leading-none text-[var(--ws-tile-text)] ${glyph ? "text-[0.9em]" : "text-[0.6em] uppercase"} ${className}`}>
-      {image ? <img src={avatar} alt="" className="size-full rounded-[inherit] object-cover" /> : avatar}
+    <span
+      aria-hidden
+      data-avatar-kind={resolved.kind}
+      data-avatar-name={author}
+      className={`relative inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-md font-bold leading-none ${plate} ${glyph ? "text-[0.9em]" : "text-[0.6em] uppercase"} ${className}`}
+    >
+      {resolved.kind === "image" ? (
+        <img src={resolved.src} alt="" className="size-full rounded-[inherit] object-cover" />
+      ) : resolved.kind === "glyph" ? (
+        resolved.text
+      ) : thinking ? (
+        <Blobatar name={author} animate="always" expression={thinkingPose} className="size-full" />
+      ) : (
+        <Blobatar name={author} className="size-full" />
+      )}
       {children}
     </span>
   );

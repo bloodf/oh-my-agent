@@ -1,7 +1,7 @@
 /**
  * Purpose: Renders one safe, interactive room message with Markdown, reactions, and thread access.
  * Public API: Message, MessageBody, MessageProps.
- * Upstream deps: RoomMessage plus shadcn Avatar, DropdownMenu, Popover, and Tooltip primitives; EmojiPicker for the full set.
+ * Upstream deps: RoomMessage plus AvatarTile, DropdownMenu, Popover, and Tooltip primitives; EmojiPicker for the full set.
  * Downstream consumers: Transcript, ThreadPanel, and PlansView.
  * Failure modes: Reaction and copy failures stay visible beside the message and can be retried.
  * Performance: Markdown parsing is linear in message length; no unsafe HTML is interpreted.
@@ -17,7 +17,6 @@ import {
   X,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -40,24 +39,13 @@ import { HUMAN_AUTHOR, type RoomMessage } from "@/lib/types";
 import { EmojiPicker } from "./EmojiPicker";
 import { Markdown } from "./Markdown";
 import { personaFor, useProfile } from "./profile";
+import { AvatarTile } from "./WorkspaceToolbar";
 
 const REACTIONS = [
   ["👀", "Eyes", Eye],
   ["⏳", "Hourglass", Clock3],
   ["✅", "Check", Check],
   ["❌", "Cross", X],
-] as const;
-
-/** Slack-like avatar tiles: [background, foreground], picked by author hash. */
-const AVATAR_TINTS = [
-  ["#1264A3", "#FFFFFF"],
-  ["#2EB67D", "#FFFFFF"],
-  ["#E01E5A", "#FFFFFF"],
-  ["#ECB22E", "#1D1C1D"],
-  ["#36C5F0", "#1D1C1D"],
-  ["#611F69", "#FFFFFF"],
-  ["#E8912D", "#1D1C1D"],
-  ["#0B7A75", "#FFFFFF"],
 ] as const;
 
 export type MessageProps = {
@@ -92,26 +80,9 @@ function lastReplyLabel(createdAt: number) {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function MessageAvatar({ author, label, size = "md" }: { author: string; label: string; size?: "md" | "xs" }) {
-  let hash = 0;
-  for (const char of author) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  const [background, color] = AVATAR_TINTS[hash % AVATAR_TINTS.length] ?? AVATAR_TINTS[0];
-  const system = author === "system";
+function MessageAvatar({ author, size = "md" }: { author: string; size?: "md" | "xs" }) {
   const tile = size === "md" ? "size-9 rounded-lg" : "size-5 rounded-[4px]";
-  // Profile avatars may be uploaded images, stored as data URLs.
-  if (label.startsWith("data:image/")) {
-    return <img src={label} alt="" className={`${tile} shrink-0 object-cover`} />;
-  }
-  return (
-    <Avatar className={size === "md" ? "size-9 rounded-lg after:rounded-lg" : "size-5 rounded-[4px] after:rounded-[4px]"}>
-      <AvatarFallback
-        className={`${size === "md" ? "rounded-lg text-[13px]" : "rounded-[4px] text-[9px]"} font-bold ${system ? "bg-muted text-muted-foreground" : ""}`}
-        style={system ? undefined : { background, color }}
-      >
-        {label}
-      </AvatarFallback>
-    </Avatar>
-  );
+  return <AvatarTile author={author} className={`${tile} shrink-0`} />;
 }
 
 export function MessageBody({ body }: { body: string }) {
@@ -281,7 +252,7 @@ export function Message({
         </time>
       ) : (
         <div className="pt-0.5">
-          <MessageAvatar author={message.author} label={persona.avatar} />
+          <MessageAvatar author={message.author} />
         </div>
       )}
       <div className="min-w-0">
@@ -374,7 +345,7 @@ export function Message({
             {replyAuthors.length > 0 && (
               <span className="flex gap-1" aria-hidden="true">
                 {replyAuthors.map((author) => (
-                  <MessageAvatar key={author} author={author} label={personaFor(profile, author).avatar} size="xs" />
+                  <MessageAvatar key={author} author={author} size="xs" />
                 ))}
               </span>
             )}

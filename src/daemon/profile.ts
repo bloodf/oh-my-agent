@@ -27,6 +27,7 @@ export interface Persona {
 	/**
 	 * One to four characters (an emoji or initials), or a
 	 * `data:image/(png|jpeg|webp|gif);base64,…` URL of at most 200 KB decoded.
+	 * Empty means the consoles draw a blobatar from the wire name.
 	 */
 	avatar?: string;
 }

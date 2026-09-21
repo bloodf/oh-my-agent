@@ -9,5 +9,5 @@
 		"skipLibCheck": true,
 		"types": ["bun"]
 	},
-	"exclude": ["web", "website", "node_modules"]
+	"exclude": ["web", "website", "web-next", "node_modules"]
 }

@@ -47,6 +47,7 @@ import { Transcript } from "./Transcript";
 import { ThreadPanel } from "./ThreadPanel";
 import { AgentPanel } from "./AgentPanel";
 import { ProfileContext } from "./profile";
+import { ThinkingProvider } from "./thinking";
 import { ProfileDialog } from "./ProfileDialog";
 import { CreateChannelDialog } from "./CreateChannelDialog";
 import { CreateAgentDialog } from "./CreateAgentDialog";
@@ -299,6 +300,7 @@ export function ConsoleShell() {
   );
   return (
     <ProfileContext.Provider value={c.profile}>
+    <ThinkingProvider messages={c.messages}>
     {c.authRequired && <AuthScreen onAuthenticate={c.authenticate} error={c.authError} />}
     <div hidden={c.authRequired} inert={c.authRequired} className="console-shell flex h-svh flex-col overflow-hidden bg-background text-foreground">
       {!c.authRequired && <section id="operator-auth" hidden aria-label="Operator authentication" />}
@@ -786,6 +788,7 @@ export function ConsoleShell() {
       }} />
       </ErrorBoundary>
     </div>
+    </ThinkingProvider>
     </ProfileContext.Provider>
   );
 }
