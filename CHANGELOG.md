@@ -6,6 +6,8 @@ From 1.0 onward this project follows semver: major versions carry breaking chang
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-21
+
 ### Changed
 
 - Default avatars are blobatars generated from the wire name (`@you`, a peer name). An empty profile, a new agent, the public demo, and the homepage transcript all draw a blobatar. A stored emoji or uploaded image still overrides. While an agent holds ⏳ on a message, its default blobatar takes the thinking pose. The TUI manager paints the same seed as a colored disc.
