@@ -5,6 +5,7 @@
     "": {
       "name": "oh-my-agent-website",
       "dependencies": {
+        "@blobatar/react": "^2.7.0",
         "@designcodeio/threeui": "1.2.0",
         "@emoji-mart/data": "1.2.1",
         "@fontsource-variable/geist": "^5.3.0",
@@ -12,6 +13,7 @@
         "@react-three/fiber": "^9.7.0",
         "@react-three/postprocessing": "^3.1.1",
         "@tailwindcss/typography": "^0.5.20",
+        "blobatar": "^2.7.0",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "cmdk": "^1.1.1",
@@ -109,6 +111,8 @@
 
     "@babel/types": ["@babel/types@7.29.8", "http://registry.npmjs.org/@babel/types/-/types-7.29.8.tgz", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
+    "@blobatar/react": ["@blobatar/react@2.7.0", "", { "peerDependencies": { "blobatar": "2.x", "react": ">=18" } }, "sha512-rysDM1+2qoeIwIezVw/em+ZxOMyqqjqJOGNEvtOOU1nFp0jmzyEjlXtJTDM6xPKamq59pq6wcG9+mHIUZV572A=="],
+
     "@braintree/sanitize-url": ["@braintree/sanitize-url@7.1.2", "http://registry.npmjs.org/@braintree/sanitize-url/-/sanitize-url-7.1.2.tgz", {}, "sha512-jigsZK+sMF/cuiB7sERuo9V7N9jx+dhmHHnQyDSVdpZwVutaBu7WvNYqMDLSgFgfB30n452TP3vjDAvFC973mA=="],
 
     "@chevrotain/cst-dts-gen": ["@chevrotain/cst-dts-gen@11.1.2", "http://registry.npmjs.org/@chevrotain/cst-dts-gen/-/cst-dts-gen-11.1.2.tgz", { "dependencies": { "@chevrotain/gast": "11.1.2", "@chevrotain/types": "11.1.2", "lodash-es": "4.17.23" } }, "sha512-XTsjvDVB5nDZBQB8o0o/0ozNelQtn2KrUVteIHSlPd2VAV2utEb6JzyCJaJ8tGxACR4RiBNWy5uYUHX2eji88Q=="],
@@ -131,7 +135,7 @@
 
     "@emnapi/runtime": ["@emnapi/runtime@1.11.3", "http://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.3.tgz", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA=="],
 
-    "@emoji-mart/data": ["@emoji-mart/data@1.2.1", "", {}, "sha512-no2pQMWiBy6gpBEiqGeU77/bFejDqUTRY7KX+0+iur13op3bqUsXdnwoZs6Xb1zbv0gAj5VvS1PWoUUckSr5Dw=="],
+    "@emoji-mart/data": ["@emoji-mart/data@1.2.1", "http://registry.npmjs.org/@emoji-mart/data/-/data-1.2.1.tgz", {}, "sha512-no2pQMWiBy6gpBEiqGeU77/bFejDqUTRY7KX+0+iur13op3bqUsXdnwoZs6Xb1zbv0gAj5VvS1PWoUUckSr5Dw=="],
 
     "@floating-ui/core": ["@floating-ui/core@1.8.0", "http://registry.npmjs.org/@floating-ui/core/-/core-1.8.0.tgz", { "dependencies": { "@floating-ui/utils": "^0.2.12" } }, "sha512-0CIZ5itps/8x7BG8dEIhs53BvCUH2PCoogtakwRTut+Arm58sJooJ0AuZhLw2HJYIR5cMLNPBSS728sPho2khQ=="],
 
@@ -549,6 +553,8 @@
 
     "bidi-js": ["bidi-js@1.1.0", "http://registry.npmjs.org/bidi-js/-/bidi-js-1.1.0.tgz", { "dependencies": { "require-from-string": "^2.0.2" } }, "sha512-fX1Onk0tdVPC7obPWB5EbJ1z7NVhLq4m2xZLq2YXBkxzMXIGRpNMU88n0EPgWseKl12J7zXs7qrDxPK4sRs2fg=="],
 
+    "blobatar": ["blobatar@2.7.0", "", { "peerDependencies": { "react": ">=18", "vue": ">=3" }, "optionalPeers": ["react", "vue"] }, "sha512-tL1p2J3dXE/Z9U/ITwHqU7HBHmTH+Am+hif1J1hWAhvFT1VYC2HG+eXtN7081yuY+L2lrp9bs/VaF7dVH3S2jw=="],
+
     "body-parser": ["body-parser@2.3.0", "http://registry.npmjs.org/body-parser/-/body-parser-2.3.0.tgz", { "dependencies": { "bytes": "^3.1.2", "content-type": "^2.0.0", "debug": "^4.4.3", "http-errors": "^2.0.1", "iconv-lite": "^0.7.2", "on-finished": "^2.4.1", "qs": "^6.15.2", "raw-body": "^3.0.2", "type-is": "^2.1.0" } }, "sha512-2cGmJupaNgg+QUwVLAucDuWuoMZ6EX9iHDRswZ5lsNYEmwPaRknMPCLZz07yTzVq/83p4o/wzbDZbBrTvGGTIw=="],
 
     "brace-expansion": ["brace-expansion@5.0.9", "http://registry.npmjs.org/brace-expansion/-/brace-expansion-5.0.9.tgz", { "dependencies": { "balanced-match": "^4.0.2" } }, "sha512-ScQ4IuvIEF1TMlP7Zt+vjJ//9zlPb2SDcxWxM3bk8s6t6GGdJ7KO1dCcTidOPJKePW30LE/2cT7wCyPho9/Wxg=="],
@@ -755,7 +761,7 @@
 
     "elkjs": ["elkjs@0.9.3", "http://registry.npmjs.org/elkjs/-/elkjs-0.9.3.tgz", {}, "sha512-f/ZeWvW/BCXbhGEf1Ujp29EASo/lk1FDnETgNKwJrsVvGZhUWCZyg3xLJjAsxfOmt8KjswHmI5EwCQcPMpOYhQ=="],
 
-    "emoji-mart": ["emoji-mart@5.6.0", "", {}, "sha512-eJp3QRe79pjwa+duv+n7+5YsNhRcMl812EcFVwrnRvYKoNPoQb5qxU8DG6Bgwji0akHdp6D4Ln6tYLG58MFSow=="],
+    "emoji-mart": ["emoji-mart@5.6.0", "http://registry.npmjs.org/emoji-mart/-/emoji-mart-5.6.0.tgz", {}, "sha512-eJp3QRe79pjwa+duv+n7+5YsNhRcMl812EcFVwrnRvYKoNPoQb5qxU8DG6Bgwji0akHdp6D4Ln6tYLG58MFSow=="],
 
     "emoji-regex": ["emoji-regex@10.6.0", "http://registry.npmjs.org/emoji-regex/-/emoji-regex-10.6.0.tgz", {}, "sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A=="],
 

@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import "blobatar/motion.css";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ConsoleShell } from "./console/ConsoleShell";

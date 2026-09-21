@@ -12,6 +12,13 @@
  */
 import { createContext, useContext } from "react";
 import { HUMAN_AUTHOR } from "@/lib/types";
+import {
+  isImageAvatar,
+  resolveAvatar,
+  type ResolvedAvatar,
+} from "../../../src/shared/avatar";
+
+export { isImageAvatar, resolveAvatar, type ResolvedAvatar };
 
 export type Persona = { displayName?: string; avatar?: string };
 export type Profile = { operator: Persona; agents: Record<string, Persona> };
@@ -24,28 +31,11 @@ export function useProfile(): Profile {
   return useContext(ProfileContext);
 }
 
-function initials(author: string): string {
-  return (
-    author
-      .replace(/^@/, "")
-      .split(/[-_.\s]+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase() ?? "")
-      .join("") || "?"
-  );
-}
-
-/** How to draw one author: the profile's name and avatar, or the wire's. */
+/** How to draw one author: the profile's name, and a stored avatar if any. */
 export function personaFor(profile: Profile, author: string): { name: string; avatar: string } {
   const persona = author === HUMAN_AUTHOR ? profile.operator : profile.agents[author];
   return {
     name: persona?.displayName ?? author,
-    avatar: persona?.avatar ?? initials(author),
+    avatar: persona?.avatar ?? "",
   };
-}
-
-/** An avatar that is an uploaded image rather than an emoji or initials. */
-export function isImageAvatar(avatar: string | undefined): avatar is string {
-  return typeof avatar === "string" && /^data:image\/(png|jpeg|webp|gif);base64,/.test(avatar);
 }

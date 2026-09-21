@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { ConsoleCall } from "../CreateChannelDialog";
 import { FilePicker } from "../FilePicker";
 import { Markdown } from "../Markdown";
-import { EMPTY_PROFILE, type Persona, personaFor } from "../profile";
+import type { Persona } from "../profile";
 import { AvatarEditor } from "./AvatarEditor";
 import { ChipList, CheckRow, Field, SELECT_CLASS, SectionTitle } from "./fields";
 import { type Definition, THINKING_LEVELS } from "./model";
@@ -83,7 +83,7 @@ export function ProfileSection({ name, draft, set, disabled, persona, onPersona 
           <Input id="definition-display-name" placeholder={name} maxLength={40} value={persona.displayName ?? ""} disabled={disabled} onChange={(event) => onPersona({ ...persona, displayName: event.target.value })} />
         </Field>
         <Field id="definition-avatar" label="Avatar" optional>
-          <AvatarEditor id="definition-avatar" label={`${name} avatar`} placeholder="🤖" value={persona.avatar ?? ""} onChange={(avatar) => onPersona({ ...persona, avatar })} fallback={personaFor(EMPTY_PROFILE, name).avatar} />
+          <AvatarEditor id="definition-avatar" label={`${name} avatar`} placeholder="🤖" value={persona.avatar ?? ""} onChange={(avatar) => onPersona({ ...persona, avatar })} name={name} />
         </Field>
       </div>
     </section>

@@ -11,7 +11,7 @@ Every unit of work on this project, as a file you can open and act on without re
 
 ## Current state
 
-**118 of 120 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
+**119 of 121 tasks Done.** Suite state is not restated here, because a pasted count rots the day after it is pasted: CI runs `tsc --noEmit` and `bun test` on every push, and `bun test` locally gives you the same answer.
 
 Every runtime subsystem and every operator surface is built and tested. Workers, isolation, credentials, rooms, scheduling, quota handling, the daemon binary, the control socket, the TUI extension, the CLI, and the browser console all ship; EP-05, EP-06, EP-09, EP-10, EP-11, and EP-16 are Done.
 
@@ -57,7 +57,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [EP-13](epics/EP-13-distribution.md) | Distribution: packable artifact, versioning, and release CI | Done | 6 |
 | [EP-14](epics/EP-14-dogfooding.md) | Live-account hardening | Blocked | 5 |
 | [EP-15](epics/EP-15-upstream-filings.md) | Upstream pi-coding-agent hygiene | Blocked | 4 |
-| [EP-16](epics/EP-16-fidelity-and-hardening.md) | Surface fidelity and protocol hardening | Done | 32 |
+| [EP-16](epics/EP-16-fidelity-and-hardening.md) | Surface fidelity and protocol hardening | Done | 33 |
 | [EP-17](epics/EP-17-public-site.md) | Public homepage and console demo | Done | 1 |
 | [EP-18](epics/EP-18-review-2026-09.md) | September 2026 review fixes | Done | 5 |
 
@@ -112,6 +112,7 @@ Task numbers are keyed to their epic: `EP-00` owns `T-0xx`, `EP-05` owns `T-5xx`
 | [ADR-016](adr/ADR-016-server-rendered-console.md) | A server-rendered console beside the bundled one, not in place of it | Accepted |
 | [ADR-017](adr/ADR-017-public-site.md) | A public homepage and a mocked console demo, hosted outside the daemon | Accepted |
 | [ADR-018](adr/ADR-018-remove-server-rendered-console.md) | Remove the server-rendered console | Accepted |
+| [ADR-019](adr/ADR-019-blobatar-default-avatars.md) | Default avatars are in-process blobatars from the wire name | Accepted |
 
 ## What to do next
 

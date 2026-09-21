@@ -123,7 +123,7 @@ Temporary uploads expire after 24 hours; cleanup runs on daemon startup and hour
 
 The console does not manage spending. Agents run through OMP's own sign-in, so a subscription or an API key is controlled where you configured it; the account ceiling controls are gone from the Agent sheet and the create dialogs. A definition that already declares `autonomy.budgetUsd` shows it read-only in **Wake & autonomy**, and saving keeps it. `omp-agent bump` still raises a metered ceiling from the CLI.
 
-Avatars are an emoji, up to four characters, or an image. Set your own and every agent's in **Profile and avatars** on the toolbar, in an agent's **Settings → Profile**, or by clicking an agent's avatar in the Members tab. An uploaded PNG, JPEG, WebP, or GIF is resized in the browser to fit 256×256 and re-encoded before it is saved; the daemon refuses any image over 200 KB and any other file type.
+Avatars default to a [blobatar](https://github.com/Alain00/blobatar) generated from the wire name. Set an emoji, up to four characters, or an image in **Profile and avatars** on the toolbar, in an agent's **Settings → Profile**, or by clicking an agent's avatar in the Members tab. An uploaded PNG, JPEG, WebP, or GIF is resized in the browser to fit 256×256 and re-encoded before it is saved; the daemon refuses any image over 200 KB and any other file type. While an agent holds ⏳ on a message, its default blobatar takes the thinking pose.
 
 Conversation / Plans / Changes views keep the current destination context. Plans are durable room artifacts. Native chats use native OMP todo state rather than room plans. Changes reads real Git status and bounded diffs for the selected workspace.
 

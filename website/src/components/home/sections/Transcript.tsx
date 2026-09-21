@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Blobatar } from "@blobatar/react";
+import { thinking as thinkingPose } from "blobatar/expression";
+import "blobatar/motion.css";
 import { AnimatePresence, motion, useInView, useReducedMotion } from "motion/react";
 
 // Illustrative only: the opening request is the README example; the replies
@@ -34,6 +37,7 @@ export default function Transcript() {
 	}, [inView, reduce]);
 
 	const shown = MESSAGES.slice(0, Math.min(count, MESSAGES.length));
+	const thinking = shown.some((row) => row.reactions.includes("⏳"));
 	return (
 		<div ref={ref} className="transcript" role="group" aria-label="Illustrative room transcript">
 			<p className="transcript-head">
@@ -51,7 +55,11 @@ export default function Transcript() {
 							transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
 						>
 							<span className="msg-avatar" aria-hidden="true">
-								{m.author.slice(0, 1)}
+								{thinking && m.author === "mate" ? (
+									<Blobatar name={m.author} animate="always" expression={thinkingPose} className="size-full" />
+								) : (
+									<Blobatar name={m.author} className="size-full" />
+								)}
 							</span>
 							<div className="msg-main">
 								<p className="msg-meta">

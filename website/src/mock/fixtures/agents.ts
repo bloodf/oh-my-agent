@@ -230,13 +230,13 @@ export function seedSchedules(agents: AgentRecord[], now: number): ScheduleRow[]
 
 export function seedProfile(): Profile {
 	return {
-		operator: { displayName: "You", avatar: "🧭" },
+		operator: { displayName: "You" },
 		agents: {
-			atlas: { displayName: "Atlas", avatar: "🗺️" },
-			scout: { displayName: "Scout", avatar: "🔭" },
-			forge: { displayName: "Forge", avatar: "🔨" },
-			sentinel: { displayName: "Sentinel", avatar: "🛡️" },
-			"ledger-bot": { avatar: "📒" },
+			atlas: { displayName: "Atlas" },
+			scout: { displayName: "Scout" },
+			forge: { displayName: "Forge" },
+			sentinel: { displayName: "Sentinel" },
+			"ledger-bot": {},
 		},
 	};
 }

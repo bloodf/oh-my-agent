@@ -24,7 +24,7 @@ import type { AgentInfo } from "@/lib/types";
 import { HUMAN_AUTHOR } from "@/lib/types";
 import type { ConsoleCall } from "./CreateChannelDialog";
 import { AvatarEditor } from "./definition/AvatarEditor";
-import { EMPTY_PROFILE, type Persona, type Profile, personaFor, useProfile } from "./profile";
+import { type Persona, type Profile, useProfile } from "./profile";
 
 const wire = (persona: Persona | undefined): Persona => ({ displayName: persona?.displayName ?? "", avatar: persona?.avatar ?? "" });
 const seed = (profile: Profile): Profile => ({ operator: { ...profile.operator }, agents: { ...profile.agents } });
@@ -83,18 +83,18 @@ export function ProfileDialog({ open, onOpenChange, call, agents, onSaved }: {
             <legend className="px-1 text-[13px] font-bold text-muted-foreground">You</legend>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
               <div className="grid gap-1.5"><Label htmlFor="profile-operator-name">Display name</Label><Input id="profile-operator-name" placeholder="@you" maxLength={40} value={draft.operator.displayName ?? ""} onChange={(e) => setOperator("displayName", e.target.value)} /></div>
-              <div className="grid gap-1.5"><Label htmlFor="profile-operator-avatar">Avatar</Label><AvatarEditor id="profile-operator-avatar" label="Your avatar" value={draft.operator.avatar ?? ""} onChange={(value) => setOperator("avatar", value)} fallback={personaFor(EMPTY_PROFILE, HUMAN_AUTHOR).avatar} /></div>
+              <div className="grid gap-1.5"><Label htmlFor="profile-operator-avatar">Avatar</Label><AvatarEditor id="profile-operator-avatar" label="Your avatar" value={draft.operator.avatar ?? ""} onChange={(value) => setOperator("avatar", value)} name={HUMAN_AUTHOR} /></div>
             </div>
           </fieldset>
           <fieldset className="grid gap-2 rounded-lg border p-4">
             <legend className="px-1 text-[13px] font-bold text-muted-foreground">Agents</legend>
-            <p className="text-[13px] text-muted-foreground">An emoji, up to four characters, or an uploaded image. Leave a field empty to show the agent's own name.</p>
+            <p className="text-[13px] text-muted-foreground">An emoji, up to four characters, or an uploaded image. Leave a field empty for a blobatar of the agent's name.</p>
             {names.length === 0 && <p className="py-4 text-center text-[15px] text-muted-foreground">No agents yet.</p>}
             {names.map((name) => (
               <div key={name} className="grid min-h-11 grid-cols-[minmax(0,1fr)] items-center gap-2 border-t pt-2 first-of-type:border-t-0 sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:border-t-0 sm:pt-0" data-agent={name}>
                 <span className="truncate text-[15px] font-bold" title={name}>{name}</span>
                 <Input id={`profile-agent-${name}-name`} aria-label={`${name} display name`} placeholder={name} maxLength={40} value={draft.agents[name]?.displayName ?? ""} onChange={(e) => setAgent(name, "displayName", e.target.value)} />
-                <AvatarEditor label={`${name} avatar`} placeholder="🤖" value={draft.agents[name]?.avatar ?? ""} onChange={(value) => setAgent(name, "avatar", value)} fallback={personaFor(EMPTY_PROFILE, name).avatar} />
+                <AvatarEditor label={`${name} avatar`} placeholder="🤖" value={draft.agents[name]?.avatar ?? ""} onChange={(value) => setAgent(name, "avatar", value)} name={name} />
               </div>
             ))}
           </fieldset>

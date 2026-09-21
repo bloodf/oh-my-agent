@@ -1,7 +1,7 @@
 /**
  * Purpose: One avatar editor for every persona — an emoji or up to four
- * characters, or an uploaded image downscaled in the browser — and a small
- * dialog that saves one agent's avatar on its own.
+ * characters, an uploaded image, or a blobatar of the wire name when empty —
+ * and a small dialog that saves one agent's avatar on its own.
  *
  * Public API: `AvatarEditor`, `AvatarDialog`.
  *
@@ -21,8 +21,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Blobatar } from "@blobatar/react";
 import type { ConsoleCall } from "../CreateChannelDialog";
-import { EMPTY_PROFILE, isImageAvatar, personaFor, useProfile } from "../profile";
+import { isImageAvatar, resolveAvatar, useProfile } from "../profile";
 
 const MAX_EDGE = 256;
 const MAX_BYTES = 200_000;
@@ -59,24 +60,34 @@ async function imageToAvatar(file: File): Promise<string> {
   return url;
 }
 
-/** The preview tile: the image, the glyph, or the fallback initials. */
-function Preview({ value, fallback }: { value: string; fallback: string }) {
-  if (isImageAvatar(value)) return <img src={value} alt="" className="size-10 shrink-0 rounded-lg border object-cover" />;
+/** The preview tile: the image, the glyph, or a blobatar from `name`. */
+function Preview({ value, name }: { value: string; name: string }) {
+  const resolved = resolveAvatar(value || undefined, name);
+  if (resolved.kind === "image") {
+    return <img src={resolved.src} alt="" className="size-10 shrink-0 rounded-lg border object-cover" />;
+  }
+  if (resolved.kind === "glyph") {
+    return (
+      <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-lg border bg-muted text-lg font-bold">
+        {resolved.text}
+      </span>
+    );
+  }
   return (
-    <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-lg border bg-muted text-lg font-bold">
-      {value || fallback}
+    <span aria-hidden className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg border">
+      <Blobatar name={name} animate="hover" className="size-full" />
     </span>
   );
 }
 
-export function AvatarEditor({ id, label, value, onChange, fallback, placeholder = "🙂" }: {
+export function AvatarEditor({ id, label, value, onChange, name, placeholder = "🙂" }: {
   id?: string;
   /** Accessible name of the text field, e.g. `reviewer avatar`. */
   label: string;
   value: string;
   onChange: (value: string) => void;
-  /** What the tile shows when there is no avatar, usually initials. */
-  fallback: string;
+  /** Wire identity used as the blobatar seed when the field is empty. */
+  name: string;
   placeholder?: string;
 }) {
   const file = useRef<HTMLInputElement>(null);
@@ -86,7 +97,7 @@ export function AvatarEditor({ id, label, value, onChange, fallback, placeholder
   return (
     <div className="grid min-w-0 gap-1" data-avatar-editor>
       <div className="flex min-w-0 items-center gap-1.5">
-        <Preview value={value} fallback={fallback} />
+        <Preview value={value} name={name} />
         <Input
           id={id}
           aria-label={label}
@@ -142,7 +153,7 @@ export function AvatarDialog({ name, onOpenChange, call, onNotice }: {
       <DialogContent id="avatar-dialog" className="slack-modal sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{name} avatar</DialogTitle>
-          <DialogDescription>An emoji, up to four characters, or an image. Every console shows the same.</DialogDescription>
+          <DialogDescription>An emoji, up to four characters, or an image. Empty draws a blobatar. Every console shows the same.</DialogDescription>
         </DialogHeader>
         <form
           className="grid gap-4"
@@ -158,7 +169,7 @@ export function AvatarDialog({ name, onOpenChange, call, onNotice }: {
         >
           <div className="grid gap-1.5">
             <Label htmlFor="avatar-dialog-value">Avatar</Label>
-            <AvatarEditor id="avatar-dialog-value" label={`${name ?? "agent"} avatar`} value={value} onChange={setValue} fallback={personaFor(EMPTY_PROFILE, name ?? "").avatar} placeholder="🤖" />
+            <AvatarEditor id="avatar-dialog-value" label={`${name ?? "agent"} avatar`} value={value} onChange={setValue} name={name ?? "agent"} placeholder="🤖" />
           </div>
           <p role="alert" className="-my-2 min-h-5 text-[13px] text-destructive">{error}</p>
           <DialogFooter>

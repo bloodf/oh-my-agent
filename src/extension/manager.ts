@@ -26,6 +26,7 @@ import type {
 	KillResult,
 	LogsTailResult,
 } from "../shared/protocol";
+import { tuiFaceMark } from "../shared/tui-face";
 import { type DaemonClient, type ExtensionIO, editCommand } from "./commands";
 import { PLAIN_THEME, type TuiTheme, themeFrom } from "./theme";
 
@@ -119,13 +120,14 @@ export class ManagerState {
 			const selected = index === this.#cursor;
 			const marker = selected ? t.fg("accent", t.nav.cursor) : " ";
 			const name = selected ? t.bold(row.agent.name) : row.agent.name;
+			const face = tuiFaceMark(row.agent.name, t !== PLAIN_THEME);
 			const state = stateMark(t, row.agent.state);
 			const model =
 				row.agent.model === undefined ? "" : t.fg("dim", ` ${row.agent.model}`);
 			const orphan = row.orphan
 				? t.fg("warning", ` (orphan: ${row.agent.parent ?? "missing-parent"})`)
 				: "";
-			return `${marker} ${"  ".repeat(row.depth)}${name} ${state} ${t.fg("muted", `(${row.agent.account})`)}${model}${orphan}`;
+			return `${marker} ${"  ".repeat(row.depth)}${face} ${name} ${state} ${t.fg("muted", `(${row.agent.account})`)}${model}${orphan}`;
 		});
 	}
 
